@@ -22,14 +22,14 @@
 
 ## 4. T4 容错与可观测性迁移
 
-- [ ] 4.1 RED：迁移容错与可观测性测试（`ResilientSharedStateCacheTest`、`ResilientSharedStateCacheMirrorTest`、`ResilientLocalSharedStateCacheContractTest`、`ResilientStateTtlTest`、`RedisCircuitBreakerTest`、`SharedStateCacheExecutionRaceTest`、`SharedStateCacheObservabilityTest`、`SharedStateCacheBackendSelectorTest`）
-- [ ] 4.2 GREEN：迁移容错层（`ResilientSharedStateCache`、`ResilientSharedStateCacheOptions`、`RedisCircuitBreaker`、`SharedStateCircuitState`、`SharedStateCacheExecution`、`SharedStateCacheOperationPlan`、`SharedStateCacheBackendSelector`）与可观测性（`SharedStateCacheObservability`、`SharedStateCacheMetrics`、`SharedStateCacheMetricTotals`、`SharedStateCacheMetricsProvider`、`SharedStateCacheHealth`、`SharedStateCacheHealthProvider`）
-- [ ] 4.3 验证：`mvn -pl dinghai-shared-state test` 通过
+- [x] 4.1 RED：迁移容错与可观测性测试（`ResilientSharedStateCacheTest`、`ResilientSharedStateCacheMirrorTest`、`ResilientLocalSharedStateCacheContractTest`、`ResilientStateTtlTest`、`RedisCircuitBreakerTest`、`SharedStateCacheExecutionRaceTest`、`SharedStateCacheObservabilityTest`、`SharedStateCacheBackendSelectorTest`）与配置属性测试（`RedisConnectionPropertiesTest`，自 T5 提前）
+- [x] 4.2 GREEN：迁移容错层（`ResilientSharedStateCache`、`ResilientSharedStateCacheOptions`、`RedisCircuitBreaker`、`SharedStateCircuitState`、`SharedStateCacheExecution`、`SharedStateCacheOperationPlan`、`SharedStateCacheBackendSelector`）、可观测性（`SharedStateCacheObservability`、`SharedStateCacheMetrics`、`SharedStateCacheMetricTotals`、`SharedStateCacheMetricsProvider`、`SharedStateCacheHealth`、`SharedStateCacheHealthProvider`）与配置属性链（`SharedStateCacheProperties`、`RedisConnectionProperties`、`SentinelProperties`，因容错层依赖 CircuitProperties 而从 T5 提前，配置前缀 dinghai.cache 在本步一并生效）
+- [x] 4.3 验证：`mvn -pl dinghai-shared-state test` 通过
 
 ## 5. T5 自动装配与配置属性迁移
 
-- [ ] 5.1 RED：迁移配置与装配测试（`SharedStateCacheConfigurationTest`、`RedisConnectionPropertiesTest`）
-- [ ] 5.2 GREEN：迁移配置层（`SharedStateCacheConfiguration`、`SharedStateCacheProperties`、`RedisConnectionProperties`、`RedisConfiguredCondition`、`SentinelProperties`）；`@ConfigurationProperties` 前缀改为 `dinghai.cache`；`AutoConfiguration.imports` 改为新全限定类名
+- [ ] 5.1 RED：迁移装配测试（`SharedStateCacheConfigurationTest`；`RedisConnectionPropertiesTest` 已提前至 T4），配置前缀断言同步更新为 dinghai.cache
+- [ ] 5.2 GREEN：迁移自动装配层（`SharedStateCacheConfiguration`、`RedisConfiguredCondition`；配置属性链已提前至 T4）；`AutoConfiguration.imports` 改为新全限定类名
 - [ ] 5.3 验证：`mvn -pl dinghai-shared-state test` 全量通过
 
 ## 6. T6 构建验证与发布准备
