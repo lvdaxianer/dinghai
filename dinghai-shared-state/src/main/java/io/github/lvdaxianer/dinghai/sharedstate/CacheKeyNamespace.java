@@ -55,6 +55,11 @@ public record CacheKeyNamespace(String namespace, String module, String resource
         if (segment == null || segment.isBlank() || segment.contains(":")) {
             throw new IllegalArgumentException("cache key segment must be non-blank and contain no colon");
         }
+        // 超长片段直接拒绝，避免超长键直接进入后端。
+        if (segment.length() > CacheKeyBuilder.MAX_SEGMENT_LENGTH) {
+            throw new IllegalArgumentException(
+                    "cache key segment length exceeds " + CacheKeyBuilder.MAX_SEGMENT_LENGTH);
+        }
         return segment;
     }
 }

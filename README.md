@@ -114,6 +114,7 @@ dinghai:
 缓存键统一为 `dinghai:{module}:{resource}:{identifier}` 格式，由 `CacheKeyBuilder` 负责构建：
 
 - 键片段（module / resource / identifier）不能为空且不允许包含 `:`；
+- 键片段长度不得超过 128 字符，拼接后的完整键不得超过 512 字符，超限时键构建直接抛出 `IllegalArgumentException`（长度按原始片段计，先于哈希替换判断）；
 - 当命名空间策略为**强制 TTL**（`NamespacePolicy.isTtlRequired()`，如 `NamespacePolicy.stateFallback(...)`）时，identifier 会被替换为其 SHA-256 小写十六进制哈希，避免临时状态键泄露原始敏感标识符；
 - 普通可重建缓存保留可读 identifier，便于运维定位。
 

@@ -112,6 +112,59 @@ public class CacheKeyBuilderTest {
     }
 
     /**
+     * 超长标识符片段应在哈希替换前被拒绝。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test(expected = IllegalArgumentException.class)
+    public void shouldRejectOverlongIdentifierSegment() {
+        profileKeyBuilder().build(profileKeyNamespace(), "a".repeat(129), String.class);
+    }
+
+    /**
+     * 超长模块片段应被拒绝。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test(expected = IllegalArgumentException.class)
+    public void shouldRejectOverlongModuleSegment() {
+        new CacheKeyNamespace("profile", "m".repeat(129), "profile");
+    }
+
+    /**
+     * 达到片段长度上限的键应正常构建。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldAcceptSegmentAtMaximumLength() {
+        String identifier = "a".repeat(128);
+
+        CacheKey<String> key = profileKeyBuilder()
+                .build(profileKeyNamespace(), identifier, String.class);
+
+        Assert.assertEquals("dinghai:user:profile:" + identifier, key.value());
+    }
+
+    /**
+     * 强制 TTL 命名空间的超长原始标识符应在哈希前被拒绝。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test(expected = IllegalArgumentException.class)
+    public void shouldRejectOverlongIdentifierBeforeHashing() {
+        NamespacePolicy policy = NamespacePolicy.stateFallback("oauth-state");
+        CacheKeyBuilder builder = new CacheKeyBuilder(NamespacePolicyRegistry.of(policy));
+        CacheKeyNamespace namespace = new CacheKeyNamespace("oauth-state", "oauth", "state");
+
+        builder.build(namespace, "s".repeat(129), String.class);
+    }
+
+    /**
      * 创建普通缓存键构建器。
      *
      * @return 缓存键构建器

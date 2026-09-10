@@ -17,6 +17,12 @@ public final class CacheKeyBuilder {
     /** 缓存键固定前缀。 */
     private static final String KEY_PREFIX = "dinghai";
 
+    /** 单个键片段的最大字符数。 */
+    static final int MAX_SEGMENT_LENGTH = 128;
+
+    /** 拼接后完整缓存键的最大字符数。 */
+    static final int MAX_KEY_LENGTH = 512;
+
     /** 敏感标识符哈希算法。 */
     private static final String HASH_ALGORITHM = "SHA-256";
 
@@ -50,6 +56,10 @@ public final class CacheKeyBuilder {
         NamespacePolicy policy = policyRegistry.require(validNamespace.namespace());
         String key = String.join(":", KEY_PREFIX, validNamespace.module(),
                 validNamespace.resource(), resolveIdentifier(policy, identifier));
+        // 拼接后的完整键同样受长度上限约束，防御超长键直接进入后端。
+        if (key.length() > MAX_KEY_LENGTH) {
+            throw new IllegalArgumentException("cache key length exceeds " + MAX_KEY_LENGTH);
+        }
         return new BuiltCacheKey<>(key, policy, valueType);
     }
 
@@ -85,6 +95,10 @@ public final class CacheKeyBuilder {
         // 空片段或分隔符会破坏固定键结构，因此直接拒绝。
         if (segment == null || segment.isBlank() || segment.contains(":")) {
             throw new IllegalArgumentException("cache key segment must be non-blank and contain no colon");
+        }
+        // 超长片段在哈希替换前拒绝，避免超长键直接进入后端。
+        if (segment.length() > MAX_SEGMENT_LENGTH) {
+            throw new IllegalArgumentException("cache key segment length exceeds " + MAX_SEGMENT_LENGTH);
         }
         return segment;
     }
