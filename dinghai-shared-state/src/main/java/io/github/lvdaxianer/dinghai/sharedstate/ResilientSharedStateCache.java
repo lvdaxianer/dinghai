@@ -198,8 +198,8 @@ public final class ResilientSharedStateCache implements SharedStateCache {
         if (entries.isEmpty()) {
             return;
         }
-        CacheKey<T> first = entries.keySet().iterator().next();
-        execution.executeVoid(first, new SharedStateCacheVoidOperationPlan(
+        CacheKey<T> routingKey = routingKey(entries.keySet());
+        execution.executeVoid(routingKey, new SharedStateCacheVoidOperationPlan(
                 backend -> backend.putAll(entries), () -> caffeine.putAll(entries),
                 () -> caffeine.putAll(entries)));
     }
@@ -210,8 +210,8 @@ public final class ResilientSharedStateCache implements SharedStateCache {
         if (uniqueKeys.isEmpty()) {
             return 0L;
         }
-        CacheKey<?> first = uniqueKeys.iterator().next();
-        return execution.execute(first, new SharedStateCacheOperationPlan<>(
+        CacheKey<?> routingKey = routingKeyAny(uniqueKeys);
+        return execution.execute(routingKey, new SharedStateCacheOperationPlan<>(
                 backend -> backend.deleteAll(uniqueKeys), () -> caffeine.deleteAll(uniqueKeys),
                 ignored -> caffeine.deleteAll(uniqueKeys)));
     }
@@ -320,10 +320,44 @@ public final class ResilientSharedStateCache implements SharedStateCache {
         if (keys.isEmpty()) {
             return Map.of();
         }
-        CacheKey<T> first = keys.iterator().next();
-        return execution.execute(first, new SharedStateCacheOperationPlan<>(
+        CacheKey<T> routingKey = routingKey(keys);
+        return execution.execute(routingKey, new SharedStateCacheOperationPlan<>(
                 backend -> backend.getAll(keys), () -> caffeine.getAll(keys),
                 result -> mirrorBulkRead(keys, result)));
+    }
+
+    /**
+     * 选择批量操作的熔断路由键。
+     *
+     * @param keys 批量操作键
+     * @param <T> 值类型
+     * @return 分布式强一致键优先的路由键
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    private <T> CacheKey<T> routingKey(Collection<CacheKey<T>> keys) {
+        for (CacheKey<T> key : keys) {
+            if (isDistributedRequired(key)) {
+                return key;
+            }
+        }
+        return keys.iterator().next();
+    }
+
+    /** 为不同值类型混合的删除批次选择路由键。 */
+    private CacheKey<?> routingKeyAny(Collection<? extends CacheKey<?>> keys) {
+        for (CacheKey<?> key : keys) {
+            if (isDistributedRequired(key)) {
+                return key;
+            }
+        }
+        return keys.iterator().next();
+    }
+
+    /** 判断键是否要求 Redis 可用。 */
+    private boolean isDistributedRequired(CacheKey<?> key) {
+        return key.namespace().fallbackPolicy()
+                == NamespaceFallbackPolicy.DISTRIBUTED_REQUIRED;
     }
 
     /**
