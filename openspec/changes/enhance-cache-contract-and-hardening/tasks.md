@@ -16,9 +16,9 @@
 
 ## 3. 批量写入 fail-fast（fixes/✅CHG-002-T3--批量写入快速失败）
 
-- [ ] 3.1 TDD：Redis 后端 `putAll` 条目失败时抛异常；契约 javadoc 语义固化
-- [ ] 3.2 `RedisSharedStateCache.putAll` 校验 pipeline 每条结果，失败抛 `RedisBackendException`
-- [ ] 3.3 `SharedStateCache` javadoc 与 README 明示批量非原子、失败可能部分写入
+- [x] 3.1 TDD：Redis 后端 `putAll` 条目失败时抛异常；契约 javadoc 语义固化
+- [x] 3.2 `RedisSharedStateCache.putAll` 校验 pipeline 每条结果，失败抛 `RedisBackendException`
+- [x] 3.3 `SharedStateCache` javadoc 与 README 明示批量非原子、失败可能部分写入
 
 ## 4. 读穿加载 getOrLoad（features/✅CHG-002-T4--读穿加载方法）
 
