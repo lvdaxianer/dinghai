@@ -1,1 +1,32 @@
 .claude/worktrees/
+
+# >>> project-hygiene (managed, do not edit by hand) >>>
+# Maven（检测到 pom.xml）
+target/
+.flattened-pom.xml
+
+# 通用
+.DS_Store
+Thumbs.db
+*.log
+logs/
+coverage/
+*.lcov
+
+# 密钥红线
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.pem
+*.key
+
+# 编辑器与 AI 工具目录（不 blanket 忽略，放行共享配置）
+.claude/settings.local.json
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+# <<< project-hygiene (managed) <<<

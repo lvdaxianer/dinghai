@@ -1,0 +1,4 @@
+# >>> project-hygiene (managed, do not edit by hand) >>>
+* text=auto eol=lf
+*.java text eol=lf
+# <<< project-hygiene (managed) <<<
