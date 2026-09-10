@@ -34,7 +34,7 @@
 
 ## 6. T6 构建验证与发布准备
 
-- [ ] 6.1 全量 `mvn clean verify` 通过（无 Redis 环境）
-- [ ] 6.2 编写 README.md：项目简介、引入方式、`dinghai.cache.*` 配置项表、后端选择与容错行为说明
-- [ ] 6.3 确认首个版本号（倾向 1.0.0）与 LICENSE（倾向 MIT），与用户确认后落盘
-- [ ] 6.4 `mvn install` 产出本地可用构件
+- [x] 6.1 全量 `mvn clean verify` 通过（无 Redis 环境）
+- [x] 6.2 编写 README.md：项目简介、引入方式、`dinghai.cache.*` 配置项表、后端选择与容错行为说明
+- [x] 6.3 确认首个版本号（倾向 1.0.0）与 LICENSE（倾向 MIT），与用户确认后落盘
+- [x] 6.4 `mvn install` 产出本地可用构件
