@@ -238,4 +238,47 @@ public class RedisSharedStateCacheTest {
     private RedisScript<String> anyRedisScript() {
         return (RedisScript<String>) org.mockito.ArgumentMatchers.any(RedisScript.class);
     }
+
+    /**
+     * 批量写入的管道条目失败应快速抛出后端异常。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldFailFastWhenPipelineEntryFails() {
+        // 步骤 1：构建两条批量写入条目，并模拟管道结果携带条目级失败。
+        Map<CacheKey<String>, CacheValue<String>> entries = Map.of(
+                keyBuilder.build(CACHE_KEYS, "batch-ok", String.class),
+                new CacheValue<>("ok", CacheExpiry.eternal()),
+                keyBuilder.build(CACHE_KEYS, "batch-fail", String.class),
+                new CacheValue<>("fail", CacheExpiry.eternal()));
+        when(operations.executePipelined(
+                org.mockito.ArgumentMatchers.any(org.springframework.data.redis.core.SessionCallback.class)))
+                .thenReturn(List.of("OK",
+                        new org.springframework.data.redis.RedisSystemException("OOM", null)));
+
+        // 步骤 2：断言条目级失败被抛出为可熔断的后端异常，而非静默成功。
+        Assert.assertThrows(RedisBackendException.class, () -> cache.putAll(entries));
+    }
+
+    /**
+     * 批量写入的管道提交失败应快速抛出后端异常。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldFailFastWhenPipelineSubmissionFails() {
+        // 步骤 1：构建批量写入条目，并模拟管道提交时连接失败。
+        Map<CacheKey<String>, CacheValue<String>> entries = Map.of(
+                keyBuilder.build(CACHE_KEYS, "batch-down", String.class),
+                new CacheValue<>("down", CacheExpiry.eternal()));
+        when(operations.executePipelined(
+                org.mockito.ArgumentMatchers.any(org.springframework.data.redis.core.SessionCallback.class)))
+                .thenThrow(new RedisConnectionFailureException("redis down"));
+
+        // 步骤 2：断言提交失败被抛出为可熔断的后端异常。
+        Assert.assertThrows(RedisBackendException.class, () -> cache.putAll(entries));
+    }
 }

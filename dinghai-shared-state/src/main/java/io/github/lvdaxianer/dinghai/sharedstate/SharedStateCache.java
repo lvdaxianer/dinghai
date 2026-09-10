@@ -103,7 +103,7 @@ public interface SharedStateCache {
     /** 批量读取命中的类型化缓存值。 */
     <T> Map<CacheKey<T>, T> getAll(Collection<CacheKey<T>> keys);
 
-    /** 按条目独立到期策略批量写入值。 */
+    /** 按条目独立到期策略批量写入值。批量操作不保证原子性；任一条目写入失败时抛出异常，失败后缓存可能处于部分写入状态。 */
     <T> void putAll(Map<CacheKey<T>, CacheValue<T>> entries);
 
     /** 批量删除键并返回实际删除数。 */

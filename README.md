@@ -185,7 +185,7 @@ boolean swapped = sharedStateCache.compareAndSet(sessionKey,
 
 注意：原子操作的一致性范围由后端声明，Caffeine 后端仅保证单进程原子性。
 
-`CacheValue<T>` 将批量写入值和 `CacheExpiry` 绑定。`putAll` 会在写入前校验全部条目的类型和命名空间 TTL 约束，避免调用方参数错误导致部分写入；Redis 后端以单次 pipeline 提交独立键写入，`getAll` 与 `deleteAll` 分别使用原生批量读取和删除命令。
+`CacheValue<T>` 将批量写入值和 `CacheExpiry` 绑定。`putAll` 会在写入前校验全部条目的类型和命名空间 TTL 约束，避免调用方参数错误导致部分写入；Redis 后端以单次 pipeline 提交独立键写入，并在提交后逐条校验执行结果，任一条目失败即抛出 `RedisBackendException`（fail-fast），`getAll` 与 `deleteAll` 分别使用原生批量读取和删除命令。注意批量操作不保证原子性，失败后缓存可能处于部分写入状态。
 
 TTL 生命周期中，`remainingTtl` 对不存在键返回空、对永久键返回 `CacheExpiry.eternal()`；`expire` 和 `persist` 仅对已有键成功时返回 `true`。强制 TTL 命名空间不能调用 `persist`，以保证临时安全状态不会变成永久值。
 

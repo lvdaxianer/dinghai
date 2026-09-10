@@ -215,7 +215,29 @@ public final class RedisSharedStateCache implements SharedStateCache {
     @Override
     public <T> void putAll(Map<CacheKey<T>, CacheValue<T>> entries) {
         validateBatch(entries);
-        RedisBackendOperations.run(() -> operations.executePipelined(batchWriter(entries)));
+        List<Object> results = RedisBackendOperations.call(
+                () -> operations.executePipelined(batchWriter(entries)));
+        verifyBatchResults(results);
+    }
+
+    /**
+     * 校验管道执行结果，条目级失败快速抛出。
+     *
+     * @param results 管道执行结果列表
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    private void verifyBatchResults(List<Object> results) {
+        // 结果为空表示管道无响应，按空批次处理。
+        if (results == null) {
+            return;
+        }
+        // 逐条检查管道结果，条目携带异常时以首个失败快速失败。
+        for (Object result : results) {
+            if (result instanceof RuntimeException exception) {
+                throw new RedisBackendException(exception);
+            }
+        }
     }
 
     @Override
