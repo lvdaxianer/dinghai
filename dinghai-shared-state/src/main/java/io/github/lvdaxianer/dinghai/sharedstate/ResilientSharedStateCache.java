@@ -322,7 +322,22 @@ public final class ResilientSharedStateCache implements SharedStateCache {
         }
         CacheKey<T> first = keys.iterator().next();
         return execution.execute(first, new SharedStateCacheOperationPlan<>(
-                backend -> backend.getAll(keys), () -> caffeine.getAll(keys), ignored -> { }));
+                backend -> backend.getAll(keys), () -> caffeine.getAll(keys),
+                result -> mirrorBulkRead(keys, result)));
+    }
+
+    /**
+     * 按 Redis 批量读取结果更新本地镜像。
+     *
+     * @param keys 批量读取键
+     * @param result Redis 命中结果
+     * @param <T> 值类型
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    private <T> void mirrorBulkRead(Collection<CacheKey<T>> keys,
+            Map<CacheKey<T>, T> result) {
+        keys.forEach(key -> mirrorRead(key, Optional.ofNullable(result.get(key))));
     }
 
     /**

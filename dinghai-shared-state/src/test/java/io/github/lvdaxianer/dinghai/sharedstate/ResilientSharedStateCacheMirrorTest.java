@@ -1,5 +1,7 @@
 package io.github.lvdaxianer.dinghai.sharedstate;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.Assert;
@@ -107,6 +109,24 @@ public class ResilientSharedStateCacheMirrorTest {
 
         // 断言：本地镜像按 Redis 结论删除。
         Assert.assertEquals(Optional.empty(), caffeine.get(cacheKey));
+    }
+
+    /**
+     * Redis 批量读取命中时应预热本地镜像。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    @Test
+    public void shouldWarmLocalMirrorAfterSuccessfulRedisBulkRead() {
+        // 准备：Redis 批量读取返回单个命中值。
+        when(redis.getAll(List.of(cacheKey))).thenReturn(Map.of(cacheKey, "remote"));
+
+        // 执行：通过容错门面批量读取。
+        Assert.assertEquals(Map.of(cacheKey, "remote"), cache.getAll(List.of(cacheKey)));
+
+        // 断言：成功结果被镜像，后续降级读取可以复用本地值。
+        Assert.assertEquals(Optional.of("remote"), caffeine.get(cacheKey));
     }
 
     /**
