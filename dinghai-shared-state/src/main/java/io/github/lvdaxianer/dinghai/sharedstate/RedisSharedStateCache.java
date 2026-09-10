@@ -1,10 +1,15 @@
 package io.github.lvdaxianer.dinghai.sharedstate;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import org.springframework.data.redis.core.RedisOperations;
+import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.ValueOperations;
 
 /**
@@ -155,6 +160,74 @@ public final class RedisSharedStateCache implements SharedStateCache {
         return LUA_SUCCESS_CODE.equals(result);
     }
 
+    @Override
+    public <T> boolean compareAndDelete(CacheKey<T> key, T expectedValue) {
+        CacheKey<T> validKey = Objects.requireNonNull(key, "key");
+        validateValue(validKey, expectedValue);
+        Long result = RedisBackendOperations.call(() -> operations.execute(
+                RedisLuaScripts.COMPARE_AND_DELETE, List.of(validKey.value()),
+                encode(validKey, expectedValue)));
+        return LUA_SUCCESS_CODE.equals(result);
+    }
+
+    @Override
+    public <T> Optional<T> getAndSet(CacheKey<T> key, T value, CacheExpiry expiry) {
+        validateWrite(key, value, expiry);
+        CacheKey<T> validKey = Objects.requireNonNull(key, "key");
+        String previous = RedisBackendOperations.call(() -> operations.execute(
+                RedisLuaScripts.GET_AND_SET, List.of(validKey.value()), encode(validKey, value),
+                ttlMillis(expiry)));
+        return Optional.ofNullable(previous).map(item -> decode(validKey, item));
+    }
+
+    @Override
+    public Optional<CacheExpiry> remainingTtl(CacheKey<?> key) {
+        CacheKey<?> validKey = Objects.requireNonNull(key, "key");
+        Long milliseconds = RedisBackendOperations.call(() -> operations.getExpire(
+                validKey.value(), TimeUnit.MILLISECONDS));
+        return ttlFromMilliseconds(milliseconds);
+    }
+
+    @Override
+    public boolean expire(CacheKey<?> key, CacheExpiry expiry) {
+        validateExpiry(key, expiry);
+        CacheKey<?> validKey = Objects.requireNonNull(key, "key");
+        return Boolean.TRUE.equals(RedisBackendOperations.call(() -> operations.expire(
+                validKey.value(), expiry.ttl())));
+    }
+
+    @Override
+    public boolean persist(CacheKey<?> key) {
+        CacheKey<?> validKey = Objects.requireNonNull(key, "key");
+        validateExpiry(validKey, CacheExpiry.eternal());
+        return Boolean.TRUE.equals(RedisBackendOperations.call(
+                () -> operations.persist(validKey.value())));
+    }
+
+    @Override
+    public <T> Map<CacheKey<T>, T> getAll(Collection<CacheKey<T>> keys) {
+        List<CacheKey<T>> uniqueKeys = keys.stream().distinct().toList();
+        List<String> values = RedisBackendOperations.call(() -> valueOperations().multiGet(
+                uniqueKeys.stream().map(CacheKey::value).toList()));
+        return decodeBatch(uniqueKeys, values);
+    }
+
+    @Override
+    public <T> void putAll(Map<CacheKey<T>, CacheValue<T>> entries) {
+        validateBatch(entries);
+        RedisBackendOperations.run(() -> operations.executePipelined(batchWriter(entries)));
+    }
+
+    @Override
+    public long deleteAll(Collection<? extends CacheKey<?>> keys) {
+        List<String> values = keys.stream().map(CacheKey::value).distinct().toList();
+        if (values.isEmpty()) {
+            return 0L;
+        }
+        Long deleted = RedisBackendOperations.call(() -> operations.delete(values));
+        return deleted == null ? 0L : deleted;
+    }
+
     /**
      * 删除 Redis 值。
      *
@@ -212,6 +285,31 @@ public final class RedisSharedStateCache implements SharedStateCache {
         } else {
             valueOperations().set(key, value, expiry.ttl());
         }
+    }
+
+    /** 在 Redis pipeline 中设置独立有效期的缓存值。 */
+    private void set(RedisOperations<String, String> pipeline, String key, String value,
+            CacheExpiry expiry) {
+        if (expiry.isEternal()) {
+            pipeline.opsForValue().set(key, value);
+        } else {
+            pipeline.opsForValue().set(key, value, expiry.ttl());
+        }
+    }
+
+    /** 创建写入全部已校验条目的单次 Redis pipeline 回调。 */
+    private <T> SessionCallback<Object> batchWriter(Map<CacheKey<T>, CacheValue<T>> entries) {
+        return new SessionCallback<>() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public <K, V> Object execute(RedisOperations<K, V> pipeline) {
+                RedisOperations<String, String> typedPipeline =
+                        (RedisOperations<String, String>) pipeline;
+                entries.forEach((key, entry) -> set(typedPipeline, key.value(),
+                        encode(key, entry.value()), entry.expiry()));
+                return null;
+            }
+        };
     }
 
     /**
@@ -290,11 +388,51 @@ public final class RedisSharedStateCache implements SharedStateCache {
      */
     private <T> void validateWrite(CacheKey<T> key, T value, CacheExpiry expiry) {
         CacheKey<T> validKey = Objects.requireNonNull(key, "key");
-        // 类型化键和值必须一致，否则会破坏跨后端信封契约。
-        if (!validKey.valueType().isInstance(Objects.requireNonNull(value, "value"))) {
+        validateValue(validKey, value);
+        validateExpiry(validKey, expiry);
+    }
+
+    /** 校验缓存值符合声明类型。 */
+    private <T> void validateValue(CacheKey<T> key, T value) {
+        if (!key.valueType().isInstance(Objects.requireNonNull(value, "value"))) {
             throw new IllegalArgumentException("cache value does not match declared type");
         }
-        validateExpiry(validKey, expiry);
+    }
+
+    /** 在发送批量命令前校验全部条目，避免部分客户端参数错误写入。 */
+    private <T> void validateBatch(Map<CacheKey<T>, CacheValue<T>> entries) {
+        Objects.requireNonNull(entries, "entries").forEach((key, entry) -> {
+            CacheValue<T> validEntry = Objects.requireNonNull(entry, "entry");
+            validateWrite(key, validEntry.value(), validEntry.expiry());
+        });
+    }
+
+    /** 将 Redis TTL 哨兵值转换为公开缓存到期策略。 */
+    private Optional<CacheExpiry> ttlFromMilliseconds(Long milliseconds) {
+        if (milliseconds == null || milliseconds == -2L) {
+            return Optional.empty();
+        }
+        if (milliseconds == -1L) {
+            return Optional.of(CacheExpiry.eternal());
+        }
+        return milliseconds > 0L ? Optional.of(CacheExpiry.after(Duration.ofMillis(milliseconds)))
+                : Optional.empty();
+    }
+
+    /** 解码批量 Redis 读取中的非空值。 */
+    private <T> Map<CacheKey<T>, T> decodeBatch(List<CacheKey<T>> keys, List<String> values) {
+        Map<CacheKey<T>, T> decoded = new LinkedHashMap<>(keys.size());
+        if (values == null) {
+            return decoded;
+        }
+        for (int index = 0; index < keys.size(); index++) {
+            String value = values.get(index);
+            if (value != null) {
+                CacheKey<T> key = keys.get(index);
+                decoded.put(key, decode(key, value));
+            }
+        }
+        return decoded;
     }
 
     /**

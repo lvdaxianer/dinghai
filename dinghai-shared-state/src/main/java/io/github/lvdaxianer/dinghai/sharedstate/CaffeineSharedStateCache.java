@@ -3,6 +3,10 @@ package io.github.lvdaxianer.dinghai.sharedstate;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Ticker;
+import java.time.Duration;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -23,6 +27,9 @@ public final class CaffeineSharedStateCache implements SharedStateCache {
 
     /** 缓存信封 JSON 编解码器。 */
     private final CacheEnvelopeCodec envelopeCodec;
+
+    /** 用于计算剩余有效期的单调时钟。 */
+    private final Ticker ticker;
 
     /**
      * 使用系统时钟创建 Caffeine 后端。
@@ -51,9 +58,10 @@ public final class CaffeineSharedStateCache implements SharedStateCache {
         if (maximumSize <= 0L) {
             throw new IllegalArgumentException("maximumSize must be positive");
         }
+        this.ticker = Objects.requireNonNull(ticker, "ticker");
         cache = Caffeine.newBuilder()
                 .maximumSize(maximumSize)
-                .ticker(Objects.requireNonNull(ticker, "ticker"))
+                .ticker(this.ticker)
                 .expireAfter(new CaffeineStoredEntryExpiry())
                 .build();
         this.envelopeCodec = Objects.requireNonNull(envelopeCodec, "envelopeCodec");
@@ -174,6 +182,82 @@ public final class CaffeineSharedStateCache implements SharedStateCache {
         return updated.get();
     }
 
+    @Override
+    public <T> boolean compareAndDelete(CacheKey<T> key, T expectedValue) {
+        CacheKey<T> validKey = Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(expectedValue, "expectedValue");
+        AtomicBoolean deleted = new AtomicBoolean();
+        cache.asMap().computeIfPresent(validKey.value(), (ignored, entry) -> {
+            if (Objects.equals(readValue(validKey, entry), expectedValue)) {
+                deleted.set(true);
+                return null;
+            }
+            return entry;
+        });
+        return deleted.get();
+    }
+
+    @Override
+    public <T> Optional<T> getAndSet(CacheKey<T> key, T value, CacheExpiry expiry) {
+        CaffeineStoredEntry entry = createEntry(key, value, expiry);
+        CaffeineStoredEntry previous = cache.asMap().put(Objects.requireNonNull(key, "key").value(), entry);
+        return Optional.ofNullable(previous).map(item -> readValue(key, item));
+    }
+
+    @Override
+    public Optional<CacheExpiry> remainingTtl(CacheKey<?> key) {
+        CaffeineStoredEntry entry = cache.getIfPresent(Objects.requireNonNull(key, "key").value());
+        if (entry == null) {
+            return Optional.empty();
+        }
+        if (entry.isEternal()) {
+            return Optional.of(CacheExpiry.eternal());
+        }
+        long elapsed = ticker.read() - entry.createdAtNanos();
+        long remaining = entry.expiryNanos() - elapsed;
+        return remaining > 0L ? Optional.of(CacheExpiry.after(Duration.ofNanos(remaining)))
+                : Optional.empty();
+    }
+
+    @Override
+    public boolean expire(CacheKey<?> key, CacheExpiry expiry) {
+        validateExpiry(key, expiry);
+        CacheKey<?> validKey = Objects.requireNonNull(key, "key");
+        AtomicBoolean updated = new AtomicBoolean();
+        cache.asMap().computeIfPresent(validKey.value(), (ignored, entry) -> {
+            updated.set(true);
+            return recreateEntry(validKey, entry, expiry);
+        });
+        return updated.get();
+    }
+
+    @Override
+    public boolean persist(CacheKey<?> key) {
+        CacheKey<?> validKey = Objects.requireNonNull(key, "key");
+        validateExpiry(validKey, CacheExpiry.eternal());
+        return expire(validKey, CacheExpiry.eternal());
+    }
+
+    @Override
+    public <T> Map<CacheKey<T>, T> getAll(Collection<CacheKey<T>> keys) {
+        Map<CacheKey<T>, T> values = new LinkedHashMap<>(keys.size());
+        for (CacheKey<T> key : keys) {
+            get(key).ifPresent(value -> values.put(key, value));
+        }
+        return values;
+    }
+
+    @Override
+    public <T> void putAll(Map<CacheKey<T>, CacheValue<T>> entries) {
+        entries.forEach((key, entry) -> put(key, entry.value(), entry.expiry()));
+    }
+
+    @Override
+    public long deleteAll(Collection<? extends CacheKey<?>> keys) {
+        return keys.stream().map(CacheKey::value).distinct()
+                .filter(value -> cache.asMap().remove(value) != null).count();
+    }
+
     /**
      * 删除缓存值。
      *
@@ -226,7 +310,20 @@ public final class CaffeineSharedStateCache implements SharedStateCache {
     private <T> CaffeineStoredEntry createEntry(CacheKey<T> key, T value, CacheExpiry expiry) {
         validateWrite(key, value, expiry);
         String serializedEnvelope = envelopeCodec.encode(CacheEnvelope.of(key.valueType(), value));
-        return new CaffeineStoredEntry(serializedEnvelope, expiry.toNanos());
+        return new CaffeineStoredEntry(serializedEnvelope, expiry.toNanos(), ticker.read(),
+                expiry.isEternal());
+    }
+
+    /** 使用新 TTL 重建保留原值的通配符键条目。 */
+    private CaffeineStoredEntry recreateEntry(CacheKey<?> key, CaffeineStoredEntry entry,
+            CacheExpiry expiry) {
+        return recreateTypedEntry(key, entry, expiry);
+    }
+
+    /** 将通配符键收窄为可创建条目的类型化键。 */
+    private <T> CaffeineStoredEntry recreateTypedEntry(CacheKey<T> key,
+            CaffeineStoredEntry entry, CacheExpiry expiry) {
+        return createEntry(key, readValue(key, entry), expiry);
     }
 
     /**

@@ -8,8 +8,11 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -136,6 +139,59 @@ public class RedisSharedStateCacheTest {
         // 步骤 3：断言返回值被正确解码，且确实通过服务端脚本原子完成。
         Assert.assertEquals(Optional.of("ticket-value"), result);
         verify(operations).execute(anyRedisScript(), eq(List.of(key.value())));
+    }
+
+    /**
+     * 条件删除和读取替换应使用服务端 Lua 脚本。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    @Test
+    public void shouldUseAtomicScriptsForDeleteAndReplace() {
+        CacheKey<String> key = keyBuilder.build(CACHE_KEYS, "atomic", String.class);
+        String previous = codec.encode(CacheEnvelope.of(String.class, "before"));
+        when(operations.execute(eq(RedisLuaScripts.COMPARE_AND_DELETE),
+                eq(List.of(key.value())), anyString())).thenReturn(1L);
+        when(operations.execute(eq(RedisLuaScripts.GET_AND_SET), eq(List.of(key.value())),
+                anyString(), eq("1000"))).thenReturn(previous);
+
+        Assert.assertTrue(cache.compareAndDelete(key, "before"));
+        Assert.assertEquals(Optional.of("before"), cache.getAndSet(
+                key, "after", CacheExpiry.after(Duration.ofSeconds(1L))));
+    }
+
+    /**
+     * Redis TTL 哨兵值应映射为公开到期策略。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    @Test
+    public void shouldMapRedisTtlSentinels() {
+        CacheKey<String> key = keyBuilder.build(CACHE_KEYS, "ttl", String.class);
+        when(operations.getExpire(key.value(), TimeUnit.MILLISECONDS)).thenReturn(-1L);
+
+        Assert.assertTrue(cache.remainingTtl(key).orElseThrow().isEternal());
+        verify(operations).getExpire(key.value(), TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * 批量读取和删除应分别使用 Redis 原生批量命令。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    @Test
+    public void shouldUseBulkReadAndDeleteCommands() {
+        CacheKey<String> first = keyBuilder.build(CACHE_KEYS, "first", String.class);
+        CacheKey<String> second = keyBuilder.build(CACHE_KEYS, "second", String.class);
+        when(values.multiGet(List.of(first.value(), second.value()))).thenReturn(Arrays.asList(
+                codec.encode(CacheEnvelope.of(String.class, "first")), null));
+        when(operations.delete(List.of(first.value(), second.value()))).thenReturn(1L);
+
+        Assert.assertEquals(Map.of(first, "first"), cache.getAll(List.of(first, second)));
+        Assert.assertEquals(1L, cache.deleteAll(List.of(first, first, second)));
     }
 
     /**

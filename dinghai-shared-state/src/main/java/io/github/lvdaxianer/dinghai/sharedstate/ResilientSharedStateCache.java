@@ -1,5 +1,7 @@
 package io.github.lvdaxianer.dinghai.sharedstate;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -151,6 +153,69 @@ public final class ResilientSharedStateCache implements SharedStateCache {
                 isUpdated -> mirrorCompared(key, command, isUpdated)));
     }
 
+    @Override
+    public <T> boolean compareAndDelete(CacheKey<T> key, T expectedValue) {
+        return execution.execute(key, new SharedStateCacheOperationPlan<>(
+                backend -> backend.compareAndDelete(key, expectedValue),
+                () -> caffeine.compareAndDelete(key, expectedValue), ignored -> caffeine.delete(key)));
+    }
+
+    @Override
+    public <T> Optional<T> getAndSet(CacheKey<T> key, T value, CacheExpiry expiry) {
+        return execution.execute(key, new SharedStateCacheOperationPlan<>(
+                backend -> backend.getAndSet(key, value, expiry),
+                () -> caffeine.getAndSet(key, value, localExpiry(key, expiry)),
+                ignored -> caffeine.put(key, value, localExpiry(key, expiry))));
+    }
+
+    @Override
+    public Optional<CacheExpiry> remainingTtl(CacheKey<?> key) {
+        return execution.execute(key, new SharedStateCacheOperationPlan<>(
+                backend -> backend.remainingTtl(key), () -> caffeine.remainingTtl(key), ignored -> { }));
+    }
+
+    @Override
+    public boolean expire(CacheKey<?> key, CacheExpiry expiry) {
+        return execution.execute(key, new SharedStateCacheOperationPlan<>(
+                backend -> backend.expire(key, expiry), () -> caffeine.expire(key, localExpiry(key, expiry)),
+                updated -> mirrorExpiry(key, expiry, updated)));
+    }
+
+    @Override
+    public boolean persist(CacheKey<?> key) {
+        return execution.execute(key, new SharedStateCacheOperationPlan<>(
+                backend -> backend.persist(key), () -> caffeine.persist(key),
+                updated -> mirrorExpiry(key, CacheExpiry.eternal(), updated)));
+    }
+
+    @Override
+    public <T> Map<CacheKey<T>, T> getAll(Collection<CacheKey<T>> keys) {
+        return getAllFromBackend(keys);
+    }
+
+    @Override
+    public <T> void putAll(Map<CacheKey<T>, CacheValue<T>> entries) {
+        if (entries.isEmpty()) {
+            return;
+        }
+        CacheKey<T> first = entries.keySet().iterator().next();
+        execution.executeVoid(first, new SharedStateCacheVoidOperationPlan(
+                backend -> backend.putAll(entries), () -> caffeine.putAll(entries),
+                () -> caffeine.putAll(entries)));
+    }
+
+    @Override
+    public long deleteAll(Collection<? extends CacheKey<?>> keys) {
+        Collection<? extends CacheKey<?>> uniqueKeys = keys.stream().distinct().toList();
+        if (uniqueKeys.isEmpty()) {
+            return 0L;
+        }
+        CacheKey<?> first = uniqueKeys.iterator().next();
+        return execution.execute(first, new SharedStateCacheOperationPlan<>(
+                backend -> backend.deleteAll(uniqueKeys), () -> caffeine.deleteAll(uniqueKeys),
+                ignored -> caffeine.deleteAll(uniqueKeys)));
+    }
+
     /**
      * 删除值和本地镜像。
      *
@@ -241,6 +306,25 @@ public final class ResilientSharedStateCache implements SharedStateCache {
         caffeine.put(key, value, CacheExpiry.after(properties.getWarmTtl()));
     }
 
+    /** 将 Redis 确认的 TTL 变更同步到本地镜像。 */
+    private void mirrorExpiry(CacheKey<?> key, CacheExpiry expiry, boolean updated) {
+        if (updated) {
+            caffeine.expire(key, localExpiry(key, expiry));
+        } else {
+            caffeine.delete(key);
+        }
+    }
+
+    /** 使用第一个键的熔断路由执行批量读取。 */
+    private <T> Map<CacheKey<T>, T> getAllFromBackend(Collection<CacheKey<T>> keys) {
+        if (keys.isEmpty()) {
+            return Map.of();
+        }
+        CacheKey<T> first = keys.iterator().next();
+        return execution.execute(first, new SharedStateCacheOperationPlan<>(
+                backend -> backend.getAll(keys), () -> caffeine.getAll(keys), ignored -> { }));
+    }
+
     /**
      * 按 Redis 读取结果更新本地镜像。
      *
@@ -272,8 +356,8 @@ public final class ResilientSharedStateCache implements SharedStateCache {
      * @date 2026-07-17
      */
     private CacheExpiry localExpiry(CacheKey<?> key, CacheExpiry expiry) {
-        // 临时状态必须保留调用方指定的实际有效期。
-        if (key.namespace().isTtlRequired()) {
+        // 单机模式和临时状态必须保留调用方声明的原始有效期。
+        if (!execution.isRedisConfigured() || key.namespace().isTtlRequired()) {
             return expiry;
         }
         return expiry.isEternal() ? CacheExpiry.after(properties.getWarmTtl()) : expiry;

@@ -168,6 +168,17 @@ final class SharedStateCacheExecution {
     }
 
     /**
+     * 判断 Redis 主后端是否已配置。
+     *
+     * @return true 表示存在 Redis 主后端
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    boolean isRedisConfigured() {
+        return redis.isPresent();
+    }
+
+    /**
      * 执行单次 Redis 操作并只捕获 Redis 后端异常。
      *
      * @param key 类型化缓存键

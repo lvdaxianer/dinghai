@@ -36,6 +36,24 @@ final class RedisLuaScripts {
             return 0
             """, Long.class);
 
+    /** 原子条件删除脚本。 */
+    static final RedisScript<Long> COMPARE_AND_DELETE = RedisScript.of("""
+            local current = redis.call('GET', KEYS[1])
+            if current == ARGV[1] then
+              redis.call('DEL', KEYS[1])
+              return 1
+            end
+            return 0
+            """, Long.class);
+
+    /** 原子读取并替换脚本。 */
+    static final RedisScript<String> GET_AND_SET = RedisScript.of("""
+            local previous = redis.call('GET', KEYS[1])
+            redis.call('SET', KEYS[1], ARGV[1])
+            if ARGV[2] ~= '0' then redis.call('PEXPIRE', KEYS[1], ARGV[2]) end
+            return previous
+            """, String.class);
+
     /**
      * 兼容 Redis 3.2 的原子读取并删除脚本。
      *
