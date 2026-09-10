@@ -10,9 +10,9 @@
 
 ## 2. 键长度约束（features/✅CHG-002-T2--缓存键长度约束）
 
-- [ ] 2.1 TDD：`CacheKeyBuilderTest` 新增片段超长、完整键超长、边界值（128/512）场景
-- [ ] 2.2 `CacheKeyBuilder` 增加片段 ≤128、完整键 ≤512 校验
-- [ ] 2.3 README 键格式章节补充长度约束
+- [x] 2.1 TDD：`CacheKeyBuilderTest` 新增片段超长、完整键超长、边界值（128/512）场景
+- [x] 2.2 `CacheKeyBuilder` 增加片段 ≤128、完整键 ≤512 校验
+- [x] 2.3 README 键格式章节补充长度约束
 
 ## 3. 批量写入 fail-fast（fixes/✅CHG-002-T3--批量写入快速失败）
 
