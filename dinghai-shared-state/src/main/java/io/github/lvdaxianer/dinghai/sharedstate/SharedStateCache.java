@@ -1,5 +1,7 @@
 package io.github.lvdaxianer.dinghai.sharedstate;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -82,6 +84,30 @@ public interface SharedStateCache {
      * @date 2026-07-17
      */
     <T> boolean compareAndSet(CacheKey<T> key, CompareAndSetCommand<T> command);
+
+    /** 原子删除与期望值匹配的缓存值。 */
+    <T> boolean compareAndDelete(CacheKey<T> key, T expectedValue);
+
+    /** 原子读取旧值并写入新值。 */
+    <T> Optional<T> getAndSet(CacheKey<T> key, T value, CacheExpiry expiry);
+
+    /** 查询键的剩余有效期。 */
+    Optional<CacheExpiry> remainingTtl(CacheKey<?> key);
+
+    /** 为已有键设置新的有效期。 */
+    boolean expire(CacheKey<?> key, CacheExpiry expiry);
+
+    /** 取消普通命名空间键的有效期。 */
+    boolean persist(CacheKey<?> key);
+
+    /** 批量读取命中的类型化缓存值。 */
+    <T> Map<CacheKey<T>, T> getAll(Collection<CacheKey<T>> keys);
+
+    /** 按条目独立到期策略批量写入值。 */
+    <T> void putAll(Map<CacheKey<T>, CacheValue<T>> entries);
+
+    /** 批量删除键并返回实际删除数。 */
+    long deleteAll(Collection<? extends CacheKey<?>> keys);
 
     /**
      * 删除缓存值。

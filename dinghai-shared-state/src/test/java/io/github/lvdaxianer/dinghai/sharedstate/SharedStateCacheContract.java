@@ -1,6 +1,8 @@
 package io.github.lvdaxianer.dinghai.sharedstate;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.Assert;
 import org.junit.Before;
@@ -181,6 +183,91 @@ public abstract class SharedStateCacheContract {
         Assert.assertTrue(cache.compareAndSet(
                 key, new CompareAndSetCommand<>("green", "blue", ETERNAL)));
         Assert.assertEquals(Optional.of("blue"), cache.get(key));
+    }
+
+    /**
+     * 条件删除仅应移除匹配的值。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    @Test
+    public void shouldCompareAndDeleteAtomically() {
+        CacheKey<String> key = stringKey("compare-and-delete");
+        cache.put(key, "green", ETERNAL);
+
+        Assert.assertFalse(cache.compareAndDelete(key, "blue"));
+        Assert.assertTrue(cache.compareAndDelete(key, "green"));
+        Assert.assertFalse(cache.exists(key));
+    }
+
+    /**
+     * 原子替换应返回旧值并按新策略更新条目。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    @Test
+    public void shouldGetAndSetAtomically() {
+        CacheKey<String> key = stringKey("get-and-set");
+        cache.put(key, "before", ETERNAL);
+
+        Assert.assertEquals(Optional.of("before"), cache.getAndSet(
+                key, "after", CacheExpiry.after(Duration.ofSeconds(5L))));
+        Assert.assertEquals(Optional.of("after"), cache.get(key));
+    }
+
+    /**
+     * TTL 生命周期操作应正确反映临时和永久状态。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    @Test
+    public void shouldManageRemainingTtl() {
+        CacheKey<String> key = stringKey("ttl");
+        Assert.assertEquals(Optional.empty(), cache.remainingTtl(key));
+
+        cache.put(key, "value", ETERNAL);
+        Assert.assertTrue(cache.remainingTtl(key).orElseThrow().isEternal());
+        Assert.assertTrue(cache.expire(key, CacheExpiry.after(Duration.ofSeconds(5L))));
+        Assert.assertTrue(cache.remainingTtl(key).orElseThrow().ttl().toMillis() > 0L);
+        Assert.assertTrue(cache.persist(key));
+        Assert.assertTrue(cache.remainingTtl(key).orElseThrow().isEternal());
+    }
+
+    /**
+     * 强制 TTL 命名空间不得取消过期时间。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    @Test(expected = IllegalArgumentException.class)
+    public void shouldRejectPersistForTransientNamespace() {
+        CacheKey<String> key = transientStringKey("persist");
+        cache.put(key, "value", CacheExpiry.after(Duration.ofSeconds(5L)));
+        cache.persist(key);
+    }
+
+    /**
+     * 批量操作应保留命中结果、独立 TTL 和唯一删除计数。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    @Test
+    public void shouldReadWriteAndDeleteInBatch() {
+        CacheKey<String> first = stringKey("batch-first");
+        CacheKey<String> second = stringKey("batch-second");
+        CacheKey<String> missing = stringKey("batch-missing");
+        cache.putAll(Map.of(first, new CacheValue<>("first", ETERNAL), second,
+                new CacheValue<>("second", CacheExpiry.after(Duration.ofSeconds(5L)))));
+
+        Assert.assertEquals(Map.of(first, "first", second, "second"),
+                cache.getAll(List.of(first, second, missing)));
+        Assert.assertTrue(cache.remainingTtl(first).orElseThrow().isEternal());
+        Assert.assertTrue(cache.remainingTtl(second).orElseThrow().ttl().toMillis() > 0L);
+        Assert.assertEquals(2L, cache.deleteAll(List.of(first, first, second, missing)));
     }
 
     /**
