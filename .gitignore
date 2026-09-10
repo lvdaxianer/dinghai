@@ -23,6 +23,8 @@ coverage/
 *.key
 
 # 编辑器与 AI 工具目录（不 blanket 忽略，放行共享配置）
+.claude/
+.codex/
 .claude/settings.local.json
 .vscode/*
 !.vscode/settings.json
