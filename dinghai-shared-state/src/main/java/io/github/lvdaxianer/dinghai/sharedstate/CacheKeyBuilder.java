@@ -7,7 +7,7 @@ import java.util.HexFormat;
 import java.util.Objects;
 
 /**
- * 构建 {@code idt:{module}:{resource}:{identifier}} 格式的缓存键。
+ * 构建 {@code dinghai:{module}:{resource}:{identifier}} 格式的缓存键。
  *
  * @author lvdaxianer@yeah.net
  * @date 2026-07-17
@@ -15,7 +15,7 @@ import java.util.Objects;
 public final class CacheKeyBuilder {
 
     /** 缓存键固定前缀。 */
-    private static final String KEY_PREFIX = "idt";
+    private static final String KEY_PREFIX = "dinghai";
 
     /** 敏感标识符哈希算法。 */
     private static final String HASH_ALGORITHM = "SHA-256";

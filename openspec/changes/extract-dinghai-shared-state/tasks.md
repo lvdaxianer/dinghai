@@ -16,9 +16,9 @@
 
 ## 3. T3 缓存后端实现迁移
 
-- [ ] 3.1 RED：迁移后端相关测试（`CaffeineSharedStateCacheTest`、`RedisSharedStateCacheTest`、`RedisSharedStateCacheContractTest`、`SharedStateCacheContract`、`SharedStateCacheAtomicContract`、`SharedStateCacheIncrementContract`、`SharedStateCacheAtomicTestSupport`、`SharedStateCacheTestExecutor`、`RedisContractConnectionFactory`、`MutableCacheValue`）
-- [ ] 3.2 GREEN：迁移 Caffeine 后端（`CaffeineSharedStateCache`、`CaffeineStoredEntry`、`CaffeineStoredEntryExpiry`）、Redis 后端（`RedisSharedStateCache`、`RedisBackendOperations`、`RedisLuaScripts`、`RedisBackendException`）、编解码器（`JacksonCacheEnvelopeCodec`）
-- [ ] 3.3 验证：`mvn -pl dinghai-shared-state test` 通过，含无 Redis 环境下契约测试自动跳过；本机有 Redis 时契约测试真实执行
+- [x] 3.1 RED：迁移后端相关测试（`CaffeineSharedStateCacheTest`、`RedisSharedStateCacheTest`、`RedisSharedStateCacheContractTest`、`SharedStateCacheContract`、`SharedStateCacheAtomicContract`、`SharedStateCacheIncrementContract`、`SharedStateCacheAtomicTestSupport`、`SharedStateCacheTestExecutor`、`RedisContractConnectionFactory`、`MutableCacheValue`）
+- [x] 3.2 GREEN：迁移 Caffeine 后端（`CaffeineSharedStateCache`、`CaffeineStoredEntry`、`CaffeineStoredEntryExpiry`）、Redis 后端（`RedisSharedStateCache`、`RedisBackendOperations`、`RedisLuaScripts`、`RedisBackendException`）、编解码器（`JacksonCacheEnvelopeCodec`）、值记录（`RedisSentinelNode`，因 T3 测试 RedisContractConnectionFactory 依赖而从 T5 提前）
+- [x] 3.3 验证：`mvn -pl dinghai-shared-state test` 通过，含无 Redis 环境下契约测试自动跳过；本机有 Redis 时契约测试真实执行
 
 ## 4. T4 容错与可观测性迁移
 
@@ -29,7 +29,7 @@
 ## 5. T5 自动装配与配置属性迁移
 
 - [ ] 5.1 RED：迁移配置与装配测试（`SharedStateCacheConfigurationTest`、`RedisConnectionPropertiesTest`）
-- [ ] 5.2 GREEN：迁移配置层（`SharedStateCacheConfiguration`、`SharedStateCacheProperties`、`RedisConnectionProperties`、`RedisConfiguredCondition`、`SentinelProperties`、`RedisSentinelNode`）；`@ConfigurationProperties` 前缀改为 `dinghai.cache`；`AutoConfiguration.imports` 改为新全限定类名
+- [ ] 5.2 GREEN：迁移配置层（`SharedStateCacheConfiguration`、`SharedStateCacheProperties`、`RedisConnectionProperties`、`RedisConfiguredCondition`、`SentinelProperties`）；`@ConfigurationProperties` 前缀改为 `dinghai.cache`；`AutoConfiguration.imports` 改为新全限定类名
 - [ ] 5.3 验证：`mvn -pl dinghai-shared-state test` 全量通过
 
 ## 6. T6 构建验证与发布准备

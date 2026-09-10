@@ -27,7 +27,7 @@ public class CacheKeyBuilderTest {
 
         CacheKey<String> plainKey = builder.build(keyNamespace, "alice", String.class);
 
-        Assert.assertEquals("idt:user:profile:alice", plainKey.value());
+        Assert.assertEquals("dinghai:user:profile:alice", plainKey.value());
     }
 
     /**
@@ -56,7 +56,7 @@ public class CacheKeyBuilderTest {
         CacheKey<String> key = builder.build(namespace, "alice", String.class);
 
         Assert.assertEquals(
-                "idt:oauth:state:2bd806c97f0e00af1a1fc3328fa763a9269723c8db8fac4f93af71db186d6e90",
+                "dinghai:oauth:state:2bd806c97f0e00af1a1fc3328fa763a9269723c8db8fac4f93af71db186d6e90",
                 key.value());
         Assert.assertFalse(key.value().contains("alice"));
     }
