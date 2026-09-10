@@ -257,6 +257,52 @@ public class SharedStateCacheConfigurationTest {
     }
 
     /**
+     * 应用自定义信封编解码器时默认 Jackson 实现应退位。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldBackOffWhenCustomCacheEnvelopeCodecExists() {
+        try (AnnotationConfigApplicationContext context =
+                new AnnotationConfigApplicationContext()) {
+            // 准备：注册应用自定义编解码器与对象映射器。
+            CacheEnvelopeCodec custom = Mockito.mock(CacheEnvelopeCodec.class);
+            context.getBeanFactory().registerSingleton("objectMapper", new ObjectMapper());
+            context.getBeanFactory().registerSingleton("customCacheEnvelopeCodec", custom);
+            context.register(SharedStateCacheConfiguration.class);
+            context.refresh();
+
+            // 断言：容器中仅存在应用自定义编解码器，默认实现不再装配。
+            Assert.assertEquals(1, context.getBeansOfType(CacheEnvelopeCodec.class).size());
+            Assert.assertSame(custom, context.getBean(CacheEnvelopeCodec.class));
+        }
+    }
+
+    /**
+     * 容器缺少 ObjectMapper 时默认编解码器应跳过装配而非以依赖错误失败。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldSkipDefaultCodecWhenObjectMapperIsAbsent() {
+        try (AnnotationConfigApplicationContext context =
+                new AnnotationConfigApplicationContext()) {
+            // 准备：不注册任何 ObjectMapper，仅注册共享状态自动装配类。
+            context.register(SharedStateCacheConfiguration.class);
+
+            // 执行并断言：刷新因缺少编解码器而失败，失败信息指向编解码器而非映射器。
+            try {
+                context.refresh();
+                Assert.fail("缺少 CacheEnvelopeCodec 时容器刷新应失败");
+            } catch (org.springframework.beans.factory.UnsatisfiedDependencyException ex) {
+                Assert.assertTrue(ex.getMessage().contains("CacheEnvelopeCodec"));
+            }
+        }
+    }
+
+    /**
      * 构造包含外部 Redis 模板的测试上下文。
      *
      * @return Redis 配置测试上下文
