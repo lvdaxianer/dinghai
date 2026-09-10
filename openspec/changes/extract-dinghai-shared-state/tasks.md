@@ -10,9 +10,9 @@
 
 ## 2. T2 SPI 契约层迁移
 
-- [ ] 2.1 RED：迁移 common 侧 SPI 测试（`CacheKeyBuilderTest`、`SharedStateContractModelTest`）至新包 `io.github.lvdaxianer.dinghai.sharedstate`，确认编译失败（被测类不存在）
-- [ ] 2.2 GREEN：迁移 13 个 SPI 类（`SharedStateCache`、`CacheKey`、`BuiltCacheKey`、`CacheKeyBuilder`、`CacheKeyNamespace`、`CacheEnvelope`、`CacheEnvelopeCodec`、`CacheExpiry`、`CompareAndSetCommand`、`NamespacePolicy`、`NamespacePolicyRegistry`、`NamespaceFallbackPolicy`、`SharedStateUnavailableException`），包名改为 `io.github.lvdaxianer.dinghai.sharedstate`，类名与字段名不变
-- [ ] 2.3 验证：`mvn -pl dinghai-shared-state test` 通过 SPI 测试
+- [x] 2.1 RED：迁移 common 侧 SPI 测试（`CacheKeyBuilderTest`、`SharedStateContractModelTest`）至新包 `io.github.lvdaxianer.dinghai.sharedstate`，确认编译失败（被测类不存在）
+- [x] 2.2 GREEN：迁移 13 个 SPI 类（`SharedStateCache`、`CacheKey`、`BuiltCacheKey`、`CacheKeyBuilder`、`CacheKeyNamespace`、`CacheEnvelope`、`CacheEnvelopeCodec`、`CacheExpiry`、`CompareAndSetCommand`、`NamespacePolicy`、`NamespacePolicyRegistry`、`NamespaceFallbackPolicy`、`SharedStateUnavailableException`），包名改为 `io.github.lvdaxianer.dinghai.sharedstate`，类名与字段名不变
+- [x] 2.3 验证：`mvn -pl dinghai-shared-state test` 通过 SPI 测试
 
 ## 3. T3 缓存后端实现迁移
 
