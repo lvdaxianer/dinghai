@@ -52,7 +52,7 @@ T1 基线与构建骨架 → T2 SPI 契约层 → T3 缓存后端（Caffeine/Red
 
 ### D6: 序列化契约不变；配置前缀去公司化
 
-`CacheEnvelope` 字段名、`sharedStateRedisOperations` 等 Bean 名称原样保留，保证 Redis 存量数据可读、Bean 覆盖语义不变。但 `@ConfigurationProperties` 前缀从 `idt.cache` 改为 `dinghai.cache`——`idt` 是公司项目命名，出现在开源库里对外无意义。该前缀只影响配置绑定、不影响已存数据，dt-workspace 侧切换时同步改 application.yml 键名即可（属后续 change）。
+`CacheEnvelope` 字段名、`sharedStateRedisOperations` 等 Bean 名称原样保留，保证 Redis 存量数据可读、Bean 覆盖语义不变。但 `@ConfigurationProperties` 前缀从 `idt.cache` 改为 `dinghai.cache`——`idt` 是公司项目命名，出现在开源库里对外无意义。该前缀只影响配置绑定、不影响已存数据，dt-workspace 侧切换时同步改 application.yml 键名即可（属后续 change）。同理，`CacheKeyBuilder` 的 Redis 键根前缀 `idt` 改为 `dinghai`（`dinghai:{module}:{resource}:{identifier}`），契约测试的系统属性 `idt.redis.contract-*` 改为 `dinghai.redis.contract-*`；Redis 中均为 TTL 有界的临时状态，切换时旧键自然过期，无数据迁移负担。
 
 ## Risks / Trade-offs
 
