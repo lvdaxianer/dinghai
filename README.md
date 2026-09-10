@@ -37,7 +37,7 @@ dinghai 是 lvdaxianer 的个人开源基础组件库，从生产项目沉淀、
 
 | Bean 名称 / 类型 | 装配条件 |
 | --- | --- |
-| `cacheEnvelopeCodec`（`CacheEnvelopeCodec`） | 无条件 |
+| `cacheEnvelopeCodec`（`CacheEnvelopeCodec`） | 容器存在 `ObjectMapper` Bean，且应用未自定义 `CacheEnvelopeCodec`（应用可提供自定义实现替换默认 Jackson 编解码器） |
 | `sharedStateRedisConnectionFactory`（`LettuceConnectionFactory`） | 满足 `RedisConfiguredCondition`；独立于其他业务 `RedisConnectionFactory` |
 | `sharedStateRedisOperations`（`RedisTemplate<String, String>`，统一字符串序列化） | 满足 `RedisConfiguredCondition`，且存在 `sharedStateRedisConnectionFactory` |
 | `redisSharedStateCache`（`RedisSharedStateCache`） | 满足 `RedisConfiguredCondition`，且存在 `sharedStateRedisOperations` |

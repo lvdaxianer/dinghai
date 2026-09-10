@@ -48,6 +48,8 @@ public class SharedStateCacheConfiguration {
      * @date 2026-07-17
      */
     @Bean
+    @ConditionalOnBean(ObjectMapper.class)
+    @ConditionalOnMissingBean(CacheEnvelopeCodec.class)
     public CacheEnvelopeCodec cacheEnvelopeCodec(ObjectMapper objectMapper) {
         return new JacksonCacheEnvelopeCodec(objectMapper);
     }
