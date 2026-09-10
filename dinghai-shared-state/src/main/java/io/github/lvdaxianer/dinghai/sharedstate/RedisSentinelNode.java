@@ -11,7 +11,7 @@ import java.util.Objects;
 final class RedisSentinelNode {
 
     /** 最大端口号。 */
-    private static final int MAX_PORT = 65_535;
+    static final int MAX_PORT = 65_535;
 
     /** 节点主机。 */
     private final String host;
