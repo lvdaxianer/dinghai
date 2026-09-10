@@ -155,6 +155,24 @@ public class ResilientSharedStateCacheTest {
     }
 
     /**
+     * 混合批量读取包含强一致键时不得降级到本地。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-10
+     */
+    @Test
+    public void shouldRejectMixedBulkReadContainingDistributedRequiredKey() {
+        // 准备：普通键在前，强一致键在后，Redis 批量读取失败。
+        when(redis.getAll(List.of(cacheKey, requiredKey))).thenThrow(redisFailure());
+        caffeine.put(cacheKey, "local-cache", CacheExpiry.eternal());
+        caffeine.put(requiredKey, "local-required", CacheExpiry.eternal());
+
+        // 断言：任何包含强一致键的批量请求均保持失败关闭。
+        Assert.assertThrows(SharedStateUnavailableException.class,
+                () -> cache.getAll(List.of(cacheKey, requiredKey)));
+    }
+
+    /**
      * 半开探测成功后应恢复 Redis 并删除降级期间的本地写入。
      *
      * @author lvdaxianer@yeah.net

@@ -98,3 +98,44 @@ dinghai-shared-state 模块提供后端中立的共享状态缓存能力：统�
 
 - **WHEN** 应用在 `application.yml` 中配置 `dinghai.cache.redis.*` 等属性
 - **THEN** 属性绑定到共享状态缓存配置对象并驱动后端选择与连接参数
+
+### Requirement: 常用原子状态操作
+
+模块 SHALL 在 `SharedStateCache` 中提供条件删除和原子读取替换操作；Redis 实现 MUST 在服务器端完成这些操作，Caffeine 实现 MUST 在单进程内原子完成它们。
+
+#### Scenario: 条件删除与原子替换
+
+- **WHEN** 调用方以期望值执行 `compareAndDelete`，或以新值和到期策略执行 `getAndSet`
+- **THEN** 条件删除仅在值匹配时删除，原子替换返回替换前的值并应用新到期策略
+
+### Requirement: TTL 查询与生命周期管理
+
+模块 SHALL 提供剩余 TTL 查询、设置 TTL 和取消 TTL 的操作；不存在键的 TTL 查询 MUST 返回空，永久键 MUST 映射为 `CacheExpiry.eternal()`，强制 TTL 命名空间 MUST 拒绝 `persist`。
+
+#### Scenario: 管理普通键 TTL
+
+- **WHEN** 调用方对普通命名空间已有键先执行 `expire` 再执行 `persist`
+- **THEN** 两个操作均返回 `true`，且最终 TTL 查询返回 `CacheExpiry.eternal()`
+
+#### Scenario: 强制 TTL 状态不能取消过期
+
+- **WHEN** 调用方对 `isTtlRequired()` 为真的命名空间执行 `persist`
+- **THEN** 操作抛出 `IllegalArgumentException`，键的既有过期时间不变
+
+### Requirement: 批量共享状态访问
+
+模块 SHALL 提供批量读取、具有逐条 TTL 的批量写入和批量删除；批量读取 MUST 只返回命中的键，批量删除 MUST 返回实际删除的唯一键数量。
+
+#### Scenario: 使用独立 TTL 批量写入
+
+- **WHEN** 调用方使用 `CacheValue` 条目执行 `putAll`，其中一个键为永久、另一个键为临时
+- **THEN** 两个值均可读取，且 TTL 查询分别返回永久和临时状态
+
+### Requirement: 专用 Redis 连接隔离
+
+Spring Boot 自动装配 SHALL 为显式配置的共享状态 Redis 创建并使用具名的 `sharedStateRedisConnectionFactory`；应用中已有业务 Redis 连接工厂 MUST 不改变共享状态 Redis 的连接配置。
+
+#### Scenario: 业务 Redis 工厂与共享 Redis 配置共存
+
+- **WHEN** 容器已有业务 `RedisConnectionFactory` 且 `dinghai.cache.redis.*` 已显式配置
+- **THEN** `sharedStateRedisOperations` 绑定专用共享状态连接工厂，而非业务工厂
