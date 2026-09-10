@@ -38,8 +38,8 @@ dinghai 是 lvdaxianer 的个人开源基础组件库，从生产项目沉淀、
 | Bean 名称 / 类型 | 装配条件 |
 | --- | --- |
 | `cacheEnvelopeCodec`（`CacheEnvelopeCodec`） | 无条件 |
-| `redisConnectionFactory`（`LettuceConnectionFactory`） | 满足 `RedisConfiguredCondition`，且容器中不存在其他 `RedisConnectionFactory` |
-| `sharedStateRedisOperations`（`RedisTemplate<String, String>`，统一字符串序列化） | 满足 `RedisConfiguredCondition`，且存在 `RedisConnectionFactory` |
+| `sharedStateRedisConnectionFactory`（`LettuceConnectionFactory`） | 满足 `RedisConfiguredCondition`；独立于其他业务 `RedisConnectionFactory` |
+| `sharedStateRedisOperations`（`RedisTemplate<String, String>`，统一字符串序列化） | 满足 `RedisConfiguredCondition`，且存在 `sharedStateRedisConnectionFactory` |
 | `redisSharedStateCache`（`RedisSharedStateCache`） | 满足 `RedisConfiguredCondition`，且存在 `sharedStateRedisOperations` |
 | `caffeineSharedStateCache`（`CaffeineSharedStateCache`） | 无条件 |
 | `sharedStateCache`（`ResilientSharedStateCache`，`@Primary`） | 无条件 |
@@ -94,7 +94,7 @@ dinghai:
 
 - **未配置 Redis**（单机模式 `host` 为空白，且未显式声明 sentinel 模式）：仅装配 Caffeine 后端，`sharedStateCache` 直接走本地缓存。
 - **显式配置 Redis**（单机模式配置 `host`，或 `mode: sentinel` 且 sentinel 配置完整）：装配 Redis 后端作为主后端，外层由 `ResilientSharedStateCache` 提供熔断回退，Redis 故障时降级到 Caffeine。
-- **不受其他业务 Redis Bean 影响**：共享状态 Redis 是否启用只取决于 `dinghai.cache.redis.*` 自身配置（`RedisConfiguredCondition` / `isConfigured()`），应用里存在的其他业务 `RedisConnectionFactory` 不会隐式启用共享状态 Redis，也不会被共享状态后端复用。
+- **不受其他业务 Redis Bean 影响**：共享状态 Redis 是否启用只取决于 `dinghai.cache.redis.*` 自身配置（`RedisConfiguredCondition` / `isConfigured()`）。启用时，自动装配会创建 `sharedStateRedisConnectionFactory` 并由 `sharedStateRedisOperations` 显式注入它；应用里的业务 `RedisConnectionFactory` 不会被复用。
 
 ### 容错与可观测性
 
@@ -126,6 +126,7 @@ import io.github.lvdaxianer.dinghai.sharedstate.CacheExpiry;
 import io.github.lvdaxianer.dinghai.sharedstate.CacheKey;
 import io.github.lvdaxianer.dinghai.sharedstate.CacheKeyBuilder;
 import io.github.lvdaxianer.dinghai.sharedstate.CacheKeyNamespace;
+import io.github.lvdaxianer.dinghai.sharedstate.CacheValue;
 import io.github.lvdaxianer.dinghai.sharedstate.CompareAndSetCommand;
 import io.github.lvdaxianer.dinghai.sharedstate.NamespacePolicy;
 import io.github.lvdaxianer.dinghai.sharedstate.NamespacePolicyRegistry;
@@ -170,10 +171,22 @@ boolean swapped = sharedStateCache.compareAndSet(sessionKey,
 | `<T> Optional<T> getAndDelete(CacheKey<T> key)` | 原子读取并删除 |
 | `long increment(CacheKey<Long> key, long delta, CacheExpiry expiry)` | 原子增加长整型值 |
 | `<T> boolean compareAndSet(CacheKey<T> key, CompareAndSetCommand<T> command)` | 原子比较并更新 |
+| `<T> boolean compareAndDelete(CacheKey<T> key, T expectedValue)` | 值匹配时原子删除 |
+| `<T> Optional<T> getAndSet(CacheKey<T> key, T value, CacheExpiry expiry)` | 原子读取旧值并替换为新值 |
+| `Optional<CacheExpiry> remainingTtl(CacheKey<?> key)` | 查询剩余 TTL；不存在时为空，永久键为 `eternal()` |
+| `boolean expire(CacheKey<?> key, CacheExpiry expiry)` | 为已有键设置 TTL |
+| `boolean persist(CacheKey<?> key)` | 取消普通命名空间键的 TTL；强制 TTL 命名空间会拒绝 |
+| `<T> Map<CacheKey<T>, T> getAll(Collection<CacheKey<T>> keys)` | 批量读取，仅返回命中的键 |
+| `<T> void putAll(Map<CacheKey<T>, CacheValue<T>> entries)` | 使用每条 `CacheValue` 的独立 TTL 批量写入 |
+| `long deleteAll(Collection<? extends CacheKey<?>> keys)` | 批量删除，返回实际删除的唯一键数量 |
 | `boolean delete(CacheKey<?> key)` | 删除缓存值 |
 | `boolean exists(CacheKey<?> key)` | 判断键是否存在 |
 
 注意：原子操作的一致性范围由后端声明，Caffeine 后端仅保证单进程原子性。
+
+`CacheValue<T>` 将批量写入值和 `CacheExpiry` 绑定。`putAll` 会在写入前校验全部条目的类型和命名空间 TTL 约束，避免调用方参数错误导致部分写入；Redis 后端以单次 pipeline 提交独立键写入，`getAll` 与 `deleteAll` 分别使用原生批量读取和删除命令。
+
+TTL 生命周期中，`remainingTtl` 对不存在键返回空、对永久键返回 `CacheExpiry.eternal()`；`expire` 和 `persist` 仅对已有键成功时返回 `true`。强制 TTL 命名空间不能调用 `persist`，以保证临时安全状态不会变成永久值。
 
 ### 测试
 

@@ -10,7 +10,7 @@
 ## 3. Redis 连接隔离与文档
 
 - [x] 3.1 以 RED/GREEN 方式创建专用具名 Redis 连接工厂，并验证它不复用业务 Redis 工厂
-- [ ] 3.2 更新 README 的 API、批量、TTL 和 Redis 隔离说明，并运行模块级完整验证
+- [x] 3.2 更新 README 的 API、批量、TTL 和 Redis 隔离说明，并运行模块级完整验证
 
 ## 4. 完整验证与发布准备
 
