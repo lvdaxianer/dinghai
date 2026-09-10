@@ -61,14 +61,14 @@ public class SharedStateCacheExecutionRaceTest {
     }
 
     /**
-     * 恢复状态转换必须与本地镜像清理共用同一临界区。
+     * 降级 loader 在恢复锁外执行，不得阻塞半开恢复；跨代降级写入不得残留。
      *
      * @throws Exception 并发任务执行失败
      * @author lvdaxianer@yeah.net
-     * @date 2026-07-17
+     * @date 2026-09-11
      */
     @Test
-    public void shouldKeepHalfOpenStateUntilRecoveryCleanupCanRun() throws Exception {
+    public void shouldNotBlockRecoveryBehindFallbackLoader() throws Exception {
         openCircuit();
         CountDownLatch fallbackEntered = new CountDownLatch(1);
         CountDownLatch releaseFallback = new CountDownLatch(1);
@@ -79,30 +79,17 @@ public class SharedStateCacheExecutionRaceTest {
             await(fallbackEntered);
             now.set(2_001L);
             Future<String> probe = executor.submit(this::successfulProbe);
-            // 降级持有恢复锁期间，半开探测不得提前关闭熔断。
-            Assert.assertFalse(waitForState(SharedStateCircuitState.CLOSED));
+            // 降级 loader 不再持有恢复锁，半开探测应立即完成恢复而不会被阻塞。
+            Assert.assertEquals("remote", probe.get(WAIT_SECONDS, TimeUnit.SECONDS));
+            Assert.assertEquals(SharedStateCircuitState.CLOSED, execution.health().circuitState());
             releaseFallback.countDown();
-            assertRecoveredAfterFallbackRelease(fallback, probe);
+            // 跨代降级复核必须清除降级写入，恢复后不得观察到降级值残留。
+            Assert.assertEquals("fallback", fallback.get(WAIT_SECONDS, TimeUnit.SECONDS));
+            Assert.assertNotEquals(Optional.of("fallback"), caffeine.get(key));
         } finally {
             releaseFallback.countDown();
             executor.shutdownNow();
         }
-    }
-
-    /**
-     * 断言释放降级锁后半开探测完成恢复。
-     *
-     * @param fallback 持有恢复锁的降级任务
-     * @param probe 半开探测任务
-     * @throws Exception 并发任务执行失败
-     * @author lvdaxianer@yeah.net
-     * @date 2026-07-17
-     */
-    private void assertRecoveredAfterFallbackRelease(Future<String> fallback,
-            Future<String> probe) throws Exception {
-        Assert.assertEquals("fallback", fallback.get(WAIT_SECONDS, TimeUnit.SECONDS));
-        Assert.assertEquals("remote", probe.get(WAIT_SECONDS, TimeUnit.SECONDS));
-        Assert.assertEquals(SharedStateCircuitState.CLOSED, execution.health().circuitState());
     }
 
     /**
@@ -145,19 +132,20 @@ public class SharedStateCacheExecutionRaceTest {
     }
 
     /**
-     * 在本地降级操作中持有恢复锁。
+     * 在本地降级操作中等待释放信号后写入降级值。
      *
      * @param entered 已进入降级操作的信号
      * @param release 释放降级操作的信号
      * @return 本地降级结果
      * @author lvdaxianer@yeah.net
-     * @date 2026-07-17
+     * @date 2026-09-11
      */
     private String holdFallback(CountDownLatch entered, CountDownLatch release) {
         return execution.execute(key, new SharedStateCacheOperationPlan<>(backend -> "unused",
                 () -> {
                     entered.countDown();
                     await(release);
+                    caffeine.put(key, "fallback", CacheExpiry.eternal());
                     return "fallback";
                 }, ignored -> Assert.fail("熔断打开时不得执行成功镜像")));
     }
@@ -208,26 +196,6 @@ public class SharedStateCacheExecutionRaceTest {
             caffeine.put(key, fallbackValue, CacheExpiry.eternal());
             return fallbackValue;
         }, ignored -> Assert.fail("Redis 失败时不得执行成功镜像")));
-    }
-
-    /**
-     * 等待熔断状态在短窗口内到达目标值。
-     *
-     * @param expected 目标熔断状态
-     * @return true 表示等待窗口内观察到目标状态
-     * @author lvdaxianer@yeah.net
-     * @date 2026-07-17
-     */
-    private boolean waitForState(SharedStateCircuitState expected) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1L);
-        while (System.nanoTime() < deadline) {
-            // 并发线程到达目标状态后立即结束轮询。
-            if (execution.health().circuitState() == expected) {
-                return true;
-            }
-            Thread.yield();
-        }
-        return false;
     }
 
     /**

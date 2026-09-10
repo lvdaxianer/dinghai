@@ -4,6 +4,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Redis 优先、Caffeine 降级的共享状态容错门面。
@@ -99,6 +100,28 @@ public final class ResilientSharedStateCache implements SharedStateCache {
                         caffeine.delete(key);
                     }
                 }));
+    }
+
+    /**
+     * 读穿加载并同步本地镜像，Redis 故障时降级到本地镜像回源。
+     *
+     * <p>回源加载器抛出的异常直接上抛，不计入熔断失败。</p>
+     *
+     * @param key 类型化缓存键
+     * @param expiry 回源写入时的到期策略
+     * @param loader 回源加载器，不得返回 null
+     * @param <T> 缓存值类型
+     * @return 缓存命中值或回源加载值
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Override
+    public <T> T getOrLoad(CacheKey<T> key, CacheExpiry expiry,
+            Supplier<? extends T> loader) {
+        return execution.execute(key, new SharedStateCacheOperationPlan<>(
+                backend -> backend.getOrLoad(key, expiry, loader),
+                () -> caffeine.getOrLoad(key, localExpiry(key, expiry), loader),
+                result -> mirrorRead(key, Optional.of(result))));
     }
 
     /**

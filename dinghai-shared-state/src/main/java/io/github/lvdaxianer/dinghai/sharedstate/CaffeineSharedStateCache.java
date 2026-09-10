@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /**
  * 基于 Caffeine 的单进程共享状态后端。
@@ -113,6 +114,31 @@ public final class CaffeineSharedStateCache implements SharedStateCache {
     public <T> boolean putIfAbsent(CacheKey<T> key, T value, CacheExpiry expiry) {
         CaffeineStoredEntry entry = createEntry(key, value, expiry);
         return cache.asMap().putIfAbsent(key.value(), entry) == null;
+    }
+
+    /**
+     * 读取缓存值，未命中时在单进程内按键合并回源并写入。
+     *
+     * @param key    类型化缓存键
+     * @param expiry 回源写入时的到期策略
+     * @param loader 回源加载器，不得返回 null
+     * @param <T>    缓存值类型
+     * @return 缓存命中值或回源加载值
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Override
+    public <T> T getOrLoad(CacheKey<T> key, CacheExpiry expiry,
+            Supplier<? extends T> loader) {
+        CacheKey<T> validKey = Objects.requireNonNull(key, "key");
+        Supplier<? extends T> validLoader = Objects.requireNonNull(loader, "loader");
+        // 先校验到期策略，非法策略在回源前快速失败，避免无谓加载。
+        validateExpiry(validKey, expiry);
+        // computeIfAbsent 在单进程内按键合并并发回源，同一键同一时刻 loader 至多执行一次。
+        CaffeineStoredEntry entry = cache.asMap().computeIfAbsent(validKey.value(),
+                ignored -> createEntry(validKey, CacheLoaderSupport.loadNonNull(validLoader),
+                        expiry));
+        return readValue(validKey, entry);
     }
 
     /**

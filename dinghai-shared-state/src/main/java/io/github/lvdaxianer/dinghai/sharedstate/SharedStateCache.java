@@ -3,6 +3,7 @@ package io.github.lvdaxianer.dinghai.sharedstate;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * 后端中立的类型化共享缓存和临时状态契约。
@@ -49,6 +50,23 @@ public interface SharedStateCache {
      * @date 2026-07-17
      */
     <T> boolean putIfAbsent(CacheKey<T> key, T value, CacheExpiry expiry);
+
+    /**
+     * 读取缓存值，未命中时回源加载并按到期策略写入。
+     *
+     * <p>命中时直接返回缓存值且不调用回源加载器；回源加载器返回 null 时抛出
+     * {@link IllegalArgumentException} 且不写入缓存；回源加载器自身抛出的异常直接上抛。
+     * 并发语义由后端实现声明，契约不保证跨进程单飞。</p>
+     *
+     * @param key    类型化缓存键
+     * @param expiry 回源写入时的到期策略
+     * @param loader 回源加载器，不得返回 null
+     * @param <T>    缓存值类型
+     * @return 缓存命中值或回源加载值
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    <T> T getOrLoad(CacheKey<T> key, CacheExpiry expiry, Supplier<? extends T> loader);
 
     /**
      * 原子读取并删除缓存值。

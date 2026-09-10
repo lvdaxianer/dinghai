@@ -17,7 +17,7 @@ public class SharedStateContractModelTest {
 
     /** 后端中立契约要求的操作名称。 */
     private static final Set<String> REQUIRED_OPERATIONS = Set.of(
-            "get", "put", "putIfAbsent", "getAndDelete", "increment",
+            "get", "put", "putIfAbsent", "getOrLoad", "getAndDelete", "increment",
             "compareAndSet", "compareAndDelete", "getAndSet", "remainingTtl",
             "expire", "persist", "getAll", "putAll", "deleteAll", "delete", "exists");
 

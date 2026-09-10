@@ -215,10 +215,10 @@ final class SharedStateCacheExecution {
      */
     private <T, R> R handleFailure(CacheKey<T> key, LocalCacheOperation<R> localOperation,
             RedisFailure failure) {
+        RedisCircuitBreaker.FailureResult result;
         synchronized (recoveryLock) {
             observability.redisFailure(key, failure.exception());
-            RedisCircuitBreaker.FailureResult result =
-                    circuitBreaker.recordFailure(failure.ticket());
+            result = circuitBreaker.recordFailure(failure.ticket());
             // 本次失败打开熔断器时记录状态转换。
             if (result.isOpened()) {
                 observability.circuitOpened(key, circuitBreaker.failures());
@@ -228,8 +228,9 @@ final class SharedStateCacheExecution {
                 throw new SharedStateUnavailableException(
                         key.namespace().name(), failure.exception());
             }
-            return executeFallback(key, localOperation, result.fallbackTicket());
         }
+        // 本地降级在恢复锁外执行，避免任意时长的回源加载串行化全部降级请求。
+        return executeFallback(key, localOperation, result.fallbackTicket());
     }
 
     /**
@@ -250,13 +251,11 @@ final class SharedStateCacheExecution {
         if (isDistributedRequired(key)) {
             throw new SharedStateUnavailableException(key.namespace().name());
         }
-        synchronized (recoveryLock) {
-            return executeFallback(key, localOperation, ticket);
-        }
+        return executeFallback(key, localOperation, ticket);
     }
 
     /**
-     * 在恢复锁内执行本地降级并复核故障代次。
+     * 锁外执行本地降级，并在恢复锁内复核故障代次。
      *
      * @param key 类型化缓存键
      * @param localOperation 本地操作
@@ -265,15 +264,18 @@ final class SharedStateCacheExecution {
      * @param <R> 结果类型
      * @return 本地结果
      * @author lvdaxianer@yeah.net
-     * @date 2026-07-17
+     * @date 2026-09-11
      */
     private <T, R> R executeFallback(CacheKey<T> key, LocalCacheOperation<R> localOperation,
             RedisCircuitBreaker.RequestTicket ticket) {
         observability.fallback(key);
+        // 锁外执行本地操作，loader 可能执行任意时长，不得占用恢复锁。
         R result = localOperation.get();
-        // 已跨代或已恢复时删除本次操作可能留下的本地值。
-        if (!circuitBreaker.retainFallback(ticket)) {
-            caffeine.delete(key);
+        synchronized (recoveryLock) {
+            // 已跨代或已恢复时删除本次操作可能留下的本地值；恢复稍后的 invalidateAll 仍会清理。
+            if (!circuitBreaker.retainFallback(ticket)) {
+                caffeine.delete(key);
+            }
         }
         return result;
     }
