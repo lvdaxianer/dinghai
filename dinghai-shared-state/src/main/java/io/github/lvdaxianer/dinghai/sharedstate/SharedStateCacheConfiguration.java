@@ -35,6 +35,10 @@ public class SharedStateCacheConfiguration {
     private static final String SHARED_STATE_REDIS_OPERATIONS_BEAN =
             "sharedStateRedisOperations";
 
+    /** 共享状态专用 Redis 连接工厂 Bean 名称。 */
+    private static final String SHARED_STATE_REDIS_CONNECTION_FACTORY_BEAN =
+            "sharedStateRedisConnectionFactory";
+
     /**
      * 创建 Jackson 缓存信封编解码器。
      *
@@ -56,9 +60,9 @@ public class SharedStateCacheConfiguration {
      * @author lvdaxianer@yeah.net
      * @date 2026-07-17
      */
-    @Bean
+    @Bean(name = SHARED_STATE_REDIS_CONNECTION_FACTORY_BEAN)
     @Conditional(RedisConfiguredCondition.class)
-    @ConditionalOnMissingBean(RedisConnectionFactory.class)
+    @ConditionalOnMissingBean(name = SHARED_STATE_REDIS_CONNECTION_FACTORY_BEAN)
     public LettuceConnectionFactory redisConnectionFactory(SharedStateCacheProperties properties) {
         SharedStateCacheProperties.RedisProperties redis = properties.getRedis();
         redis.validate();
@@ -75,9 +79,10 @@ public class SharedStateCacheConfiguration {
      */
     @Bean
     @Conditional(RedisConfiguredCondition.class)
-    @ConditionalOnBean(RedisConnectionFactory.class)
+    @ConditionalOnBean(name = SHARED_STATE_REDIS_CONNECTION_FACTORY_BEAN)
     @ConditionalOnMissingBean(name = SHARED_STATE_REDIS_OPERATIONS_BEAN)
     public RedisTemplate<String, String> sharedStateRedisOperations(
+            @Qualifier(SHARED_STATE_REDIS_CONNECTION_FACTORY_BEAN)
             RedisConnectionFactory connectionFactory, SharedStateCacheProperties properties) {
         properties.getRedis().validate();
         RedisTemplate<String, String> template = new RedisTemplate<>();

@@ -235,6 +235,15 @@ public class SharedStateCacheConfigurationTest {
         try (AnnotationConfigApplicationContext context = createRedisContext()) {
             // 断言：专用模板与外部模板共存且互不覆盖。
             Assert.assertEquals(2, context.getBeansOfType(RedisOperations.class).size());
+            RedisTemplate<String, String> shared = context.getBean(
+                    "sharedStateRedisOperations", RedisTemplate.class);
+            LettuceConnectionFactory dedicated = context.getBean(
+                    "sharedStateRedisConnectionFactory", LettuceConnectionFactory.class);
+            RedisConnectionFactory external = context.getBean(
+                    "externalRedisConnectionFactory", RedisConnectionFactory.class);
+            // 断言：共享状态模板只能绑定其具名连接工厂，不能复用业务工厂。
+            Assert.assertSame(dedicated, shared.getConnectionFactory());
+            Assert.assertNotSame(external, shared.getConnectionFactory());
             // 断言：Redis 后端 Bean 按约定名称注册，可被健康快照识别。
             Assert.assertNotNull(context.getBean("redisSharedStateCache"));
             // 断言：配置共享状态 Redis 后主后端切换为 Redis 且不再降级。
