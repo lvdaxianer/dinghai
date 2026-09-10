@@ -151,6 +151,10 @@ CacheKey<String> profileKey = keyBuilder.build(profileNs, "u-1001", String.class
 sharedStateCache.put(profileKey, "{\"name\":\"ding\"}", CacheExpiry.after(Duration.ofMinutes(10)));
 Optional<String> profile = sharedStateCache.get(profileKey);
 
+// 读穿加载：命中直接返回缓存值，未命中调用 loader 回源并按到期策略写入
+String loaded = sharedStateCache.getOrLoad(profileKey,
+        CacheExpiry.after(Duration.ofMinutes(10)), () -> loadProfileFromDatabase("u-1001"));
+
 // 强制 TTL 的临时状态：identifier 以 SHA-256 哈希入库
 CacheKeyNamespace sessionNs = new CacheKeyNamespace("auth-state", "auth", "session");
 CacheKey<String> sessionKey = keyBuilder.build(sessionNs, "raw-session-token", String.class);
@@ -169,6 +173,7 @@ boolean swapped = sharedStateCache.compareAndSet(sessionKey,
 | `<T> Optional<T> get(CacheKey<T> key)` | 读取类型化缓存值 |
 | `<T> void put(CacheKey<T> key, T value, CacheExpiry expiry)` | 新增或覆盖缓存值 |
 | `<T> boolean putIfAbsent(CacheKey<T> key, T value, CacheExpiry expiry)` | 仅在键不存在时写入 |
+| `<T> T getOrLoad(CacheKey<T> key, CacheExpiry expiry, Supplier<? extends T> loader)` | 读穿加载：命中直接返回；未命中回源写入后返回；loader 返回 null 抛 `IllegalArgumentException` 且不写入 |
 | `<T> Optional<T> getAndDelete(CacheKey<T> key)` | 原子读取并删除 |
 | `long increment(CacheKey<Long> key, long delta, CacheExpiry expiry)` | 原子增加长整型值 |
 | `<T> boolean compareAndSet(CacheKey<T> key, CompareAndSetCommand<T> command)` | 原子比较并更新 |
@@ -184,6 +189,8 @@ boolean swapped = sharedStateCache.compareAndSet(sessionKey,
 | `boolean exists(CacheKey<?> key)` | 判断键是否存在 |
 
 注意：原子操作的一致性范围由后端声明，Caffeine 后端仅保证单进程原子性。
+
+`getOrLoad` 提供读穿加载：命中时不调用 loader；未命中时调用 loader 回源并按传入的 `expiry` 写入。loader 不允许返回 null（否则抛 `IllegalArgumentException` 且不写入），其自身抛出的异常直接上抛且不计入熔断失败。Caffeine 后端在单进程内按键合并并发回源（同一键同一时刻 loader 至多执行一次）；Redis 后端按 `get` → loader → `putIfAbsent` → 冲突时重读的顺序执行，并发下以现存值为准，不保证跨进程单飞。
 
 `CacheValue<T>` 将批量写入值和 `CacheExpiry` 绑定。`putAll` 会在写入前校验全部条目的类型和命名空间 TTL 约束，避免调用方参数错误导致部分写入；Redis 后端以单次 pipeline 提交独立键写入，并在提交后逐条校验执行结果，任一条目失败即抛出 `RedisBackendException`（fail-fast），`getAll` 与 `deleteAll` 分别使用原生批量读取和删除命令。注意批量操作不保证原子性，失败后缓存可能处于部分写入状态。
 

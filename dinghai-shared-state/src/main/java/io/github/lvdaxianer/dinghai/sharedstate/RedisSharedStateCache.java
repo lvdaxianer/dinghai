@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.ValueOperations;
@@ -98,6 +99,54 @@ public final class RedisSharedStateCache implements SharedStateCache {
                 ? valueOperations().setIfAbsent(key.value(), encoded)
                 : valueOperations().setIfAbsent(key.value(), encoded, expiration(expiry)));
         return Boolean.TRUE.equals(result);
+    }
+
+    /**
+     * 读取 Redis 值，未命中时回源加载并按 get→loader→putIfAbsent 顺序写入。
+     *
+     * @param key 类型化缓存键
+     * @param expiry 回源写入时的到期策略
+     * @param loader 回源加载器，不得返回 null
+     * @param <T> 缓存值类型
+     * @return 缓存命中值或回源加载值，并发冲突时以 Redis 现存值为准
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Override
+    public <T> T getOrLoad(CacheKey<T> key, CacheExpiry expiry,
+            Supplier<? extends T> loader) {
+        CacheKey<T> validKey = Objects.requireNonNull(key, "key");
+        Supplier<? extends T> validLoader = Objects.requireNonNull(loader, "loader");
+        // 先校验到期策略，非法策略在回源前快速失败，避免无谓加载。
+        validateExpiry(validKey, expiry);
+        Optional<T> existing = get(validKey);
+        // 命中时直接返回缓存值，不执行回源加载。
+        if (existing.isPresent()) {
+            return existing.orElseThrow();
+        }
+        return loadAndPublish(validKey, expiry, validLoader);
+    }
+
+    /**
+     * 回源加载并原子写入，并发冲突时以 Redis 现存值为准。
+     *
+     * @param key 类型化缓存键
+     * @param expiry 回源写入时的到期策略
+     * @param loader 回源加载器
+     * @param <T> 缓存值类型
+     * @return 回源加载值或并发竞争中的现存值
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    private <T> T loadAndPublish(CacheKey<T> key, CacheExpiry expiry,
+            Supplier<? extends T> loader) {
+        T loaded = CacheLoaderSupport.loadNonNull(loader);
+        // 原子写入成功时直接返回回源值。
+        if (putIfAbsent(key, loaded, expiry)) {
+            return loaded;
+        }
+        // 并发窗口内他方先写入时重读，以现存值为准；极端过期窗口下回退到回源值。
+        return get(key).orElse(loaded);
     }
 
     /**

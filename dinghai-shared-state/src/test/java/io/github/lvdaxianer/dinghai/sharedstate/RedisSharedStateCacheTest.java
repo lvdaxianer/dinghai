@@ -3,6 +3,8 @@ package io.github.lvdaxianer.dinghai.sharedstate;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +18,8 @@ import java.util.concurrent.TimeUnit;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.InOrder;
+import org.mockito.Mockito;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.data.redis.core.ValueOperations;
@@ -225,6 +229,71 @@ public class RedisSharedStateCacheTest {
 
         // 步骤 2：断言 Spring Data 异常被包装为可熔断的后端异常。
         Assert.assertThrows(RedisBackendException.class, () -> cache.get(key));
+    }
+
+    /**
+     * Redis 读穿未命中时应按 get→loader→putIfAbsent 顺序交互。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldGetThenLoadThenPutIfAbsentOnMiss() {
+        // 步骤 1：构建普通缓存键，模拟 Redis 未命中且原子写入成功。
+        CacheKey<String> key = keyBuilder.build(CACHE_KEYS, "load-through", String.class);
+        when(values.get(key.value())).thenReturn(null);
+        when(values.setIfAbsent(eq(key.value()), anyString())).thenReturn(true);
+
+        // 步骤 2：执行读穿加载。
+        String result = cache.getOrLoad(key, CacheExpiry.eternal(), () -> "loaded");
+
+        // 步骤 3：断言返回回源值，且与 Redis 的交互顺序为读取后原子写入。
+        Assert.assertEquals("loaded", result);
+        InOrder inOrder = Mockito.inOrder(values);
+        inOrder.verify(values).get(key.value());
+        inOrder.verify(values).setIfAbsent(eq(key.value()), anyString());
+    }
+
+    /**
+     * putIfAbsent 并发冲突时应重读并以 Redis 现存值为准返回。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldRereadExistingValueWhenPutIfAbsentLosesRace() {
+        // 步骤 1：首次读取未命中，原子写入失败（并发他方先写入），重读命中他方值。
+        CacheKey<String> key = keyBuilder.build(CACHE_KEYS, "load-race", String.class);
+        String existing = codec.encode(CacheEnvelope.of(String.class, "remote"));
+        when(values.get(key.value())).thenReturn(null, existing);
+        when(values.setIfAbsent(eq(key.value()), anyString())).thenReturn(false);
+
+        // 步骤 2：执行读穿加载，loader 返回本端回源值。
+        String result = cache.getOrLoad(key, CacheExpiry.eternal(), () -> "local");
+
+        // 步骤 3：断言以 Redis 现存值为准，且共执行两次读取。
+        Assert.assertEquals("remote", result);
+        verify(values, times(2)).get(key.value());
+    }
+
+    /**
+     * 回源加载器返回 null 时应拒绝写入 Redis。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldRejectNullLoaderResultBeforeRedisWrite() {
+        // 步骤 1：构建普通缓存键，模拟 Redis 未命中。
+        CacheKey<String> key = keyBuilder.build(CACHE_KEYS, "load-null", String.class);
+        when(values.get(key.value())).thenReturn(null);
+
+        // 步骤 2：回源加载器返回 null，断言抛出非法参数异常。
+        Assert.assertThrows(IllegalArgumentException.class,
+                () -> cache.getOrLoad(key, CacheExpiry.eternal(), () -> null));
+
+        // 步骤 3：断言未向 Redis 发起任何写入。
+        verify(values, never()).setIfAbsent(anyString(), anyString());
     }
 
     /**

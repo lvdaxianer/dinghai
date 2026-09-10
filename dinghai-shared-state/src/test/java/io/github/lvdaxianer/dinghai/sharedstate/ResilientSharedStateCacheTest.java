@@ -4,13 +4,18 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -45,6 +50,12 @@ public class ResilientSharedStateCacheTest {
     /** 临时状态键路径。 */
     private static final CacheKeyNamespace STATE_KEYS =
             new CacheKeyNamespace(STATE_NAMESPACE, "auth", "failure");
+
+    /** 回源失败重试次数（超过熔断阈值 2）。 */
+    private static final int LOADER_FAILURE_ATTEMPTS = 3;
+
+    /** 降级回源并发等待秒数。 */
+    private static final long LOADER_WAIT_SECONDS = 5L;
 
     /** 测试时间源。 */
     private AtomicLong now;
@@ -319,6 +330,119 @@ public class ResilientSharedStateCacheTest {
         // 断言：半开窗口内只有一个探测请求真正到达 Redis。
         Assert.assertEquals(3, redisCalls.get());
         Assert.assertEquals(1L, cache.metrics().halfOpenCount());
+    }
+
+    /**
+     * 回源加载器抛出的调用方异常不得计入熔断失败。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldNotCountLoaderFailuresTowardsCircuitBreaker() {
+        // 准备：Redis 后端透传执行调用方 loader，模拟真实读穿链路。
+        when(redis.getOrLoad(eq(cacheKey), any(), any())).thenAnswer(invocation -> {
+            Supplier<String> loader = invocation.getArgument(2);
+            return loader.get();
+        });
+        Supplier<String> failingLoader = () -> {
+            throw new IllegalStateException("source down");
+        };
+
+        // 执行：连续回源失败，次数超过熔断阈值 2。
+        for (int attempt = 0; attempt < LOADER_FAILURE_ATTEMPTS; attempt++) {
+            Assert.assertThrows(IllegalStateException.class,
+                    () -> cache.getOrLoad(cacheKey, CacheExpiry.eternal(), failingLoader));
+        }
+
+        // 断言：数据/调用方错误不熔断，熔断器保持关闭。
+        Assert.assertEquals(SharedStateCircuitState.CLOSED, cache.health().circuitState());
+    }
+
+    /**
+     * Redis 熔断降级时 getOrLoad 应在本地镜像未命中时回源并写入本地镜像。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldLoadThroughLocalMirrorWhenRedisIsDown() {
+        // 准备：Redis 读穿失败，触发按命名空间策略的本地降级。
+        when(redis.getOrLoad(eq(cacheKey), any(), any())).thenThrow(redisFailure());
+
+        // 执行：降级路径下本地镜像未命中，回源加载并写入本地镜像。
+        String value = cache.getOrLoad(cacheKey, CacheExpiry.eternal(), () -> "local-loaded");
+
+        // 断言：返回回源值，本地镜像已写入，并记录一次降级。
+        Assert.assertEquals("local-loaded", value);
+        Assert.assertEquals(Optional.of("local-loaded"), caffeine.get(cacheKey));
+        Assert.assertEquals(1L, cache.metrics().fallbackCount());
+    }
+
+    /**
+     * 熔断打开后不同键的降级回源加载器应并发执行，不被恢复锁全局串行化。
+     *
+     * @throws Exception 并发任务执行失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldRunFallbackLoadersConcurrentlyAcrossKeys() throws Exception {
+        // 准备：阈值为 1，首次 Redis 失败即熔断打开，后续请求直接走降级路径。
+        SharedStateCacheProperties.CircuitProperties properties = circuitProperties();
+        properties.setFailureThreshold(1);
+        cache = new ResilientSharedStateCache(Optional.of(redis), caffeine, options(properties));
+        CacheKey<String> secondKey = keyBuilder.build(CACHE_KEYS, "value-second", String.class);
+        when(redis.get(cacheKey)).thenThrow(redisFailure());
+        Assert.assertEquals(Optional.empty(), cache.get(cacheKey));
+        Assert.assertEquals(SharedStateCircuitState.OPEN, cache.health().circuitState());
+
+        // 执行：两个线程对不同缺失键并发 getOrLoad，loader 互相等待以强制重叠。
+        CountDownLatch firstEntered = new CountDownLatch(1);
+        CountDownLatch secondEntered = new CountDownLatch(1);
+        SharedStateCacheAtomicTestSupport support = new SharedStateCacheAtomicTestSupport(2);
+        try {
+            SharedStateCacheAtomicTestSupport.Gate gate = support.newGate();
+            List<Future<String>> results = support.submitAndRelease(gate, List.of(
+                    () -> support.gatedCall(gate, () -> cache.getOrLoad(cacheKey,
+                            CacheExpiry.eternal(), pairedLoader(firstEntered, secondEntered, "first"))),
+                    () -> support.gatedCall(gate, () -> cache.getOrLoad(secondKey,
+                            CacheExpiry.eternal(), pairedLoader(secondEntered, firstEntered, "second")))));
+            // 断言：两个 loader 均并发完成；若被全局锁串行化将超时失败。
+            Assert.assertEquals("first", results.get(0).get(LOADER_WAIT_SECONDS, TimeUnit.SECONDS));
+            Assert.assertEquals("second", results.get(1).get(LOADER_WAIT_SECONDS, TimeUnit.SECONDS));
+        } finally {
+            support.close();
+        }
+        Assert.assertEquals(Optional.of("first"), caffeine.get(cacheKey));
+        Assert.assertEquals(Optional.of("second"), caffeine.get(secondKey));
+    }
+
+    /**
+     * 创建互相等待对方进入的回源加载器，用于强制两个 loader 并发重叠。
+     *
+     * @param entered 本 loader 进入门闩
+     * @param otherEntered 对方 loader 进入门闩
+     * @param value 回源返回值
+     * @return 配对回源加载器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    private Supplier<String> pairedLoader(CountDownLatch entered, CountDownLatch otherEntered,
+            String value) {
+        return () -> {
+            entered.countDown();
+            try {
+                // 若 loader 被恢复锁串行化，对方永远无法进入，此等待超时即暴露问题。
+                if (!otherEntered.await(LOADER_WAIT_SECONDS, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("fallback loaders were serialized");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(exception);
+            }
+            return value;
+        };
     }
 
     /**

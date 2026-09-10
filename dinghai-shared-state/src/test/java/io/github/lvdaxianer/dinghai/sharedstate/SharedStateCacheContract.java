@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -135,6 +136,64 @@ public abstract class SharedStateCacheContract {
         Assert.assertTrue(cache.putIfAbsent(key, "first", ETERNAL));
         Assert.assertFalse(cache.putIfAbsent(key, "second", ETERNAL));
         Assert.assertEquals(Optional.of("first"), cache.get(key));
+    }
+
+    /**
+     * getOrLoad 未命中时应回源写入，后续读取命中且 TTL 生效。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldLoadThroughAndWriteOnMiss() {
+        CacheKey<String> key = stringKey("get-or-load");
+        AtomicInteger loaderCalls = new AtomicInteger();
+
+        String value = cache.getOrLoad(key, CacheExpiry.after(Duration.ofSeconds(30L)),
+                () -> {
+                    loaderCalls.incrementAndGet();
+                    return "loaded";
+                });
+
+        // 回源加载器只执行一次，且返回值与写入值一致。
+        Assert.assertEquals("loaded", value);
+        Assert.assertEquals(1, loaderCalls.get());
+        Assert.assertEquals(Optional.of("loaded"), cache.get(key));
+        // 回源写入应携带调用方传入的到期策略。
+        Assert.assertTrue(cache.remainingTtl(key).orElseThrow().ttl().toMillis() > 0L);
+    }
+
+    /**
+     * getOrLoad 命中时应直接返回缓存值且不调用回源加载器。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldReturnCachedValueWithoutLoadingOnHit() {
+        CacheKey<String> key = stringKey("get-or-load-hit");
+        cache.put(key, "cached", ETERNAL);
+
+        String value = cache.getOrLoad(key, ETERNAL, () -> {
+            throw new IllegalStateException("loader must not be called on hit");
+        });
+
+        Assert.assertEquals("cached", value);
+    }
+
+    /**
+     * getOrLoad 的回源加载器返回 null 时应抛出非法参数异常且不产生键。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldRejectNullLoaderResultWithoutWriting() {
+        CacheKey<String> key = stringKey("get-or-load-null");
+
+        Assert.assertThrows(IllegalArgumentException.class,
+                () -> cache.getOrLoad(key, ETERNAL, () -> null));
+        Assert.assertFalse(cache.exists(key));
     }
 
     /**
@@ -354,6 +413,27 @@ public abstract class SharedStateCacheContract {
         CacheKey<String> key = transientStringKey("compare-and-set");
         cache.put(key, "before", CacheExpiry.after(Duration.ofSeconds(30L)));
         cache.compareAndSet(key, new CompareAndSetCommand<>("before", "after", ETERNAL));
+    }
+
+    /**
+     * 临时状态命名空间的 getOrLoad 必须先校验到期策略再回源。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldRejectEternalGetOrLoadForTransientNamespaceBeforeLoading() {
+        CacheKey<String> key = transientStringKey("get-or-load");
+        AtomicInteger loaderCalls = new AtomicInteger();
+
+        Assert.assertThrows(IllegalArgumentException.class,
+                () -> cache.getOrLoad(key, ETERNAL, () -> {
+                    loaderCalls.incrementAndGet();
+                    return "loaded";
+                }));
+        // 校验先于回源执行，loader 未被调用且未产生键。
+        Assert.assertEquals(0, loaderCalls.get());
+        Assert.assertFalse(cache.exists(key));
     }
 
     /**

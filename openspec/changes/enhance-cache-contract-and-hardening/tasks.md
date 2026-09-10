@@ -22,9 +22,9 @@
 
 ## 4. 读穿加载 getOrLoad（features/✅CHG-002-T4--读穿加载方法）
 
-- [ ] 4.1 TDD：契约测试覆盖未命中回源写入、命中不回源、loader 返回 null 拒绝、Caffeine 并发回源合并
-- [ ] 4.2 `SharedStateCache` 新增 `getOrLoad`；`CaffeineSharedStateCache`（computeIfAbsent 合并）、`RedisSharedStateCache`（get→loader→putIfAbsent→重读）、`ResilientSharedStateCache`（路由/降级）实现
-- [ ] 4.3 README 操作列表与示例补充
+- [x] 4.1 TDD：契约测试覆盖未命中回源写入、命中不回源、loader 返回 null 拒绝、Caffeine 并发回源合并
+- [x] 4.2 `SharedStateCache` 新增 `getOrLoad`；`CaffeineSharedStateCache`（computeIfAbsent 合并）、`RedisSharedStateCache`（get→loader→putIfAbsent→重读）、`ResilientSharedStateCache`（路由/降级）实现
+- [x] 4.3 README 操作列表与示例补充
 
 ## 5. 滑动续期 getAndExpire（features/✅CHG-002-T5--滑动续期方法）
 
