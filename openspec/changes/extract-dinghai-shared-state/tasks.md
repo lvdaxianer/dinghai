@@ -28,9 +28,9 @@
 
 ## 5. T5 自动装配与配置属性迁移
 
-- [ ] 5.1 RED：迁移装配测试（`SharedStateCacheConfigurationTest`；`RedisConnectionPropertiesTest` 已提前至 T4），配置前缀断言同步更新为 dinghai.cache
-- [ ] 5.2 GREEN：迁移自动装配层（`SharedStateCacheConfiguration`、`RedisConfiguredCondition`；配置属性链已提前至 T4）；`AutoConfiguration.imports` 改为新全限定类名
-- [ ] 5.3 验证：`mvn -pl dinghai-shared-state test` 全量通过
+- [x] 5.1 RED：迁移装配测试（`SharedStateCacheConfigurationTest`；`RedisConnectionPropertiesTest` 已提前至 T4），配置前缀断言同步更新为 dinghai.cache
+- [x] 5.2 GREEN：迁移自动装配层（`SharedStateCacheConfiguration`、`RedisConfiguredCondition`；配置属性链已提前至 T4）；`AutoConfiguration.imports` 改为新全限定类名
+- [x] 5.3 验证：`mvn -pl dinghai-shared-state test` 全量通过
 
 ## 6. T6 构建验证与发布准备
 
