@@ -9,6 +9,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -118,6 +119,39 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(properties.getUpload().getMaxSize())
                             .isEqualTo(UploadRequest.DEFAULT_MAX_SIZE_BYTES);
                 });
+    }
+
+    /**
+     * Web 流式响应应使用容量明确的专用执行器。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldConfigureBoundedFileStorageWebExecutor() {
+        contextRunner.withPropertyValues(localProperties())
+                .run(context -> {
+                    ThreadPoolTaskExecutor executor = context.getBean("fileStorageWebTaskExecutor",
+                            ThreadPoolTaskExecutor.class);
+                    assertThat(executor.getCorePoolSize()).isPositive();
+                    assertThat(executor.getMaxPoolSize()).isGreaterThanOrEqualTo(executor.getCorePoolSize());
+                    assertThat(executor.getQueueCapacity()).isPositive();
+                    assertThat(executor.getThreadNamePrefix()).contains("file-storage-web-");
+                    assertThat(context).hasSingleBean(FileStorageWebMvcConfiguration.class);
+                });
+    }
+
+    /**
+     * 禁用 Web 集成时不应创建文件存储执行器。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldNotConfigureWebExecutorWhenWebIsDisabled() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.web.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean("fileStorageWebTaskExecutor"));
     }
 
     /**

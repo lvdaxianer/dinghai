@@ -68,7 +68,7 @@ dinghai:
       max-size: 100MB
 ```
 
-Starter 默认注册 `/files/upload/{*key}`、`/files/download/{*key}` 和 `/files/preview/{*key}`。上传和下载 URL 均可预签名；下载签名绑定 `inline` 或 `attachment` 响应模式。预览/下载使用流式响应，并支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304 和单 Range 206/416。无签名访问默认拒绝，直接访问必须显式开启并提供 `FileStorageAccessPolicy`。
+Starter 默认注册 `/files/upload/{*key}`、`/files/download/{*key}` 和 `/files/preview/{*key}`。上传和下载 URL 均可预签名；下载签名绑定 `inline` 或 `attachment` 响应模式。预览/下载使用流式响应，并支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304 和单 Range 206/416。流式响应使用文件存储专用的有界异步执行器，避免依赖无界默认执行器。无签名访问默认拒绝，直接访问必须显式开启并提供 `FileStorageAccessPolicy`。
 
 MinIO 配置需要 `endpoint`、`bucket`、`access-key` 和 `secret-key`，不自动创建 bucket，也不会在 Local 与 MinIO 之间自动回退。签名密钥、访问密钥和完整签名 URL 不写入日志或错误响应。
 
