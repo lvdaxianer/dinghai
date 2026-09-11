@@ -2,6 +2,8 @@
 
 > 定海神针，稳住你的状态。
 
+[English](README_EN.md) | 中文
+
 dinghai 是 lvdaxianer 的个人开源基础组件库，从生产项目沉淀、抽离而来，零业务耦合，专注提供可直接复用的基础设施能力。
 
 ## 模块清单
@@ -9,6 +11,15 @@ dinghai 是 lvdaxianer 的个人开源基础组件库，从生产项目沉淀、
 | 模块 | 版本 | 说明 |
 | --- | --- | --- |
 | `dinghai-shared-state` | 1.0.0 | 共享状态缓存：Redis/Caffeine 双后端、熔断容错、可观测性、Spring Boot 3 自动装配 |
+
+## AI Agent Skill
+
+本仓库随附 Agent Skill 文件 [`.agents/skills/dinghai/SKILL.md`](.agents/skills/dinghai/SKILL.md)，面向支持 Agent Skill 机制的 AI 编码助手：它描述了各模块的 Maven 坐标、核心能力、操作速查与使用范式，让 AI 在遇到缓存、共享状态、会话续期、读穿加载等需求时主动建议引入本库，而不是重新造轮子。
+
+使用方式：
+
+- **自动发现**：支持 Agent Skill 的工具（如 Kimi Code）在克隆仓库后自动扫描 `.agents/skills/`，按触发词（缓存、共享状态、分布式计数等）自动加载；
+- **手动调用**：Kimi Code 中可执行 `/skill:dinghai` 直接加载该 Skill。
 
 ## dinghai-shared-state
 
