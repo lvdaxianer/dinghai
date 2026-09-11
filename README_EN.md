@@ -11,6 +11,10 @@ dinghai is lvdaxianer's personal open-source base-component library, distilled a
 | Module | Version | Description |
 | --- | --- | --- |
 | `dinghai-shared-state` | 1.0.0 | Shared state cache: dual Redis/Caffeine backends, circuit-breaker fault tolerance, observability, Spring Boot 3 auto-configuration |
+| `dinghai-file-storage-core` | 1.0.0 | Backend-neutral storage contracts, object models, presigned models, and stable error codes |
+| `dinghai-file-storage-local` | 1.0.0 | Local-disk adapter with Unicode/nested keys, HMAC presigning, and streaming I/O |
+| `dinghai-file-storage-minio` | 1.0.0 | Fixed-bucket MinIO adapter with native presigning |
+| `dinghai-file-storage-spring-boot-starter` | 1.0.0 | Provider auto-configuration and local Web presigned endpoints |
 
 ## AI Agent Skill
 
@@ -31,6 +35,42 @@ A typed shared-state caching library providing backend-neutral contracts for cac
 - **Auto-configuration**: works out of the box with Spring Boot 3 — no hand-written configuration classes required
 
 Requirements: Java 21+, Spring Boot 3.x.
+
+## dinghai-file-storage
+
+The unified file-storage adapter supports local disk and MinIO. Application code depends on the `FileStorage` contract and can switch providers through configuration. The local provider accepts nested keys such as `1/1/1/1.png` and Unicode paths, and uses temporary files plus streaming I/O rather than loading whole objects into memory.
+
+Add the Starter:
+
+```xml
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+Example configuration, with sensitive values injected through the environment:
+
+```yaml
+dinghai:
+  file-storage:
+    provider: local
+    local:
+      root: /var/lib/app/files
+    security:
+      signing-key: ${DINGHAI_FILE_STORAGE_SIGNING_KEY}
+    web:
+      enabled: true
+      path-prefix: /files
+      direct-access: false
+    upload:
+      max-size: 100MB
+```
+
+The Starter registers `/files/upload/{*key}`, `/files/download/{*key}`, and `/files/preview/{*key}` by default. Upload and download URLs can be presigned; download signatures bind the `inline` or `attachment` response disposition. Preview/download responses stream object content and support Content-Type, ETag, Last-Modified, Cache-Control, Expires, 304, and single-range 206/416 responses. Unsigned access is denied by default; direct access requires explicit enablement and an application `FileStorageAccessPolicy`.
+
+MinIO requires `endpoint`, `bucket`, `access-key`, and `secret-key`. Buckets are not created automatically, and there is no automatic fallback between local disk and MinIO. Signing keys, access keys, and full presigned URLs are never written to logs or error responses.
 
 ### Quick Start
 

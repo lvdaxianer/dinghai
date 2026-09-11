@@ -11,6 +11,10 @@ dinghai 是 lvdaxianer 的个人开源基础组件库，从生产项目沉淀、
 | 模块 | 版本 | 说明 |
 | --- | --- | --- |
 | `dinghai-shared-state` | 1.0.0 | 共享状态缓存：Redis/Caffeine 双后端、熔断容错、可观测性、Spring Boot 3 自动装配 |
+| `dinghai-file-storage-core` | 1.0.0 | 后端无关的文件存储契约、对象模型、预签名模型与稳定错误码 |
+| `dinghai-file-storage-local` | 1.0.0 | 本地磁盘适配器，支持中文及多级对象 key、HMAC 预签名和流式读写 |
+| `dinghai-file-storage-minio` | 1.0.0 | 固定 bucket 的 MinIO 适配器与原生预签名能力 |
+| `dinghai-file-storage-spring-boot-starter` | 1.0.0 | 按 provider 自动装配文件存储，并提供本地 Web 预签名端点 |
 
 ## AI Agent Skill
 
@@ -31,6 +35,42 @@ dinghai 是 lvdaxianer 的个人开源基础组件库，从生产项目沉淀、
 - **自动装配**：Spring Boot 3 引入即用，无需手写配置类
 
 要求：Java 21+，Spring Boot 3.x。
+
+## dinghai-file-storage
+
+统一文件存储适配层支持本地磁盘和 MinIO，业务代码依赖 `FileStorage` 契约即可切换后端。Local 支持 `1/1/1/1.png`、中文目录等对象 key，并通过临时文件和流式读写避免把文件整体载入内存。
+
+引入 Starter：
+
+```xml
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+配置示例（敏感值使用环境变量注入）：
+
+```yaml
+dinghai:
+  file-storage:
+    provider: local
+    local:
+      root: /var/lib/app/files
+    security:
+      signing-key: ${DINGHAI_FILE_STORAGE_SIGNING_KEY}
+    web:
+      enabled: true
+      path-prefix: /files
+      direct-access: false
+    upload:
+      max-size: 100MB
+```
+
+Starter 默认注册 `/files/upload/{*key}`、`/files/download/{*key}` 和 `/files/preview/{*key}`。上传和下载 URL 均可预签名；下载签名绑定 `inline` 或 `attachment` 响应模式。预览/下载使用流式响应，并支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304 和单 Range 206/416。无签名访问默认拒绝，直接访问必须显式开启并提供 `FileStorageAccessPolicy`。
+
+MinIO 配置需要 `endpoint`、`bucket`、`access-key` 和 `secret-key`，不自动创建 bucket，也不会在 Local 与 MinIO 之间自动回退。签名密钥、访问密钥和完整签名 URL 不写入日志或错误响应。
 
 ### 快速开始
 

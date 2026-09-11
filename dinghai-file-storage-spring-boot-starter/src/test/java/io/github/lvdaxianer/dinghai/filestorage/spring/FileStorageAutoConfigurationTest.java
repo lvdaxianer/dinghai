@@ -1,6 +1,7 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import org.junit.Rule;
@@ -114,6 +115,8 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(properties.getWeb().isDirectAccess()).isFalse();
                     assertThat(properties.getWeb().getPathPrefix()).isEqualTo("/files");
                     assertThat(properties.getWeb().isEnabled()).isTrue();
+                    assertThat(properties.getUpload().getMaxSize())
+                            .isEqualTo(UploadRequest.DEFAULT_MAX_SIZE_BYTES);
                 });
     }
 
