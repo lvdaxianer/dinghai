@@ -68,7 +68,7 @@ dinghai:
       max-size: 100MB
 ```
 
-The Starter registers `/files/upload/{*key}`, `/files/download/{*key}`, and `/files/preview/{*key}` by default. Upload and download URLs can be presigned; download signatures bind the `inline` or `attachment` response disposition. Preview/download responses stream object content and support Content-Type, ETag, Last-Modified, Cache-Control, Expires, 304, and single-range 206/416 responses. Unsigned access is denied by default; direct access requires explicit enablement and an application `FileStorageAccessPolicy`.
+The Starter registers `/files/upload/{*key}`, `/files/download/{*key}`, and `/files/preview/{*key}` by default. Upload and download URLs can be presigned; download signatures bind the `inline` or `attachment` response disposition. Preview/download responses stream object content and support Content-Type, ETag, Last-Modified, Cache-Control, Expires, 304, and single-range 206/416 responses. Streaming uses a dedicated bounded async executor instead of an unbounded default executor. Unsigned access is denied by default; direct access requires explicit enablement and an application `FileStorageAccessPolicy`.
 
 MinIO requires `endpoint`, `bucket`, `access-key`, and `secret-key`. Buckets are not created automatically, and there is no automatic fallback between local disk and MinIO. Signing keys, access keys, and full presigned URLs are never written to logs or error responses.
 

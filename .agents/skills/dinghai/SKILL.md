@@ -86,7 +86,7 @@ sharedStateCache.getAndExpire(sessionKey, CacheExpiry.after(Duration.ofMinutes(3
 - **对象 key**：支持 `1/1/1/1.png` 和 `用户资料/头像.png`；拒绝绝对路径、`..`、反斜杠和控制字符。
 - **Provider**：`local` 使用 `local.root`；`minio` 使用固定 bucket 的 `endpoint`、`bucket`、`access-key`、`secret-key`。
 - **安全默认值**：最大上传大小为 100 MB；本地签名密钥必须由环境变量或部署配置注入；Web 默认启用 `/files`，但 `direct-access=false`，无签名请求拒绝。
-- **Web**：Local 的预签名地址使用 `/files/upload/{*key}`、`/files/download/{*key}`、`/files/preview/{*key}`；下载强制 `attachment`，预览强制 `inline`，并支持 ETag、304、Cache-Control 与单 Range。
+- **Web**：Local 的预签名地址使用 `/files/upload/{*key}`、`/files/download/{*key}`、`/files/preview/{*key}`；下载强制 `attachment`，预览强制 `inline`，支持 ETag、304、Cache-Control 与单 Range，并使用独立有界异步执行器承载流式响应。
 - **保密**：不要记录或返回 signing key、MinIO access/secret key、token、完整预签名 URL 或请求体。
 
 ### 最小配置
