@@ -61,6 +61,17 @@ public class FileStorageAutoConfigurationTest {
                 });
     }
 
+    /** MinIO provider 也应注册后端中立的受控读取端点和专用执行器。 */
+    @Test
+    public void shouldRegisterWebReadEndpointForMinioProvider() {
+        contextRunner.withPropertyValues(minioProperties())
+                .run(context -> {
+                    assertThat(context).hasSingleBean(FileStorageWebController.class);
+                    assertThat(context).hasSingleBean(FileStorageWebMvcConfiguration.class);
+                    assertThat(context).hasBean("fileStorageWebTaskExecutor");
+                });
+    }
+
     /**
      * 未知 provider 必须在容器启动时失败。
      *

@@ -77,24 +77,20 @@ public class FileStorageAutoConfiguration {
     }
 
     /**
-     * 为 local provider 注册受签名保护的 Web 文件端点。
+     * 为已配置 provider 注册受签名保护的 Web 文件端点。
      *
      * @param fileStorage 已装配文件存储
      * @param authorizer 直接访问授权器
-     * @return 本地文件端点控制器
+     * @return 文件端点控制器
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
     @Bean
-    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "local")
     @ConditionalOnProperty(name = "dinghai.file-storage.web.enabled", havingValue = "true",
             matchIfMissing = true)
     public FileStorageWebController fileStorageWebController(FileStorage fileStorage,
                                                               FileStorageDirectAccessAuthorizer authorizer) {
-        if (fileStorage instanceof LocalFileStorageAdapter localStorage) {
-            return new FileStorageWebController(localStorage, authorizer, Clock.systemUTC());
-        }
-        throw invalidConfiguration("local file storage web endpoint is unavailable", null);
+        return new FileStorageWebController(fileStorage, authorizer, Clock.systemUTC());
     }
 
     /**
@@ -106,7 +102,6 @@ public class FileStorageAutoConfiguration {
      */
     @Bean(name = "fileStorageWebTaskExecutor")
     @ConditionalOnMissingBean(name = "fileStorageWebTaskExecutor")
-    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "local")
     @ConditionalOnProperty(name = "dinghai.file-storage.web.enabled", havingValue = "true",
             matchIfMissing = true)
     public ThreadPoolTaskExecutor fileStorageWebTaskExecutor() {
@@ -131,7 +126,6 @@ public class FileStorageAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(FileStorageWebMvcConfiguration.class)
-    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "local")
     @ConditionalOnProperty(name = "dinghai.file-storage.web.enabled", havingValue = "true",
             matchIfMissing = true)
     public FileStorageWebMvcConfiguration fileStorageWebMvcConfiguration(
