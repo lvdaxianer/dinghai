@@ -11,7 +11,7 @@
 
     <name>dinghai-parent</name>
     <description>dinghai - lvdaxianer 的开源基础组件库（定海神针，稳住你的状态）</description>
-    <url>https://github.com/lvdaxianer/dinghai</url>
+    <url>https://gitee.com/lvdaxianer/dinghai</url>
 
     <!-- Maven Central 发布要求的项目元数据 -->
     <licenses>
@@ -28,9 +28,9 @@
         </developer>
     </developers>
     <scm>
-        <connection>scm:git:git://github.com/lvdaxianer/dinghai.git</connection>
-        <developerConnection>scm:git:ssh://git@github.com:lvdaxianer/dinghai.git</developerConnection>
-        <url>https://github.com/lvdaxianer/dinghai</url>
+        <connection>scm:git:https://gitee.com/lvdaxianer/dinghai.git</connection>
+        <developerConnection>scm:git:git@gitee.com:lvdaxianer/dinghai.git</developerConnection>
+        <url>https://gitee.com/lvdaxianer/dinghai</url>
     </scm>
 
     <modules>
