@@ -30,11 +30,11 @@
 
 ## 5. Spring Boot Starter 与后端路由
 
-- [ ] 5.1 TDD：先添加属性绑定/校验和自动装配测试，覆盖 provider local/minio、未知 provider、缺失生产签名密钥、仅注册一个主 Bean 和 direct access 默认关闭
-- [ ] 5.2 实现 `FileStorageProperties`、provider 路由、条件 Bean、启动 fail-fast 校验和 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`
-- [ ] 5.3 TDD：先添加 `FileStorageAccessPolicy` 测试，覆盖策略允许/拒绝下载、预览、上传及无策略时 direct access 拒绝
-- [ ] 5.4 实现可选 `FileStorageAccessPolicy` 扩展点、`web.enabled`、默认 `/files` 与可配置 `path-prefix`；Controller 只转发，不记录业务日志
-- [ ] 5.5 运行 starter focused tests 与 `mvn -pl dinghai-file-storage-spring-boot-starter -am test`
+- [x] 5.1 TDD：先添加属性绑定/校验和自动装配测试，覆盖 provider local/minio、未知 provider、缺失生产签名密钥、仅注册一个主 Bean 和 direct access 默认关闭
+- [x] 5.2 实现 `FileStorageProperties`、provider 路由、条件 Bean、启动 fail-fast 校验和 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`
+- [x] 5.3 TDD：先添加 `FileStorageAccessPolicy` 测试，覆盖策略允许/拒绝下载、预览、上传及无策略时 direct access 拒绝
+- [x] 5.4 实现可选 `FileStorageAccessPolicy` 扩展点、`web.enabled`、默认 `/files` 与可配置 `path-prefix`；Controller 只转发，不记录业务日志
+- [x] 5.5 运行 starter focused tests 与 `mvn -pl dinghai-file-storage-spring-boot-starter -am test`
 
 ## 6. Web 预签名、预览与 HTTP 缓存
 
