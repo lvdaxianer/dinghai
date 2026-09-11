@@ -88,7 +88,8 @@
 - Modify: `README_EN.md`
 - Modify: `openspec/specs/file-storage/spec.md`
 - Modify: `openspec/specs/file-storage-web-access/spec.md`
+- Create: `openspec/specs/file-storage-offline-migration/spec.md`
 
-- [ ] Update managed environment template with placeholder stable ID key, migration roots, and non-local cache root; run project-hygiene checks and secret-leak scan.
+- [ ] Update managed environment template with placeholder stable ID key, migration roots, and cache settings; document that only Local/disk caching is off by default while every non-Local provider is on by default, with an explicit switch available; run project-hygiene checks and secret-leak scan.
 - [ ] Document logical alias consistency, key rotation invalidation, read URLs, migration directory workflow, completed/failed behavior, and no-HTTP large-file transfer.
 - [ ] Synchronize specs, run `openspec validate add-stable-file-access-migration --strict`, `mvn test`, review the full diff, then archive and commit.

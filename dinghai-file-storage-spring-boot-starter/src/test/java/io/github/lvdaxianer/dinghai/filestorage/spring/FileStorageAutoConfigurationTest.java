@@ -4,6 +4,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -84,6 +85,63 @@ public class FileStorageAutoConfigurationTest {
     public void shouldEnableDiskCacheByDefaultForNonLocalProvider() {
         contextRunner.withPropertyValues(minioProperties())
                 .run(context -> assertThat(context).hasSingleBean(ProviderFileReadCache.class));
+    }
+
+    /** 本地 provider 显式开启缓存后应创建二级缓存。 */
+    @Test
+    public void shouldEnableDiskCacheForLocalProviderWhenExplicitlyEnabled() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.cache.enabled=true")
+                .run(context -> assertThat(context).hasSingleBean(ProviderFileReadCache.class));
+    }
+
+    /** 非本地 provider 显式关闭缓存后不得创建二级缓存。 */
+    @Test
+    public void shouldDisableDiskCacheForNonLocalProviderWhenExplicitlyDisabled() {
+        contextRunner.withPropertyValues(minioProperties())
+                .withPropertyValues("dinghai.file-storage.cache.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(ProviderFileReadCache.class));
+    }
+
+    /** 显式启用迁移后自动装配应提供迁移服务所需的 Jackson 编解码器。 */
+    @Test
+    public void shouldProvideObjectMapperForMigrationService() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.migration.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(ObjectMapper.class);
+                    assertThat(context).hasSingleBean(FileStorageMigrationService.class);
+                });
+    }
+
+    /** 未显式启用时不得暴露数据迁移服务或管理端点。 */
+    @Test
+    public void shouldDisableMigrationByDefault() {
+        contextRunner.withPropertyValues(localProperties())
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(FileStorageMigrationService.class);
+                    assertThat(context).doesNotHaveBean(FileStorageMigrationController.class);
+                });
+    }
+
+    /** 启用迁移但未提供宿主授权策略时不得注册管理接口。 */
+    @Test
+    public void shouldNotExposeMigrationControllerWithoutAccessPolicy() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.migration.enabled=true")
+                .run(context -> assertThat(context)
+                        .doesNotHaveBean(FileStorageMigrationController.class));
+    }
+
+    /** 启用迁移且宿主提供授权策略时应注册管理接口。 */
+    @Test
+    public void shouldExposeMigrationControllerWithAccessPolicy() {
+        contextRunner.withBean(FileStorageMigrationAccessPolicy.class,
+                        () -> (principal, operation) -> true)
+                .withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.migration.enabled=true")
+                .run(context -> assertThat(context)
+                        .hasSingleBean(FileStorageMigrationController.class));
     }
 
     /**
@@ -227,7 +285,11 @@ public class FileStorageAutoConfigurationTest {
                 "dinghai.file-storage.local.root=" + storageRoot(),
                 "dinghai.file-storage.security.signing-key=test-signing-key",
                 "dinghai.file-storage.storage-alias=documents",
-                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b"
+                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
+                "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
+                "dinghai.file-storage.migration.import-root=" + migrationRoot("import"),
+                "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
+                "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
         };
     }
 
@@ -246,7 +308,11 @@ public class FileStorageAutoConfigurationTest {
                 "dinghai.file-storage.minio.access-key=test-access-key",
                 "dinghai.file-storage.minio.secret-key=test-secret-key",
                 "dinghai.file-storage.storage-alias=documents",
-                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b"
+                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
+                "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
+                "dinghai.file-storage.migration.import-root=" + migrationRoot("import"),
+                "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
+                "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
         };
     }
 
@@ -259,5 +325,10 @@ public class FileStorageAutoConfigurationTest {
      */
     private String storageRoot() {
         return temporaryFolder.getRoot().toPath().toString();
+    }
+
+    /** 返回本次测试可用的迁移根目录。 */
+    private String migrationRoot(String name) {
+        return temporaryFolder.getRoot().toPath().resolve(name).toString();
     }
 }

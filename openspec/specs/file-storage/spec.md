@@ -7,7 +7,7 @@
 ## Requirements
 
 ### Requirement: 后端中立的文件存储契约
-组件 SHALL 在 `dinghai-file-storage-core` 提供不含供应商 SDK 类型的 `FileStorage` 契约，支持对象覆盖写入、流式读取、元数据查询、存在判断、幂等删除、预签名上传和预签名下载。读取和元数据查询不存在对象时 MUST 返回 `Optional.empty()`；删除不存在对象时 MUST 返回 `false`；写入相同 key 时 MUST 覆盖既有对象。MinIO 预签名 POST 上传 MUST 在 `PresignedUpload.formFields` 返回服务端 policy 所要求的固定 bucket、对象 key、内容类型、缓存策略及 SDK 生成的签名字段；调用方提交全部表单字段时，服务端 MUST 能验证该 policy。
+组件 SHALL 在 `dinghai-file-storage-core` 提供不含供应商 SDK 类型的 `FileStorage` 契约，支持对象覆盖写入、流式读取、元数据查询、存在判断、幂等删除、预签名上传和预签名下载，以及可关闭的惰性对象枚举。读取和元数据查询不存在对象时 MUST 返回 `Optional.empty()`；删除不存在对象时 MUST 返回 `false`；写入相同 key 时 MUST 覆盖既有对象。MinIO 预签名 POST 上传 MUST 在 `PresignedUpload.formFields` 返回服务端 policy 所要求的固定 bucket、对象 key、内容类型、缓存策略及 SDK 生成的签名字段；调用方提交全部表单字段时，服务端 MUST 能验证该 policy。逻辑 storage alias MUST 与 provider、bucket 和磁盘根目录分离，使后端迁移不改变逻辑对象引用。
 
 #### Scenario: 通过统一契约覆盖并读取对象
 - **WHEN** 调用方通过 `FileStorage` 将对象写入一个 key 后再读取该 key
@@ -20,6 +20,10 @@
 #### Scenario: 提交 MinIO 预签名 POST 表单
 - **WHEN** 调用方使用 MinIO 适配器为对象生成预签名 POST 上传并提交返回的全部表单字段和文件内容
 - **THEN** 表单包含 bucket、key、内容类型、缓存策略与 SDK 签名字段，且 MinIO 接受上传并保存匹配的对象元数据
+
+#### Scenario: 惰性枚举对象
+- **WHEN** 迁移服务遍历包含大量对象的 provider
+- **THEN** 枚举逐项提供统一元数据且在关闭前不需要将全部 key 或元数据加载到内存
 
 ### Requirement: 安全且 Unicode 兼容的对象 key
 组件 SHALL 允许 UTF-8 中文和多级相对对象 key，并在任何存储、读取、删除和 URL 签名操作前用同一规则规范化和验证。key MUST 拒绝空值、绝对路径、空路径段、`.`、`..`、反斜杠、NUL 与控制字符；完整 key UTF-8 长度 MUST 不超过 1024 bytes，单路径段 MUST 不超过 255 bytes。URL 解码后的 key MUST 再次验证。

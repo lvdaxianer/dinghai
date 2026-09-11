@@ -3,13 +3,16 @@ package io.github.lvdaxianer.dinghai.filestorage.spring;
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.RemoveBucketArgs;
 import io.minio.RemoveObjectArgs;
 import org.junit.Assume;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -48,6 +51,60 @@ public class MinioStableFileReadIntegrationTest {
     private static final String SECRET_KEY = "DINGHAI_FILE_STORAGE_MINIO_SECRET_KEY";
     /** 固定测试时间。 */
     private static final Instant NOW = Instant.parse("2026-09-11T08:00:00Z");
+    /** 端到端迁移用的本地目录。 */
+    @Rule
+    public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
+    /**
+     * Local 导出包导入 MinIO 后必须保持稳定 ID 并可读取私有对象。
+     *
+     * @throws Exception 创建、迁移、读取和清理临时资源失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    @Test
+    public void shouldImportLocalPackageToMinioWithUnchangedStableId() throws Exception {
+        Assume.assumeTrue(Boolean.parseBoolean(System.getenv(ENABLED)));
+        MinioClient client = client();
+        String bucket = temporaryBucket();
+        ObjectKey key = ObjectKey.of("1/1/1/private.txt");
+        byte[] content = "local-to-minio".getBytes(StandardCharsets.UTF_8);
+        Path root = temporaryFolder.getRoot().toPath();
+        LocalFileStorageAdapter local = new LocalFileStorageAdapter(root.resolve("local"),
+                "local-signing-key".getBytes(StandardCharsets.UTF_8));
+        local.put(new UploadRequest(key, new ByteArrayInputStream(content), content.length,
+                "text/plain", new CacheControl("private, max-age=60")));
+        FileStorageMigrationService exporter = new FileStorageMigrationService(local, "documents",
+                root.resolve("exports"), new com.fasterxml.jackson.databind.ObjectMapper());
+        Path packagePath = exporter.exportPackage("release-001");
+        Path importRoot = root.resolve("imports");
+        Files.createDirectories(importRoot);
+        Files.move(packagePath, importRoot.resolve("release-001"));
+        client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+        try {
+            MinioFileStorageAdapter minio = new MinioFileStorageAdapter(client, bucket, endpoint());
+            FileStorageMigrationService importer = new FileStorageMigrationService(minio, "documents",
+                    root.resolve("unused-export"), new com.fasterxml.jackson.databind.ObjectMapper());
+            importer.importPackage("release-001", importRoot, root.resolve("completed"),
+                    root.resolve("failed"));
+            StableFileAccessService stableAccess = new StableFileAccessService("documents",
+                    "stable-file-id-test-key-material-32b".getBytes(StandardCharsets.UTF_8));
+            String payload = stableAccess.identifier(key).substring("v1.".length());
+            MockMvc mockMvc = webClient(minio, stableAccess);
+
+            MvcResult started = mockMvc.perform(get("/files/read/v1/preview/" + payload))
+                    .andExpect(request().asyncStarted()).andReturn();
+
+            mockMvc.perform(asyncDispatch(started)).andExpect(status().isOk())
+                    .andExpect(header().string("Content-Disposition",
+                            org.hamcrest.Matchers.containsString("inline")))
+                    .andExpect(header().string("Cache-Control", "private, max-age=60"))
+                    .andExpect(content().string("local-to-minio"));
+        } finally {
+            client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(key.value()).build());
+            client.removeBucket(RemoveBucketArgs.builder().bucket(bucket).build());
+        }
+    }
 
     /**
      * 私有 MinIO 对象应通过稳定预览地址内联流式返回。

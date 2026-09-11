@@ -34,8 +34,10 @@
 - `StableFileAccessService` 负责从 `FileReference` 生成/解析 ID；Web Controller
   仅接受已解析对象 key，且 stable 路由不调用 `FileStorageAccessPolicy`。保留旧
   `/preview` 与 `/download` 的签名/宿主授权语义以兼容已有调用方。
-- 二级缓存由 `ProviderFileReadCache` 抽象处理。`local` provider 默认关闭缓存；
-  其他 provider 默认开启。缓存文件名由 `storageAlias + ObjectKey` 的 SHA-256
+- 二级缓存由 `ProviderFileReadCache` 抽象处理。缓存开关按 provider 选择：仅
+  `local`（磁盘）provider 默认关闭，所有非 `local` provider 默认开启；显式
+  `cache.enabled` 可覆盖两类默认值。缓存文件名由
+  `storageAlias + ObjectKey` 的 SHA-256
   生成，sidecar 记录 ETag、长度、最后修改时间和最后访问时间。缓存命中先调用
   provider `stat`，完全一致时以本地文件通道响应；不一致或对象不存在时删除副本。
 - 未命中且对象不超过 `max-object-size` 时，响应线程仍直接读取 provider 流；缓存
