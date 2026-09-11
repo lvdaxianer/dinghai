@@ -1,10 +1,20 @@
 package io.github.lvdaxianer.dinghai.sharedstate;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static io.github.lvdaxianer.dinghai.sharedstate.SharedStateCacheEventListener.BACKEND_SELECTION_EVENT;
+import static io.github.lvdaxianer.dinghai.sharedstate.SharedStateCacheEventListener.CIRCUIT_OPEN_EVENT;
+import static io.github.lvdaxianer.dinghai.sharedstate.SharedStateCacheEventListener.CONSISTENCY_LOSS_EVENT;
+import static io.github.lvdaxianer.dinghai.sharedstate.SharedStateCacheEventListener.FALLBACK_EVENT;
+import static io.github.lvdaxianer.dinghai.sharedstate.SharedStateCacheEventListener.HALF_OPEN_EVENT;
+import static io.github.lvdaxianer.dinghai.sharedstate.SharedStateCacheEventListener.RECOVERY_EVENT;
+import static io.github.lvdaxianer.dinghai.sharedstate.SharedStateCacheEventListener.REDIS_FAILURE_EVENT;
 
 /**
  * 共享状态缓存结构化日志和运行指标收集器。
@@ -38,26 +48,8 @@ final class SharedStateCacheObservability {
     /** Redis 连接配置原因。 */
     private static final String REDIS_CONFIGURED = "configured";
 
-    /** 半开探测事件。 */
-    private static final String HALF_OPEN_EVENT = "half-open";
-
-    /** 后端选择事件。 */
-    private static final String BACKEND_SELECTION_EVENT = "backend-selection";
-
     /** 指标维度分隔符。 */
     private static final String DIMENSION_SEPARATOR = "|";
-
-    /** Redis 失败事件。 */
-    private static final String FAILURE_EVENT = "failure";
-
-    /** 熔断打开事件。 */
-    private static final String CIRCUIT_OPEN_EVENT = "circuit-open";
-
-    /** 降级事件。 */
-    private static final String FALLBACK_EVENT = "fallback";
-
-    /** 一致性损失事件。 */
-    private static final String CONSISTENCY_LOSS_EVENT = "consistency-loss";
 
     /** 熔断阈值原因。 */
     private static final String FAILURE_THRESHOLD = "failure-threshold";
@@ -104,6 +96,9 @@ final class SharedStateCacheObservability {
     /** 带维度指标计数器。 */
     private final Map<String, AtomicLong> dimensions = new ConcurrentHashMap<>(16);
 
+    /** 事件订阅监听器。 */
+    private final List<SharedStateCacheEventListener> listeners = new CopyOnWriteArrayList<>();
+
     /**
      * 使用默认 SLF4J 日志创建可观测组件。
      *
@@ -126,6 +121,19 @@ final class SharedStateCacheObservability {
     }
 
     /**
+     * 注册七类运行事件的订阅监听器。
+     *
+     * <p>监听器在对应结构化日志输出之后回调，避免监听器异常导致既有日志丢失。</p>
+     *
+     * @param listener 事件监听器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    void addEventListener(SharedStateCacheEventListener listener) {
+        listeners.add(java.util.Objects.requireNonNull(listener, "listener"));
+    }
+
+    /**
      * 记录无 Redis 的本地模式。
      *
      * @author lvdaxianer@yeah.net
@@ -135,6 +143,7 @@ final class SharedStateCacheObservability {
         backendSelected(CAFFEINE_BACKEND, REDIS_NOT_CONFIGURED);
         logger.warn("{} backend={}, reason={}", LOG_PREFIX, CAFFEINE_BACKEND,
                 REDIS_NOT_CONFIGURED);
+        listeners.forEach(listener -> listener.onEvent(BACKEND_SELECTION_EVENT));
     }
 
     /**
@@ -146,6 +155,7 @@ final class SharedStateCacheObservability {
     void redisSelected() {
         backendSelected(REDIS_BACKEND, REDIS_CONFIGURED);
         logger.info("{} backend={}, reason={}", LOG_PREFIX, REDIS_BACKEND, REDIS_CONFIGURED);
+        listeners.forEach(listener -> listener.onEvent(BACKEND_SELECTION_EVENT));
     }
 
     /**
@@ -162,6 +172,7 @@ final class SharedStateCacheObservability {
         logger.warn("{} backend={}, namespace={}, policy={}, result={}, reason={}",
                 LOG_PREFIX, CAFFEINE_BACKEND, key.namespace().name(),
                 key.namespace().fallbackPolicy(), LOCAL_ONLY_RESULT, REDIS_NOT_CONFIGURED);
+        listeners.forEach(listener -> listener.onEvent(CONSISTENCY_LOSS_EVENT));
     }
 
     /**
@@ -175,10 +186,11 @@ final class SharedStateCacheObservability {
     void redisFailure(CacheKey<?> key, RuntimeException exception) {
         redisFailures.incrementAndGet();
         incrementDimension(key, new MetricDimension(
-                FAILURE_EVENT, REDIS_BACKEND, exception.getClass().getSimpleName()));
+                REDIS_FAILURE_EVENT, REDIS_BACKEND, exception.getClass().getSimpleName()));
         logger.warn("{} backend={}, namespace={}, policy={}, result={}, reason={}",
                 LOG_PREFIX, REDIS_BACKEND, key.namespace().name(), key.namespace().fallbackPolicy(),
-                FAILURE_EVENT, exception.getClass().getSimpleName());
+                REDIS_FAILURE_EVENT, exception.getClass().getSimpleName());
+        listeners.forEach(listener -> listener.onEvent(REDIS_FAILURE_EVENT));
     }
 
     /**
@@ -195,6 +207,7 @@ final class SharedStateCacheObservability {
                 CIRCUIT_OPEN_EVENT, REDIS_BACKEND, FAILURE_THRESHOLD));
         logger.warn("{} circuit={}, namespace={}, failures={}",
                 LOG_PREFIX, OPEN_STATE, key.namespace().name(), failures);
+        listeners.forEach(listener -> listener.onEvent(CIRCUIT_OPEN_EVENT));
     }
 
     /**
@@ -210,6 +223,7 @@ final class SharedStateCacheObservability {
                 HALF_OPEN_EVENT, REDIS_BACKEND, PROBE_DUE));
         logger.info("{} circuit={}, namespace={}", LOG_PREFIX, HALF_OPEN_EVENT,
                 key.namespace().name());
+        listeners.forEach(listener -> listener.onEvent(HALF_OPEN_EVENT));
     }
 
     /**
@@ -224,12 +238,17 @@ final class SharedStateCacheObservability {
         incrementDimension(key, new MetricDimension(
                 FALLBACK_EVENT, CAFFEINE_BACKEND, REDIS_UNAVAILABLE));
         // 临时状态本地降级会丢失跨节点一致性，需要独立计量。
-        if (key.namespace().fallbackPolicy() == NamespaceFallbackPolicy.STATE_FALLBACK) {
+        boolean consistencyLoss = key.namespace().fallbackPolicy() == NamespaceFallbackPolicy.STATE_FALLBACK;
+        if (consistencyLoss) {
             consistencyLosses.incrementAndGet();
         }
         logger.warn("{} backend={}, namespace={}, policy={}, result={}, reason={}",
                 LOG_PREFIX, CAFFEINE_BACKEND, key.namespace().name(),
                 key.namespace().fallbackPolicy(), FALLBACK_EVENT, REDIS_UNAVAILABLE);
+        listeners.forEach(listener -> listener.onEvent(FALLBACK_EVENT));
+        if (consistencyLoss) {
+            listeners.forEach(listener -> listener.onEvent(CONSISTENCY_LOSS_EVENT));
+        }
     }
 
     /**
@@ -242,6 +261,7 @@ final class SharedStateCacheObservability {
         recoveries.incrementAndGet();
         logger.info("{} circuit={}, backend={}, localMirror={}", LOG_PREFIX,
                 CLOSED_STATE, REDIS_BACKEND, INVALIDATED_MIRROR);
+        listeners.forEach(listener -> listener.onEvent(RECOVERY_EVENT));
     }
 
     /**

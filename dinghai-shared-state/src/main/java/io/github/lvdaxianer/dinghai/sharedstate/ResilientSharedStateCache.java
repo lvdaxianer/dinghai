@@ -315,6 +315,17 @@ public final class ResilientSharedStateCache implements SharedStateCache {
     }
 
     /**
+     * 注册七类运行事件的订阅监听器，供标准可观测性集成递增指标。
+     *
+     * @param listener 事件监听器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    void addEventListener(SharedStateCacheEventListener listener) {
+        execution.addEventListener(listener);
+    }
+
+    /**
      * Redis 比较更新成功时镜像本地值。
      *
      * @param key 类型化缓存键
