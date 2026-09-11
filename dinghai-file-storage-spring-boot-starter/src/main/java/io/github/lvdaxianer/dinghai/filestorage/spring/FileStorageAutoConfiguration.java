@@ -77,6 +77,26 @@ public class FileStorageAutoConfiguration {
     }
 
     /**
+     * 创建稳定文件 ID 的生成与解析服务。
+     *
+     * @param properties 已绑定的文件存储属性
+     * @return 稳定文件读取服务
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public StableFileAccessService stableFileAccessService(FileStorageProperties properties) {
+        String storageAlias = requireText(properties.getStorageAlias(), "storage alias");
+        String key = requireText(properties.getSecurity().getStableIdKey(), "stable ID key");
+        try {
+            return new StableFileAccessService(storageAlias, key.getBytes(StandardCharsets.UTF_8));
+        } catch (IllegalArgumentException exception) {
+            throw invalidConfiguration("stable file access configuration is invalid", exception);
+        }
+    }
+
+    /**
      * 为已配置 provider 注册受签名保护的 Web 文件端点。
      *
      * @param fileStorage 已装配文件存储
@@ -89,8 +109,9 @@ public class FileStorageAutoConfiguration {
     @ConditionalOnProperty(name = "dinghai.file-storage.web.enabled", havingValue = "true",
             matchIfMissing = true)
     public FileStorageWebController fileStorageWebController(FileStorage fileStorage,
-                                                              FileStorageDirectAccessAuthorizer authorizer) {
-        return new FileStorageWebController(fileStorage, authorizer, Clock.systemUTC());
+                                                              FileStorageDirectAccessAuthorizer authorizer,
+                                                              StableFileAccessService stableAccess) {
+        return new FileStorageWebController(fileStorage, authorizer, Clock.systemUTC(), stableAccess);
     }
 
     /**
@@ -216,5 +237,13 @@ public class FileStorageAutoConfiguration {
      */
     private FileStorageException invalidConfiguration(String message, Throwable cause) {
         return new FileStorageException(FileStorageErrorCode.INVALID_CONFIGURATION, message, cause);
+    }
+
+    /** 读取并校验不可为空的安全配置文本。 */
+    private String requireText(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw invalidConfiguration(name + " is required", null);
+        }
+        return value;
     }
 }

@@ -1,6 +1,10 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
+import io.github.lvdaxianer.dinghai.filestorage.core.FileReference;
+import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
+import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
@@ -15,6 +19,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -57,6 +63,8 @@ public class FileStorageWebControllerTest {
 
     /** MVC 测试客户端。 */
     private MockMvc mockMvc;
+    /** 稳定文件读取 ID 编解码器。 */
+    private StableFileAccessService stableAccess;
 
     /**
      * 创建带默认拒绝访问策略的端点。
@@ -71,8 +79,10 @@ public class FileStorageWebControllerTest {
                 SIGNING_KEY, 1024L, java.util.Set.of(), Duration.ofHours(1L), clock, "/files");
         write(ObjectKey.of("documents/readme.txt"), "hello", "text/plain",
                 new CacheControl("public, max-age=60"));
+        stableAccess = new StableFileAccessService("documents",
+                "stable-file-id-test-key-material-32b".getBytes(StandardCharsets.UTF_8));
         FileStorageWebController controller = new FileStorageWebController(storage,
-                new FileStorageDirectAccessAuthorizer(false, null), clock);
+                new FileStorageDirectAccessAuthorizer(false, null), clock, stableAccess);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
     }
@@ -203,6 +213,71 @@ public class FileStorageWebControllerTest {
                 .andExpect(header().string("Content-Range", "bytes */5"));
     }
 
+    /** 稳定读取地址不带认证主体也可预览、下载和按范围读取私有对象。 */
+    @Test
+    public void shouldReadPrivateObjectThroughStableIdWithoutPrincipal() throws Exception {
+        String identifier = stableAccess.identifier(ObjectKey.of("documents/readme.txt"));
+        String payload = identifier.substring("v1.".length());
+
+        MvcResult readStarted = mockMvc.perform(get("/files/read/v1/" + payload))
+                .andExpect(request().asyncStarted()).andReturn();
+        mockMvc.perform(asyncDispatch(readStarted)).andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("inline")))
+                .andExpect(content().string("hello"));
+        MvcResult previewStarted = mockMvc.perform(get("/files/read/v1/preview/" + payload)
+                        .header("Range", "bytes=1-3"))
+                .andExpect(request().asyncStarted()).andReturn();
+        mockMvc.perform(asyncDispatch(previewStarted)).andExpect(status().isPartialContent())
+                .andExpect(header().string("Content-Range", "bytes 1-3/5"))
+                .andExpect(content().string("ell"));
+        MvcResult downloadStarted = mockMvc.perform(get("/files/read/v1/download/" + payload))
+                .andExpect(request().asyncStarted()).andReturn();
+        mockMvc.perform(asyncDispatch(downloadStarted)).andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("attachment")));
+    }
+
+    /** 稳定读取地址应按当前 ETag 返回 304，且篡改 ID 不得触发对象读取。 */
+    @Test
+    public void shouldSupportNotModifiedAndRejectTamperedStableId() throws Exception {
+        String identifier = stableAccess.identifier(ObjectKey.of("documents/readme.txt"));
+        String payload = identifier.substring("v1.".length());
+        MvcResult initialStarted = mockMvc.perform(get("/files/read/v1/" + payload))
+                .andExpect(request().asyncStarted()).andReturn();
+        MvcResult initial = mockMvc.perform(asyncDispatch(initialStarted)).andExpect(status().isOk())
+                .andReturn();
+        String etag = initial.getResponse().getHeader("ETag");
+
+        mockMvc.perform(get("/files/read/v1/" + payload).header("If-None-Match", etag))
+                .andExpect(status().isNotModified());
+        char replacement = identifier.endsWith("A") ? 'B' : 'A';
+        mockMvc.perform(get("/files/read/v1/" + payload.substring(0, payload.length() - 1)
+                        + replacement))
+                .andExpect(status().isBadRequest());
+    }
+
+    /** 稳定读取仅使用通用存储契约，不调用宿主直接访问授权策略。 */
+    @Test
+    public void shouldReadThroughProviderNeutralStorageWithoutHostAuthorization() throws Exception {
+        InMemoryFileStorage provider = new InMemoryFileStorage("remote");
+        FileStorageAccessPolicy rejectingPolicy = (principal, key, operation) -> {
+            throw new AssertionError("stable read must not call host authorization");
+        };
+        StableFileAccessService access = new StableFileAccessService("documents",
+                "stable-file-id-test-key-material-32b".getBytes(StandardCharsets.UTF_8));
+        FileStorageWebController controller = new FileStorageWebController(provider,
+                new FileStorageDirectAccessAuthorizer(true, rejectingPolicy), Clock.fixed(NOW, ZoneOffset.UTC),
+                access);
+        MockMvc providerMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new FileStorageExceptionHandler()).build();
+        String payload = access.identifier(ObjectKey.of("reports/remote.txt")).substring("v1.".length());
+
+        MvcResult started = providerMvc.perform(get("/files/read/v1/" + payload))
+                .andExpect(request().asyncStarted()).andReturn();
+
+        providerMvc.perform(asyncDispatch(started)).andExpect(status().isOk())
+                .andExpect(content().string("remote"));
+    }
+
     /**
      * 创建预签名下载请求。
      *
@@ -265,5 +340,69 @@ public class FileStorageWebControllerTest {
             }
         }
         throw new AssertionError("missing query parameter");
+    }
+
+    /** 仅实现读取所需能力的远程 provider 测试替身。 */
+    private static final class InMemoryFileStorage implements FileStorage {
+        /** 对象内容。 */
+        private final byte[] content;
+        /** 对象元数据。 */
+        private final ObjectMetadata metadata;
+
+        /** 创建固定的远程对象。 */
+        private InMemoryFileStorage(String content) {
+            this.content = content.getBytes(StandardCharsets.UTF_8);
+            metadata = new ObjectMetadata(ObjectKey.of("reports/remote.txt"), this.content.length,
+                    "text/plain", "remote-etag", NOW, CacheControl.privateNoCache());
+        }
+
+        /** 读取匹配 key 的对象流。 */
+        @Override
+        public Optional<DownloadObject> get(ObjectKey key) {
+            return metadata.key().equals(key) ? Optional.of(new DownloadObject(
+                    new ByteArrayInputStream(content), metadata)) : Optional.empty();
+        }
+
+        /** 返回匹配 key 的对象元数据。 */
+        @Override
+        public Optional<ObjectMetadata> stat(ObjectKey key) {
+            return metadata.key().equals(key) ? Optional.of(metadata) : Optional.empty();
+        }
+
+        /** 不支持读取测试之外的写入能力。 */
+        @Override
+        public ObjectMetadata put(UploadRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        /** 判断对象是否存在。 */
+        @Override
+        public boolean exists(ObjectKey key) {
+            return stat(key).isPresent();
+        }
+
+        /** 不支持删除。 */
+        @Override
+        public boolean delete(ObjectKey key) {
+            throw new UnsupportedOperationException();
+        }
+
+        /** 枚举唯一对象。 */
+        @Override
+        public Stream<ObjectMetadata> list() {
+            return Stream.of(metadata);
+        }
+
+        /** 不支持预签名上传。 */
+        @Override
+        public PresignedUpload presignUpload(PresignUploadRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        /** 不支持预签名下载。 */
+        @Override
+        public PresignedDownload presignDownload(PresignDownloadRequest request) {
+            throw new UnsupportedOperationException();
+        }
     }
 }
