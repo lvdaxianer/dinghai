@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /** 基于本地磁盘的流式文件存储适配器。 */
 public final class LocalFileStorageAdapter implements FileStorage {
@@ -159,6 +160,25 @@ public final class LocalFileStorageAdapter implements FileStorage {
             throw failure(FileStorageErrorCode.STORAGE_UNAVAILABLE,
                     "local object delete failed", exception);
         }
+    }
+
+    /** 惰性枚举根目录中的普通对象，关闭流时释放目录遍历句柄。 */
+    @Override
+    public Stream<ObjectMetadata> list() {
+        try {
+            Path root = paths.root();
+            return Files.walk(root).filter(this::isRegularObjectFile).map(root::relativize)
+                    .map(Path::toString).map(value -> value.replace(java.io.File.separatorChar, '/'))
+                    .map(ObjectKey::of).map(key -> stat(key).orElseThrow());
+        } catch (IOException exception) {
+            throw failure(FileStorageErrorCode.STORAGE_UNAVAILABLE,
+                    "local object listing failed", exception);
+        }
+    }
+
+    /** 判断目录项是否为不跟随符号链接的普通对象文件。 */
+    private boolean isRegularObjectFile(Path path) {
+        return Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS);
     }
 
     /** 生成本地预签名上传地址。 */

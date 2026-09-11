@@ -12,6 +12,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.PresignedUpload;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.minio.GetObjectArgs;
 import io.minio.GetPresignedObjectUrlArgs;
+import io.minio.ListObjectsArgs;
 import io.minio.MinioClient;
 import io.minio.PostPolicy;
 import io.minio.PutObjectArgs;
@@ -20,6 +21,7 @@ import io.minio.StatObjectArgs;
 import io.minio.StatObjectResponse;
 import io.minio.errors.ErrorResponseException;
 import io.minio.http.Method;
+import io.minio.messages.Item;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -29,6 +31,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 /** 使用固定 bucket 的 MinIO 文件存储适配器。 */
 public final class MinioFileStorageAdapter implements FileStorage {
@@ -84,6 +88,14 @@ public final class MinioFileStorageAdapter implements FileStorage {
         catch (Exception exception) { throw MinioExceptionMapper.map(exception); }
     }
 
+    /** 惰性枚举固定 bucket 中的对象元数据。 */
+    @Override public Stream<ObjectMetadata> list() {
+        Iterable<io.minio.Result<Item>> results = client.listObjects(ListObjectsArgs.builder()
+                .bucket(bucket).recursive(true).build());
+        return StreamSupport.stream(results.spliterator(), false).filter(this::isObject)
+                .map(this::objectKey).map(this::requiredMetadata);
+    }
+
     /** 生成绑定对象、类型和长度的原生 POST policy。 */
     @Override public PresignedUpload presignUpload(PresignUploadRequest request) {
         try {
@@ -116,6 +128,25 @@ public final class MinioFileStorageAdapter implements FileStorage {
     private static ObjectMetadata metadata(ObjectKey key, StatObjectResponse stat) {
         String cache = stat.headers().get("Cache-Control");
         return new ObjectMetadata(key, stat.size(), stat.contentType(), stat.etag(), stat.lastModified().toInstant(), cache == null ? CacheControl.privateNoCache() : new CacheControl(cache));
+    }
+    /** 判断列举结果是否为可迁移的普通对象。 */
+    private boolean isObject(io.minio.Result<Item> result) {
+        try {
+            Item item = result.get();
+            return !item.isDir() && !item.isDeleteMarker();
+        } catch (Exception exception) { throw MinioExceptionMapper.map(exception); }
+    }
+
+    /** 从列举结果提取经过统一校验的对象 key。 */
+    private ObjectKey objectKey(io.minio.Result<Item> result) {
+        try { return ObjectKey.of(result.get().objectName()); }
+        catch (Exception exception) { throw MinioExceptionMapper.map(exception); }
+    }
+
+    /** 查询完整元数据，确保离线迁移保留内容类型和缓存策略。 */
+    private ObjectMetadata requiredMetadata(ObjectKey key) {
+        return stat(key).orElseThrow(() -> MinioExceptionMapper.map(
+                new IllegalStateException("listed object disappeared")));
     }
     private static String requireText(String value, String name) { if (value == null || value.isBlank()) throw new IllegalArgumentException(name + " must not be blank"); return value; }
 }

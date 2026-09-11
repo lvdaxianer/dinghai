@@ -2,6 +2,7 @@ package io.github.lvdaxianer.dinghai.filestorage.minio;
 
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
+import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignedDownload;
@@ -9,10 +10,16 @@ import io.github.lvdaxianer.dinghai.filestorage.core.PresignedUpload;
 import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MinioClient;
 import io.minio.PostPolicy;
+import io.minio.Result;
+import io.minio.StatObjectArgs;
+import io.minio.StatObjectResponse;
+import io.minio.messages.Item;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertNotNull;
@@ -98,6 +105,33 @@ public class MinioFileStorageAdapterTest {
                 GetPresignedObjectUrlArgs.class);
         verify(client).getPresignedObjectUrl(arguments.capture());
         assertEquals(io.minio.http.Method.GET, arguments.getValue().method());
+    }
+
+    /** 枚举时通过对象查询保留完整元数据，并保持递归列举。 */
+    @Test
+    public void listsCompleteObjectMetadataLazily() throws Exception {
+        MinioClient client = mock(MinioClient.class);
+        Item item = mock(Item.class);
+        StatObjectResponse response = mock(StatObjectResponse.class);
+        Instant lastModified = Instant.parse("2026-09-11T00:00:00Z");
+        when(item.objectName()).thenReturn("reports/monthly.pdf");
+        when(item.isDir()).thenReturn(false);
+        when(item.isDeleteMarker()).thenReturn(false);
+        when(client.listObjects(any())).thenReturn(List.of(new Result<>(item)));
+        when(client.statObject(any(StatObjectArgs.class))).thenReturn(response);
+        when(response.size()).thenReturn(1024L);
+        when(response.contentType()).thenReturn("application/pdf");
+        when(response.etag()).thenReturn("etag-1");
+        when(response.lastModified()).thenReturn(lastModified.atZone(java.time.ZoneOffset.UTC));
+        when(response.headers()).thenReturn(okhttp3.Headers.of("Cache-Control", "public, max-age=60"));
+
+        List<ObjectMetadata> objects = adapter(client).list().toList();
+
+        assertEquals(1, objects.size());
+        assertEquals("reports/monthly.pdf", objects.getFirst().key().value());
+        assertEquals("application/pdf", objects.getFirst().contentType());
+        assertEquals(new CacheControl("public, max-age=60"), objects.getFirst().cacheControl());
+        verify(client).statObject(any(StatObjectArgs.class));
     }
 
     private static MinioFileStorageAdapter adapter() {
