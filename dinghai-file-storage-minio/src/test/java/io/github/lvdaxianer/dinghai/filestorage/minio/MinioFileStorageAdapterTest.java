@@ -13,6 +13,7 @@ import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
+import java.util.Map;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertEquals;
@@ -60,9 +61,8 @@ public class MinioFileStorageAdapterTest {
     @Test
     public void createsConstrainedPostPolicy() throws Exception {
         MinioClient client = mock(MinioClient.class);
-        when(client.getPresignedPostFormData(any(PostPolicy.class))).thenReturn(java.util.Map.of(
-                "key", "用户/头像.png", "Content-Type", "image/png",
-                "Cache-Control", "public, max-age=60", "x-amz-signature", "signature"));
+        when(client.getPresignedPostFormData(any(PostPolicy.class))).thenReturn(Map.of(
+                "x-amz-algorithm", "AWS4-HMAC-SHA256", "x-amz-signature", "signature"));
         MinioFileStorageAdapter adapter = adapter(client);
 
         PresignedUpload result = adapter.presignUpload(new PresignUploadRequest(
@@ -71,8 +71,10 @@ public class MinioFileStorageAdapterTest {
 
         assertEquals("POST", result.method());
         assertEquals("public, max-age=60", result.requiredHeaders().get("Cache-Control"));
+        assertEquals("uploads", result.formFields().get("bucket"));
         assertEquals("用户/头像.png", result.formFields().get("key"));
         assertEquals("image/png", result.formFields().get("Content-Type"));
+        assertEquals("public, max-age=60", result.formFields().get("Cache-Control"));
         assertTrue(result.formFields().containsKey("x-amz-signature"));
         verify(client).getPresignedPostFormData(any(PostPolicy.class));
     }

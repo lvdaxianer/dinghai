@@ -24,6 +24,7 @@ import io.minio.http.Method;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -92,8 +93,13 @@ public final class MinioFileStorageAdapter implements FileStorage {
             policy.addEqualsCondition("Content-Type", request.contentType());
             policy.addEqualsCondition("Cache-Control", request.cacheControl().value());
             policy.addContentLengthRangeCondition(0, request.maxSizeBytes());
+            Map<String, String> formFields = new HashMap<>(client.getPresignedPostFormData(policy));
+            formFields.put("bucket", bucket);
+            formFields.put("key", request.key().value());
+            formFields.put("Content-Type", request.contentType());
+            formFields.put("Cache-Control", request.cacheControl().value());
             return new PresignedUpload(endpoint + "/" + bucket, "POST", expires,
-                    Map.of("Cache-Control", request.cacheControl().value()), client.getPresignedPostFormData(policy));
+                    Map.of("Cache-Control", request.cacheControl().value()), formFields);
         } catch (Exception exception) { throw MinioExceptionMapper.map(exception); }
     }
 
