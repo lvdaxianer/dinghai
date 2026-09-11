@@ -36,11 +36,13 @@ public final class LocalFileStorageAdapter implements FileStorage {
     private static final String DEFAULT_CONTENT_TYPE = "application/octet-stream";
     /** 本地预签名 URL 的默认最长有效期。 */
     public static final Duration DEFAULT_MAXIMUM_PRESIGN_EXPIRY = Duration.ofHours(1);
+    private static final String DEFAULT_PATH_PREFIX = "/files";
     private final LocalObjectPathResolver paths;
     private final LocalMetadataStore metadataStore;
     private final LocalFileStorageSigner signer;
     private final long maxSizeBytes;
     private final Set<String> contentTypeWhitelist;
+    private final String pathPrefix;
 
     /** 使用默认 100 MB 上限创建本地适配器。 */
     public LocalFileStorageAdapter(Path root, byte[] signingKey) {
@@ -57,6 +59,14 @@ public final class LocalFileStorageAdapter implements FileStorage {
     public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes,
                                    Set<String> contentTypeWhitelist,
                                    Duration maximumPresignExpiry, Clock clock) {
+        this(root, signingKey, maxSizeBytes, contentTypeWhitelist, maximumPresignExpiry, clock,
+                DEFAULT_PATH_PREFIX);
+    }
+
+    /** 使用指定 Web 路径前缀创建本地适配器。 */
+    public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes,
+                                   Set<String> contentTypeWhitelist,
+                                   Duration maximumPresignExpiry, Clock clock, String pathPrefix) {
         if (maxSizeBytes < 0) {
             throw new IllegalArgumentException("max size must be non-negative");
         }
@@ -66,6 +76,7 @@ public final class LocalFileStorageAdapter implements FileStorage {
         this.maxSizeBytes = maxSizeBytes;
         this.contentTypeWhitelist = Set.copyOf(Objects.requireNonNull(
                 contentTypeWhitelist, "contentTypeWhitelist"));
+        this.pathPrefix = LocalFileStorageSigner.validatePathPrefix(pathPrefix);
     }
 
     /** 写入或覆盖对象，并以临时文件和原子移动完成替换。 */
@@ -154,14 +165,26 @@ public final class LocalFileStorageAdapter implements FileStorage {
     @Override
     public PresignedUpload presignUpload(PresignUploadRequest request) {
         validatePresignUpload(request);
-        return signer.presignUpload(request, "/files");
+        return signer.presignUpload(request, pathPrefix);
     }
 
     /** 生成本地预签名下载地址。 */
     @Override
     public PresignedDownload presignDownload(PresignDownloadRequest request) {
         Objects.requireNonNull(request, "request");
-        return signer.presignDownload(request, "/files");
+        return signer.presignDownload(request, pathPrefix);
+    }
+
+    /** 验证本地预签名上传请求。 */
+    public void verifyPresignedUpload(PresignUploadRequest request, Instant expiresAt,
+                                      String signature, Instant now) {
+        signer.verifyUpload(request, expiresAt, signature, now);
+    }
+
+    /** 验证本地预签名下载或预览请求。 */
+    public void verifyPresignedDownload(PresignDownloadRequest request, Instant expiresAt,
+                                        String signature, Instant now) {
+        signer.verifyDownload(request, expiresAt, signature, now);
     }
 
     private ObjectMetadata writeObject(UploadRequest request, Path target, InputStream content)

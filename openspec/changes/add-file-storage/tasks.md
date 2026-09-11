@@ -38,12 +38,12 @@
 
 ## 6. Web 预签名、预览与 HTTP 缓存
 
-- [ ] 6.1 TDD：先添加本地端点测试，覆盖签名上传/下载/预览、默认无签名拒绝、inline/attachment、中文 URL 编码、过期拒绝和最大上传限制
-- [ ] 6.2 实现 `/files/upload/{*key}`、`/files/download/{*key}`、`/files/preview/{*key}` 端点及签名验证；处理流式请求、Content-Type 和稳定 HTTP 错误响应
-- [ ] 6.3 TDD：先添加缓存和范围请求测试，覆盖 ETag、Last-Modified、Cache-Control、Expires、If-None-Match/If-Modified-Since 304、单字节 Range 206/416
-- [ ] 6.4 实现 HTTP/CDN 缓存头、条件请求和单范围流式响应；默认 `private, max-age=0`，公开/immutable 只接受显式策略
-- [ ] 6.5 按 logging-boundaries 检查 HTTP 日志：不在 Controller 打业务日志，不记录 token/签名/完整 URL/请求体；确认异常包含安全上下文但不泄密
-- [ ] 6.6 运行 `mvn -pl dinghai-file-storage-spring-boot-starter -am test` 与端点集成测试，确认无内存全量缓存和无阻塞无界线程池
+- [x] 6.1 TDD：先添加本地端点测试，覆盖签名上传/下载/预览、默认无签名拒绝、inline/attachment、中文 URL 编码、过期拒绝和最大上传限制
+- [x] 6.2 实现 `/files/upload/{*key}`、`/files/download/{*key}`、`/files/preview/{*key}` 端点及签名验证；处理流式请求、Content-Type 和稳定 HTTP 错误响应
+- [x] 6.3 TDD：先添加缓存和范围请求测试，覆盖 ETag、Last-Modified、Cache-Control、Expires、If-None-Match/If-Modified-Since 304、单字节 Range 206/416
+- [x] 6.4 实现 HTTP/CDN 缓存头、条件请求和单范围流式响应；默认 `private, max-age=0`，公开/immutable 只接受显式策略
+- [x] 6.5 按 logging-boundaries 检查 HTTP 日志：不在 Controller 打业务日志，不记录 token/签名/完整 URL/请求体；确认异常包含安全上下文但不泄密
+- [x] 6.6 运行 `mvn -pl dinghai-file-storage-spring-boot-starter -am test` 与端点集成测试，确认无内存全量缓存和无阻塞无界线程池
 
 ## 7. 文档、集成验证与审计
 
