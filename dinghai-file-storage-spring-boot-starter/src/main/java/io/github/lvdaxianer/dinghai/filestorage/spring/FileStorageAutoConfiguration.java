@@ -11,6 +11,7 @@ import java.time.Clock;
 import java.util.Optional;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
@@ -65,6 +66,40 @@ public class FileStorageAutoConfiguration {
     }
 
     /**
+     * 为 local provider 注册受签名保护的 Web 文件端点。
+     *
+     * @param fileStorage 已装配文件存储
+     * @param authorizer 直接访问授权器
+     * @return 本地文件端点控制器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Bean
+    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "local")
+    @ConditionalOnProperty(name = "dinghai.file-storage.web.enabled", havingValue = "true",
+            matchIfMissing = true)
+    public FileStorageWebController fileStorageWebController(FileStorage fileStorage,
+                                                              FileStorageDirectAccessAuthorizer authorizer) {
+        if (fileStorage instanceof LocalFileStorageAdapter localStorage) {
+            return new FileStorageWebController(localStorage, authorizer, Clock.systemUTC());
+        }
+        throw invalidConfiguration("local file storage web endpoint is unavailable", null);
+    }
+
+    /**
+     * 注册文件端点的稳定异常映射。
+     *
+     * @return 文件存储异常处理器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public FileStorageExceptionHandler fileStorageExceptionHandler() {
+        return new FileStorageExceptionHandler();
+    }
+
+    /**
      * 创建本地磁盘适配器。
      *
      * @param properties 已绑定的文件存储属性
@@ -83,7 +118,8 @@ public class FileStorageAutoConfiguration {
         return new LocalFileStorageAdapter(properties.getLocal().getRoot(),
                 signingKey.getBytes(StandardCharsets.UTF_8), properties.getUpload().getMaxSize(),
                 properties.getUpload().getContentTypeWhitelist(),
-                properties.getSecurity().getMaximumPresignExpiry(), Clock.systemUTC());
+                properties.getSecurity().getMaximumPresignExpiry(), Clock.systemUTC(),
+                properties.getWeb().getPathPrefix());
     }
 
     /**

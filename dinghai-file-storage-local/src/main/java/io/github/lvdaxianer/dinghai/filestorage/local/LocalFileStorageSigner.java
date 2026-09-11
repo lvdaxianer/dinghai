@@ -62,7 +62,9 @@ public final class LocalFileStorageSigner {
         Instant expiresAt = expiry(request.expiresIn());
         String payload = downloadPayload(request, expiresAt);
         String signature = sign(payload);
-        String url = buildUrl(pathPrefix, "download", request.key(),
+        String operation = request.disposition() == PresignDownloadRequest.ResponseDisposition.INLINE
+                ? "preview" : "download";
+        String url = buildUrl(pathPrefix, operation, request.key(),
                 "expires=" + expiresAt.getEpochSecond(),
                 "disposition=" + request.disposition().name().toLowerCase(),
                 "cacheControl=" + encode(request.cacheControl().value()),
@@ -154,7 +156,7 @@ public final class LocalFileStorageSigner {
 
     private static String buildUrl(String pathPrefix, String operation, ObjectKey key,
                                    String... parameters) {
-        String prefix = normalizePrefix(pathPrefix);
+        String prefix = validatePathPrefix(pathPrefix);
         String encodedKey = encodeKey(key);
         return prefix + "/" + operation + "/" + encodedKey + "?" + String.join("&", parameters);
     }
@@ -165,7 +167,7 @@ public final class LocalFileStorageSigner {
                 .orElseThrow(LocalFileStorageSigner::invalidPresign);
     }
 
-    private static String normalizePrefix(String pathPrefix) {
+    static String validatePathPrefix(String pathPrefix) {
         if (pathPrefix == null || pathPrefix.isBlank() || pathPrefix.indexOf('?') >= 0
                 || pathPrefix.indexOf('#') >= 0 || pathPrefix.indexOf('\n') >= 0
                 || pathPrefix.indexOf('\r') >= 0) {
