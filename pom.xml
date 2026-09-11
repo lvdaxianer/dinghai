@@ -13,6 +13,26 @@
     <description>dinghai - lvdaxianer 的开源基础组件库（定海神针，稳住你的状态）</description>
     <url>https://github.com/lvdaxianer/dinghai</url>
 
+    <!-- Maven Central 发布要求的项目元数据 -->
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+        </license>
+    </licenses>
+    <developers>
+        <developer>
+            <id>lvdaxianer</id>
+            <name>lvdaxianer</name>
+            <email>lvdaxianer@yeah.net</email>
+        </developer>
+    </developers>
+    <scm>
+        <connection>scm:git:git://github.com/lvdaxianer/dinghai.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com:lvdaxianer/dinghai.git</developerConnection>
+        <url>https://github.com/lvdaxianer/dinghai</url>
+    </scm>
+
     <modules>
         <module>dinghai-shared-state</module>
     </modules>
@@ -31,6 +51,10 @@
         <mockito.version>4.11.0</mockito.version>
 
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+        <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
+        <maven-javadoc-plugin.version>3.8.0</maven-javadoc-plugin.version>
+        <maven-gpg-plugin.version>3.2.4</maven-gpg-plugin.version>
+        <central-publishing-plugin.version>0.7.0</central-publishing-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -88,4 +112,72 @@
             </plugins>
         </pluginManagement>
     </build>
+
+    <!-- 发布配置：仅在显式启用 release profile 时生成 sources/javadoc jar、GPG 签名并对接 Central Portal -->
+    <profiles>
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <!-- 源码 jar，Maven Central 强制要求 -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>${maven-source-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- javadoc jar，Maven Central 强制要求；项目注释为中文，关闭 doclint 避免严格 HTML 校验误报 -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>${maven-javadoc-plugin.version}</version>
+                        <configuration>
+                            <doclint>none</doclint>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- GPG 签名，Maven Central 强制要求；本地验证可用 -Dgpg.skip=true 跳过 -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>${maven-gpg-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- Central Portal 发布插件，凭据取自 settings.xml 中 id 为 central 的 server -->
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>${central-publishing-plugin.version}</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>false</autoPublish>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
