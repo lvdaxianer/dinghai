@@ -41,9 +41,9 @@
 
 ## 7. Maven Central 发布配置（features/✅CHG-002-T7--发布配置补齐）
 
-- [ ] 7.1 父 pom 增加 licenses/developers/scm/url 元数据
-- [ ] 7.2 release profile：sources/javadoc/gpg/central-publishing 插件
-- [ ] 7.3 验证 `mvn -q -Prelease -DskipTests -Dgpg.skip=true package` 产物齐全；README 记录发布前置条件
+- [x] 7.1 父 pom 增加 licenses/developers/scm/url 元数据
+- [x] 7.2 release profile：sources/javadoc/gpg/central-publishing 插件
+- [x] 7.3 验证 `mvn -q -Prelease -DskipTests -Dgpg.skip=true package` 产物齐全；README 记录发布前置条件
 
 ## 8. Caffeine 3.x 升级（features/✅CHG-002-T8--Caffeine版本升级）
 

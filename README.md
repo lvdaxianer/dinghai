@@ -235,6 +235,20 @@ mvn test -Ddinghai.redis.contract-test=true
 | `dinghai.redis.contract-sentinel-username`（空） | Sentinel ACL 用户名 |
 | `dinghai.redis.contract-sentinel-password`（空） | Sentinel ACL 密码 |
 
+## 发布
+
+日常构建（`mvn test` / `mvn package`）不触发签名与发布插件。发布到 Maven Central 使用 `release` profile：
+
+```bash
+mvn -Prelease clean deploy
+```
+
+发布前置条件：
+
+- 本机已配置 GPG 签名密钥（发布产物强制签名；本地验证产物可用 `-Dgpg.skip=true` 跳过）；
+- `settings.xml` 中配置 id 为 `central` 的 server，携带 Central Portal 的用户令牌；
+- 发布插件为 `central-publishing-maven-plugin`，`autoPublish=false`，上传后需在 Central Portal 手动确认发布。
+
 ## License
 
 本项目基于 [MIT License](LICENSE) 开源。
