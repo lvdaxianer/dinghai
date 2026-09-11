@@ -57,6 +57,8 @@ public class FileStorageWebController {
     private final FileStorageDirectAccessAuthorizer authorizer;
     /** 当前时间源。 */
     private final Clock clock;
+    /** 稳定文件读取服务。 */
+    private final StableFileAccessService stableAccess;
 
     /**
      * 创建后端中立的文件存储端点。
@@ -69,9 +71,26 @@ public class FileStorageWebController {
      */
     public FileStorageWebController(FileStorage storage,
                                     FileStorageDirectAccessAuthorizer authorizer, Clock clock) {
+        this(storage, authorizer, clock, null);
+    }
+
+    /**
+     * 创建带稳定 ID 读取能力的文件存储端点。
+     *
+     * @param storage 文件存储
+     * @param authorizer 直接访问授权器
+     * @param clock 当前时间源
+     * @param stableAccess 稳定文件读取服务
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    public FileStorageWebController(FileStorage storage,
+                                    FileStorageDirectAccessAuthorizer authorizer, Clock clock,
+                                    StableFileAccessService stableAccess) {
         this.storage = java.util.Objects.requireNonNull(storage, "storage");
         this.authorizer = java.util.Objects.requireNonNull(authorizer, "authorizer");
         this.clock = java.util.Objects.requireNonNull(clock, "clock");
+        this.stableAccess = stableAccess;
     }
 
     /**
@@ -188,6 +207,114 @@ public class FileStorageWebController {
     }
 
     /**
+     * 通过稳定 ID 匿名读取对象，响应为内联预览。
+     *
+     * @param identifier 稳定文件 ID
+     * @param ifNoneMatch 条件 ETag
+     * @param ifModifiedSince 条件修改时间
+     * @param range 单区间字节范围
+     * @return 流式对象响应
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @GetMapping("/read/{identifier}")
+    public ResponseEntity<StreamingResponseBody> stableRead(@PathVariable String identifier,
+                                                              @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
+                                                                      required = false) String ifNoneMatch,
+                                                              @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE,
+                                                                      required = false) String ifModifiedSince,
+                                                              @RequestHeader(value = HttpHeaders.RANGE,
+                                                                      required = false) String range) {
+        return stableRead(identifier, ifNoneMatch, ifModifiedSince, range,
+                PresignDownloadRequest.ResponseDisposition.INLINE);
+    }
+
+    /** 通过稳定 ID 的显式版本路径匿名读取对象。 */
+    @GetMapping("/read/v1/{identifier}")
+    public ResponseEntity<StreamingResponseBody> stableVersionedRead(@PathVariable String identifier,
+                                                                       @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
+                                                                               required = false) String ifNoneMatch,
+                                                                       @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE,
+                                                                               required = false) String ifModifiedSince,
+                                                                       @RequestHeader(value = HttpHeaders.RANGE,
+                                                                               required = false) String range) {
+        return stableVersionedRead(identifier, ifNoneMatch, ifModifiedSince, range,
+                PresignDownloadRequest.ResponseDisposition.INLINE);
+    }
+
+    /**
+     * 通过稳定 ID 匿名预览对象。
+     *
+     * @param identifier 稳定文件 ID
+     * @param ifNoneMatch 条件 ETag
+     * @param ifModifiedSince 条件修改时间
+     * @param range 单区间字节范围
+     * @return 流式对象响应
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @GetMapping("/read/preview/{identifier}")
+    public ResponseEntity<StreamingResponseBody> stablePreview(@PathVariable String identifier,
+                                                                 @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
+                                                                         required = false) String ifNoneMatch,
+                                                                 @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE,
+                                                                         required = false) String ifModifiedSince,
+                                                                 @RequestHeader(value = HttpHeaders.RANGE,
+                                                                         required = false) String range) {
+        return stableRead(identifier, ifNoneMatch, ifModifiedSince, range,
+                PresignDownloadRequest.ResponseDisposition.INLINE);
+    }
+
+    /** 通过稳定 ID 的显式版本路径匿名预览对象。 */
+    @GetMapping("/read/v1/preview/{identifier}")
+    public ResponseEntity<StreamingResponseBody> stableVersionedPreview(@PathVariable String identifier,
+                                                                          @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
+                                                                                  required = false) String ifNoneMatch,
+                                                                          @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE,
+                                                                                  required = false) String ifModifiedSince,
+                                                                          @RequestHeader(value = HttpHeaders.RANGE,
+                                                                                  required = false) String range) {
+        return stableVersionedRead(identifier, ifNoneMatch, ifModifiedSince, range,
+                PresignDownloadRequest.ResponseDisposition.INLINE);
+    }
+
+    /**
+     * 通过稳定 ID 匿名下载对象。
+     *
+     * @param identifier 稳定文件 ID
+     * @param ifNoneMatch 条件 ETag
+     * @param ifModifiedSince 条件修改时间
+     * @param range 单区间字节范围
+     * @return 流式对象响应
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @GetMapping("/read/download/{identifier}")
+    public ResponseEntity<StreamingResponseBody> stableDownload(@PathVariable String identifier,
+                                                                  @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
+                                                                          required = false) String ifNoneMatch,
+                                                                  @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE,
+                                                                          required = false) String ifModifiedSince,
+                                                                  @RequestHeader(value = HttpHeaders.RANGE,
+                                                                          required = false) String range) {
+        return stableRead(identifier, ifNoneMatch, ifModifiedSince, range,
+                PresignDownloadRequest.ResponseDisposition.ATTACHMENT);
+    }
+
+    /** 通过稳定 ID 的显式版本路径匿名下载对象。 */
+    @GetMapping("/read/v1/download/{identifier}")
+    public ResponseEntity<StreamingResponseBody> stableVersionedDownload(@PathVariable String identifier,
+                                                                           @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
+                                                                                   required = false) String ifNoneMatch,
+                                                                           @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE,
+                                                                                   required = false) String ifModifiedSince,
+                                                                           @RequestHeader(value = HttpHeaders.RANGE,
+                                                                                   required = false) String range) {
+        return stableVersionedRead(identifier, ifNoneMatch, ifModifiedSince, range,
+                PresignDownloadRequest.ResponseDisposition.ATTACHMENT);
+    }
+
+    /**
      * 验证读取授权、条件缓存和可选字节范围。
      *
      * @param key 原始对象 key
@@ -210,12 +337,59 @@ public class FileStorageWebController {
                                                          PresignDownloadRequest.ResponseDisposition disposition) {
         ObjectKey objectKey = objectKey(key);
         verifyReadAccess(objectKey, expires, cacheControl, signature, principal, disposition);
-        ObjectMetadata metadata = storage.stat(objectKey).orElseThrow(this::notFound);
+        return readObject(objectKey, ifNoneMatch, ifModifiedSince, range, disposition);
+    }
+
+    /**
+     * 解析稳定 ID 后读取对象，不执行组件用户授权。
+     *
+     * @param identifier 稳定文件 ID
+     * @param ifNoneMatch 条件 ETag
+     * @param ifModifiedSince 条件修改时间
+     * @param range 单区间字节范围
+     * @param disposition 响应处置模式
+     * @return 流式对象响应
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    private ResponseEntity<StreamingResponseBody> stableRead(String identifier, String ifNoneMatch,
+                                                               String ifModifiedSince, String range,
+                                                               PresignDownloadRequest.ResponseDisposition disposition) {
+        return readObject(stableAccess().resolve(identifier), ifNoneMatch, ifModifiedSince, range,
+                disposition);
+    }
+
+    /** 解析显式版本段并创建稳定读取响应。 */
+    private ResponseEntity<StreamingResponseBody> stableVersionedRead(String identifier,
+                                                                        String ifNoneMatch,
+                                                                        String ifModifiedSince,
+                                                                        String range,
+                                                                        PresignDownloadRequest.ResponseDisposition disposition) {
+        return readObject(stableAccess().resolveVersioned("v1", identifier), ifNoneMatch,
+                ifModifiedSince, range, disposition);
+    }
+
+    /**
+     * 按对象元数据创建标准的条件和范围读取响应。
+     *
+     * @param key 已验证对象 key
+     * @param ifNoneMatch 条件 ETag
+     * @param ifModifiedSince 条件修改时间
+     * @param range 单区间字节范围
+     * @param disposition 响应处置模式
+     * @return 流式对象响应
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    private ResponseEntity<StreamingResponseBody> readObject(ObjectKey key, String ifNoneMatch,
+                                                              String ifModifiedSince, String range,
+                                                              PresignDownloadRequest.ResponseDisposition disposition) {
+        ObjectMetadata metadata = storage.stat(key).orElseThrow(this::notFound);
         HttpHeaders headers = responseHeaders(metadata, disposition);
         if (isNotModified(metadata, ifNoneMatch, ifModifiedSince)) {
             return new ResponseEntity<>(null, headers, HttpStatus.NOT_MODIFIED);
         }
-        return rangedResponse(objectKey, metadata, headers, range);
+        return rangedResponse(key, metadata, headers, range);
     }
 
     /**
@@ -494,6 +668,15 @@ public class FileStorageWebController {
             return localStorage;
         }
         throw invalidPresign();
+    }
+
+    /** 获取已配置的稳定文件读取服务。 */
+    private StableFileAccessService stableAccess() {
+        if (stableAccess != null) {
+            return stableAccess;
+        }
+        throw new FileStorageException(FileStorageErrorCode.INVALID_CONFIGURATION,
+                "stable file access is unavailable");
     }
 
     /**

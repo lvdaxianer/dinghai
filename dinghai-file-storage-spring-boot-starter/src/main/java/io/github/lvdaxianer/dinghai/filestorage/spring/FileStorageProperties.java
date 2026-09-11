@@ -18,6 +18,8 @@ public class FileStorageProperties {
 
     /** 存储后端类型。 */
     private FileStorageProvider provider;
+    /** 不随物理后端变动的逻辑存储别名。 */
+    private String storageAlias;
     /** 本地磁盘后端配置。 */
     private final Local local = new Local();
     /** MinIO 后端配置。 */
@@ -49,6 +51,28 @@ public class FileStorageProperties {
      */
     public void setProvider(FileStorageProvider provider) {
         this.provider = provider;
+    }
+
+    /**
+     * 获取逻辑存储别名。
+     *
+     * @return 逻辑存储别名
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    public String getStorageAlias() {
+        return storageAlias;
+    }
+
+    /**
+     * 设置逻辑存储别名。
+     *
+     * @param storageAlias 逻辑存储别名
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    public void setStorageAlias(String storageAlias) {
+        this.storageAlias = storageAlias;
     }
 
     /**
@@ -382,6 +406,8 @@ public class FileStorageProperties {
     public static class Security {
         /** 签名密钥。 */
         private String signingKey;
+        /** 稳定文件 ID 的活动密钥。 */
+        private String stableIdKey;
         /** 最大预签名有效期。 */
         private Duration maximumPresignExpiry = Duration.ofHours(1L);
 
@@ -405,6 +431,28 @@ public class FileStorageProperties {
          */
         public void setSigningKey(String signingKey) {
             this.signingKey = signingKey;
+        }
+
+        /**
+         * 获取稳定文件 ID 的活动密钥。
+         *
+         * @return 稳定文件 ID 密钥
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-11
+         */
+        public String getStableIdKey() {
+            return stableIdKey;
+        }
+
+        /**
+         * 设置稳定文件 ID 的活动密钥。
+         *
+         * @param stableIdKey 稳定文件 ID 密钥
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-11
+         */
+        public void setStableIdKey(String stableIdKey) {
+            this.stableIdKey = stableIdKey;
         }
 
         /**

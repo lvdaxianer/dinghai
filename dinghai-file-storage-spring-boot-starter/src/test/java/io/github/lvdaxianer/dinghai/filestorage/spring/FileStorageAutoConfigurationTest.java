@@ -113,6 +113,28 @@ public class FileStorageAutoConfigurationTest {
                 .run(context -> assertThat(context).hasFailed());
     }
 
+    /** 启用稳定读取时缺少逻辑存储别名必须在启动时失败。 */
+    @Test
+    public void shouldFailFastWhenStableAccessHasNoStorageAlias() {
+        contextRunner.withPropertyValues(
+                        "dinghai.file-storage.provider=local",
+                        "dinghai.file-storage.local.root=" + storageRoot(),
+                        "dinghai.file-storage.security.signing-key=test-signing-key",
+                        "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    /** 启用稳定读取时缺少活动 ID 密钥必须在启动时失败。 */
+    @Test
+    public void shouldFailFastWhenStableAccessHasNoIdKey() {
+        contextRunner.withPropertyValues(
+                        "dinghai.file-storage.provider=local",
+                        "dinghai.file-storage.local.root=" + storageRoot(),
+                        "dinghai.file-storage.security.signing-key=test-signing-key",
+                        "dinghai.file-storage.storage-alias=documents")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
     /**
      * Web 直接访问必须默认关闭。
      *
@@ -189,7 +211,9 @@ public class FileStorageAutoConfigurationTest {
         return new String[]{
                 "dinghai.file-storage.provider=local",
                 "dinghai.file-storage.local.root=" + storageRoot(),
-                "dinghai.file-storage.security.signing-key=test-signing-key"
+                "dinghai.file-storage.security.signing-key=test-signing-key",
+                "dinghai.file-storage.storage-alias=documents",
+                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b"
         };
     }
 
@@ -206,7 +230,9 @@ public class FileStorageAutoConfigurationTest {
                 "dinghai.file-storage.minio.endpoint=http://localhost:9000",
                 "dinghai.file-storage.minio.bucket=test-bucket",
                 "dinghai.file-storage.minio.access-key=test-access-key",
-                "dinghai.file-storage.minio.secret-key=test-secret-key"
+                "dinghai.file-storage.minio.secret-key=test-secret-key",
+                "dinghai.file-storage.storage-alias=documents",
+                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b"
         };
     }
 
