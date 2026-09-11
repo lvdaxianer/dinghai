@@ -16,10 +16,13 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -83,6 +86,46 @@ public class MinioStableFileReadIntegrationTest {
         }
     }
 
+    /**
+     * MinIO 对象首次直通后应异步落盘，远程变更时缓存必须失效。
+     *
+     * @throws Exception 创建、读取和清理临时 bucket 失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldFillAndInvalidateDiskCacheForMinioObject() throws Exception {
+        Assume.assumeTrue(Boolean.parseBoolean(System.getenv(ENABLED)));
+        MinioClient client = client();
+        String bucket = temporaryBucket();
+        ObjectKey key = ObjectKey.of("reports/cache.txt");
+        Path cacheRoot = Files.createTempDirectory("dinghai-minio-cache-");
+        client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+        try {
+            MinioFileStorageAdapter storage = new MinioFileStorageAdapter(client, bucket, endpoint());
+            put(storage, key, "first");
+            ProviderFileReadCache cache = new ProviderFileReadCache(storage, "documents", cacheRoot,
+                    true, 1024L);
+            try (var object = cache.get(key).orElseThrow()) {
+                org.junit.Assert.assertEquals("first", new String(object.stream().readAllBytes(),
+                        StandardCharsets.UTF_8));
+            }
+            cache.awaitIdle(2L, TimeUnit.SECONDS);
+            org.junit.Assert.assertTrue(cache.hasCachedObject(key));
+            put(storage, key, "second");
+
+            try (var object = cache.get(key).orElseThrow()) {
+                org.junit.Assert.assertEquals("second", new String(object.stream().readAllBytes(),
+                        StandardCharsets.UTF_8));
+            }
+            cache.close();
+        } finally {
+            client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(key.value()).build());
+            client.removeBucket(RemoveBucketArgs.builder().bucket(bucket).build());
+            deleteRecursively(cacheRoot);
+        }
+    }
+
     /** 创建连接到用户启动的 Docker MinIO 的客户端。 */
     private MinioClient client() {
         return MinioClient.builder().endpoint(endpoint()).credentials(required(ACCESS_KEY),
@@ -96,6 +139,28 @@ public class MinioStableFileReadIntegrationTest {
                 stableAccess);
         return MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
+    }
+
+    /** 将测试文本写入 MinIO 对象。 */
+    private void put(MinioFileStorageAdapter storage, ObjectKey key, String value) {
+        byte[] content = value.getBytes(StandardCharsets.UTF_8);
+        storage.put(new UploadRequest(key, new ByteArrayInputStream(content), content.length,
+                "text/plain", CacheControl.privateNoCache()));
+    }
+
+    /** 删除测试产生的缓存目录。 */
+    private void deleteRecursively(Path root) throws Exception {
+        if (Files.exists(root)) {
+            try (var paths = Files.walk(root)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (java.io.IOException exception) {
+                        throw new IllegalStateException(exception);
+                    }
+                });
+            }
+        }
     }
 
     /** 返回随机、受 bucket 规则约束的测试 bucket 名称。 */

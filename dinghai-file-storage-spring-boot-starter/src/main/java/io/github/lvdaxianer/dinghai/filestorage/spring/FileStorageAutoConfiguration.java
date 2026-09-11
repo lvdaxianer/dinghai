@@ -16,6 +16,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 /**
@@ -26,6 +27,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  */
 @AutoConfiguration
 @EnableConfigurationProperties(FileStorageProperties.class)
+@EnableScheduling
 public class FileStorageAutoConfiguration {
 
     /** 文件存储 Web 异步核心线程数。 */
@@ -97,6 +99,38 @@ public class FileStorageAutoConfiguration {
     }
 
     /**
+     * 为非本地 provider 创建默认启用的二级磁盘读取缓存。
+     *
+     * @param storage 已装配的远程文件存储
+     * @param properties 已绑定的文件存储属性
+     * @return 读取缓存
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "minio")
+    public ProviderFileReadCache providerFileReadCache(FileStorage storage,
+                                                       FileStorageProperties properties) {
+        FileStorageProperties.Cache cache = properties.getCache();
+        if (cache.getRoot() == null) {
+            throw invalidConfiguration("non-local cache root is required", null);
+        }
+        return new ProviderFileReadCache(storage, properties.getStorageAlias(), cache.getRoot(),
+                cache.isEnabled(), cache.getMaxObjectSize());
+    }
+
+    /** 创建非本地 provider 缓存的午夜清理任务。 */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "minio")
+    public ProviderFileReadCacheCleaner providerFileReadCacheCleaner(ProviderFileReadCache cache,
+                                                                      FileStorageProperties properties) {
+        return new ProviderFileReadCacheCleaner(cache, Clock.systemDefaultZone(),
+                properties.getCache().getIdleTtl());
+    }
+
+    /**
      * 为已配置 provider 注册受签名保护的 Web 文件端点。
      *
      * @param fileStorage 已装配文件存储
@@ -110,8 +144,10 @@ public class FileStorageAutoConfiguration {
             matchIfMissing = true)
     public FileStorageWebController fileStorageWebController(FileStorage fileStorage,
                                                               FileStorageDirectAccessAuthorizer authorizer,
-                                                              StableFileAccessService stableAccess) {
-        return new FileStorageWebController(fileStorage, authorizer, Clock.systemUTC(), stableAccess);
+                                                              StableFileAccessService stableAccess,
+                                                              Optional<ProviderFileReadCache> readCache) {
+        return new FileStorageWebController(fileStorage, authorizer, Clock.systemUTC(), stableAccess,
+                readCache.orElse(null));
     }
 
     /**
