@@ -1,5 +1,6 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
@@ -11,6 +12,7 @@ import java.time.Clock;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -110,6 +112,8 @@ public class FileStorageAutoConfiguration {
     @Bean(destroyMethod = "close")
     @ConditionalOnMissingBean
     @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "minio")
+    @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true",
+            matchIfMissing = true)
     public ProviderFileReadCache providerFileReadCache(FileStorage storage,
                                                        FileStorageProperties properties) {
         FileStorageProperties.Cache cache = properties.getCache();
@@ -120,14 +124,99 @@ public class FileStorageAutoConfiguration {
                 cache.isEnabled(), cache.getMaxObjectSize());
     }
 
+    /** 为本地 provider 在显式开启时创建二级磁盘读取缓存。 */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "local")
+    @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true")
+    public ProviderFileReadCache localProviderFileReadCache(FileStorage storage,
+                                                             FileStorageProperties properties) {
+        FileStorageProperties.Cache cache = properties.getCache();
+        if (cache.getRoot() == null) {
+            throw invalidConfiguration("local cache root is required", null);
+        }
+        return new ProviderFileReadCache(storage, properties.getStorageAlias(), cache.getRoot(),
+                true, cache.getMaxObjectSize());
+    }
+
     /** 创建非本地 provider 缓存的午夜清理任务。 */
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "minio")
+    @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true",
+            matchIfMissing = true)
     public ProviderFileReadCacheCleaner providerFileReadCacheCleaner(ProviderFileReadCache cache,
                                                                       FileStorageProperties properties) {
         return new ProviderFileReadCacheCleaner(cache, Clock.systemDefaultZone(),
                 properties.getCache().getIdleTtl());
+    }
+
+    /** 创建本地 provider 显式启用缓存时的午夜清理任务。 */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "local")
+    @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true")
+    public ProviderFileReadCacheCleaner localProviderFileReadCacheCleaner(
+            ProviderFileReadCache cache, FileStorageProperties properties) {
+        return new ProviderFileReadCacheCleaner(cache, Clock.systemDefaultZone(),
+                properties.getCache().getIdleTtl());
+    }
+
+    /**
+     * 创建服务器目录迁移服务。
+     *
+     * @param storage 当前文件存储 provider
+     * @param properties 已绑定的文件存储属性
+     * @param objectMapper 迁移清单 JSON 编解码器
+     * @return 迁移服务
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(name = "dinghai.file-storage.migration.enabled", havingValue = "true")
+    public FileStorageMigrationService fileStorageMigrationService(FileStorage storage,
+                                                                    FileStorageProperties properties,
+                                                                    ObjectMapper objectMapper) {
+        FileStorageProperties.Migration migration = properties.getMigration();
+        requirePath(migration.getExportRoot(), "migration export root");
+        requirePath(migration.getImportRoot(), "migration import root");
+        requirePath(migration.getCompletedRoot(), "migration completed root");
+        requirePath(migration.getFailedRoot(), "migration failed root");
+        return new FileStorageMigrationService(storage, properties.getStorageAlias(),
+                migration.getExportRoot(), objectMapper);
+    }
+
+    /**
+     * 提供迁移清单所需的默认 JSON 编解码器，允许宿主应用替换。
+     *
+     * @return 默认 JSON 编解码器
+     */
+    @Bean
+    @ConditionalOnMissingBean(ObjectMapper.class)
+    @ConditionalOnProperty(name = "dinghai.file-storage.migration.enabled", havingValue = "true")
+    public ObjectMapper fileStorageMigrationObjectMapper() {
+        return new ObjectMapper();
+    }
+
+    /**
+     * 创建受显式启用和宿主授权保护的服务器目录迁移接口。
+     *
+     * @param migrationService 迁移服务
+     * @param properties 已绑定的文件存储属性
+     * @param accessPolicy 宿主迁移授权策略
+     * @return 迁移管理接口
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean(FileStorageMigrationAccessPolicy.class)
+    @ConditionalOnProperty(name = "dinghai.file-storage.migration.enabled", havingValue = "true")
+    public FileStorageMigrationController fileStorageMigrationController(
+            FileStorageMigrationService migrationService, FileStorageProperties properties,
+            FileStorageMigrationAccessPolicy accessPolicy) {
+        return new FileStorageMigrationController(migrationService, properties, accessPolicy);
     }
 
     /**
@@ -281,5 +370,12 @@ public class FileStorageAutoConfiguration {
             throw invalidConfiguration(name + " is required", null);
         }
         return value;
+    }
+
+    /** 校验迁移目录配置。 */
+    private void requirePath(java.nio.file.Path value, String name) {
+        if (value == null) {
+            throw invalidConfiguration(name + " is required", null);
+        }
     }
 }

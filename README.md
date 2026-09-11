@@ -58,8 +58,10 @@ dinghai:
     provider: local
     local:
       root: /var/lib/app/files
+    storage-alias: documents
     security:
       signing-key: ${DINGHAI_FILE_STORAGE_SIGNING_KEY}
+      stable-id-key: ${DINGHAI_FILE_STORAGE_STABLE_ID_KEY}
     web:
       enabled: true
       path-prefix: /files
@@ -71,6 +73,25 @@ dinghai:
 Starter 默认注册 `/files/upload/{*key}`、`/files/download/{*key}` 和 `/files/preview/{*key}`。上传和下载 URL 均可预签名；下载签名绑定 `inline` 或 `attachment` 响应模式。预览/下载使用流式响应，并支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304 和单 Range 206/416。流式响应使用文件存储专用的有界异步执行器，避免依赖无界默认执行器。无签名访问默认拒绝，直接访问必须显式开启并提供 `FileStorageAccessPolicy`。
 
 MinIO 配置需要 `endpoint`、`bucket`、`access-key` 和 `secret-key`，不自动创建 bucket，也不会在 Local 与 MinIO 之间自动回退。签名密钥、访问密钥和完整签名 URL 不写入日志或错误响应。
+
+私有对象可使用稳定读取 URL：`/files/read/v1/{id}`，预览和下载分别为
+`/files/preview/v1/{id}`、`/files/download/v1/{id}`。`id` 只依赖
+`storage-alias + object key` 与活动 AES-SIV 密钥，因此从 Local 迁移到 MinIO 后保持不变；
+轮换 `stable-id-key` 会使旧 URL 失效。该路由不执行组件内的用户鉴权，嵌入方负责浏览器前的权限控制。
+
+非 Local provider 默认启用经远端 `stat` 校验的二级磁盘读取缓存；仅 Local/磁盘 provider
+默认关闭。未命中且对象不超过 `cache.max-object-size` 时，当前请求直接流式读取，另开第二条
+provider 流异步落盘；每天
+00:00 删除超过 `cache.idle-ttl` 未访问的完整副本。生产环境应显式配置安全的
+`cache.root`，例如 `${DINGHAI_FILE_STORAGE_CACHE_ROOT}`。`cache.enabled` 可显式覆盖默认值：
+对 Local 设置为 `true` 可开启缓存，对非 Local 设置为 `false` 可关闭缓存。
+
+离线迁移只处理服务器目录包，不通过 HTTP 上传大文件。显式设置
+`dinghai.file-storage.migration.enabled=true` 后，配置 `export-root`、`import-root`、
+`completed-root`、`failed-root` 四个目录。导出产生 `manifest.ndjson` 和 `objects/`，内容以
+SHA-256 校验；导入成功后包移动到 completed，失败包及 `errors.ndjson` 移动到 failed。
+管理接口 `/files/migration/export` 与 `/files/migration/import` 仅在宿主提供
+`FileStorageMigrationAccessPolicy` 时注册，策略必须分别授权 `EXPORT` 与 `IMPORT` 操作。
 
 ### 快速开始
 

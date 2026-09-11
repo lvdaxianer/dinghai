@@ -33,6 +33,8 @@ public class FileStorageProperties {
     private final Web web = new Web();
     /** 非本地 provider 读取缓存配置。 */
     private final Cache cache = new Cache();
+    /** 服务器目录迁移配置。 */
+    private final Migration migration = new Migration();
 
     /**
      * 获取后端类型。
@@ -142,6 +144,17 @@ public class FileStorageProperties {
      */
     public Cache getCache() {
         return cache;
+    }
+
+    /**
+     * 获取服务器目录迁移配置。
+     *
+     * @return 服务器目录迁移配置
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    public Migration getMigration() {
+        return migration;
     }
 
     /**
@@ -605,5 +618,134 @@ public class FileStorageProperties {
         public Duration getIdleTtl() { return idleTtl; }
         /** 设置缓存空闲保留时间。 */
         public void setIdleTtl(Duration idleTtl) { this.idleTtl = idleTtl; }
+    }
+
+    /**
+     * 服务器目录迁移包根目录配置。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    public static class Migration {
+        /** 是否启用服务器目录迁移服务和管理接口。 */
+        private boolean enabled;
+        /** 导出包根目录。 */
+        private Path exportRoot;
+        /** 待导入包根目录。 */
+        private Path importRoot;
+        /** 导入成功包根目录。 */
+        private Path completedRoot;
+        /** 导入失败包根目录。 */
+        private Path failedRoot;
+
+        /**
+         * 判断是否启用迁移。
+         *
+         * @return 启用时返回 true
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-12
+         */
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        /**
+         * 设置是否启用迁移。
+         *
+         * @param enabled 是否启用迁移
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-12
+         */
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        /**
+         * 获取导出包根目录。
+         *
+         * @return 导出包根目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-12
+         */
+        public Path getExportRoot() {
+            return exportRoot;
+        }
+
+        /**
+         * 设置导出包根目录。
+         *
+         * @param exportRoot 导出包根目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-12
+         */
+        public void setExportRoot(Path exportRoot) {
+            this.exportRoot = exportRoot;
+        }
+
+        /**
+         * 获取待导入包根目录。
+         *
+         * @return 待导入包根目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-12
+         */
+        public Path getImportRoot() {
+            return importRoot;
+        }
+
+        /**
+         * 设置待导入包根目录。
+         *
+         * @param importRoot 待导入包根目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-12
+         */
+        public void setImportRoot(Path importRoot) {
+            this.importRoot = importRoot;
+        }
+
+        /**
+         * 获取导入成功包根目录。
+         *
+         * @return 导入成功包根目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-12
+         */
+        public Path getCompletedRoot() {
+            return completedRoot;
+        }
+
+        /**
+         * 设置导入成功包根目录。
+         *
+         * @param completedRoot 导入成功包根目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-12
+         */
+        public void setCompletedRoot(Path completedRoot) {
+            this.completedRoot = completedRoot;
+        }
+
+        /**
+         * 获取导入失败包根目录。
+         *
+         * @return 导入失败包根目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-12
+         */
+        public Path getFailedRoot() {
+            return failedRoot;
+        }
+
+        /**
+         * 设置导入失败包根目录。
+         *
+         * @param failedRoot 导入失败包根目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-12
+         */
+        public void setFailedRoot(Path failedRoot) {
+            this.failedRoot = failedRoot;
+        }
     }
 }
