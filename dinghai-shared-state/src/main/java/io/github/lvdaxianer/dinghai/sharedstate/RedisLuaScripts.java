@@ -55,6 +55,27 @@ final class RedisLuaScripts {
             """, String.class);
 
     /**
+     * 原子读取并滑动续期脚本。
+     *
+     * <p>不依赖 Redis 6.2 的 GETEX：读取与 TTL 重置在脚本内原子完成，
+     * 键不存在时不创建键。</p>
+     */
+    static final RedisScript<String> GET_AND_EXPIRE = RedisScript.of("""
+            -- 读取并滑动续期脚本。
+            -- 意图：读取与 TTL 重置必须在服务端原子完成，避免续期窗口内键过期丢失。
+            local value = redis.call('GET', KEYS[1])
+            -- 键不存在时直接返回 nil，不创建键，调用方将其映射为空结果。
+            if not value then return value end
+            -- ARGV[1] 为 '0' 表示续期为永久（PERSIST），非 0 时按毫秒重置过期时间。
+            if ARGV[1] == '0' then
+              redis.call('PERSIST', KEYS[1])
+            else
+              redis.call('PEXPIRE', KEYS[1], ARGV[1])
+            end
+            return value
+            """, String.class);
+
+    /**
      * 兼容 Redis 3.2 的原子读取并删除脚本。
      *
      * <p>旧版 Redis 没有 GETDEL 命令，用脚本模拟同样的原子"消费"语义。</p>

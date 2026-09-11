@@ -179,6 +179,7 @@ boolean swapped = sharedStateCache.compareAndSet(sessionKey,
 | `<T> boolean compareAndSet(CacheKey<T> key, CompareAndSetCommand<T> command)` | 原子比较并更新 |
 | `<T> boolean compareAndDelete(CacheKey<T> key, T expectedValue)` | 值匹配时原子删除 |
 | `<T> Optional<T> getAndSet(CacheKey<T> key, T value, CacheExpiry expiry)` | 原子读取旧值并替换为新值 |
+| `<T> Optional<T> getAndExpire(CacheKey<T> key, CacheExpiry expiry)` | 原子读取原值并把 TTL 重置为给定到期策略（滑动续期）；键不存在时为空且不创建键 |
 | `Optional<CacheExpiry> remainingTtl(CacheKey<?> key)` | 查询剩余 TTL；不存在时为空，永久键为 `eternal()` |
 | `boolean expire(CacheKey<?> key, CacheExpiry expiry)` | 为已有键设置 TTL |
 | `boolean persist(CacheKey<?> key)` | 取消普通命名空间键的 TTL；强制 TTL 命名空间会拒绝 |
@@ -190,11 +191,13 @@ boolean swapped = sharedStateCache.compareAndSet(sessionKey,
 
 注意：原子操作的一致性范围由后端声明，Caffeine 后端仅保证单进程原子性。
 
+接口演进说明：`SharedStateCache` 会随版本新增方法（如 `getOrLoad`、`getAndExpire`）。通过依赖注入使用该接口的代码不受影响；仓库外自行实现该接口的代码在升级后需要补实现新增方法。
+
 `getOrLoad` 提供读穿加载：命中时不调用 loader；未命中时调用 loader 回源并按传入的 `expiry` 写入。loader 不允许返回 null（否则抛 `IllegalArgumentException` 且不写入），其自身抛出的异常直接上抛且不计入熔断失败。Caffeine 后端在单进程内按键合并并发回源（同一键同一时刻 loader 至多执行一次）；Redis 后端按 `get` → loader → `putIfAbsent` → 冲突时重读的顺序执行，并发下以现存值为准，不保证跨进程单飞。
 
 `CacheValue<T>` 将批量写入值和 `CacheExpiry` 绑定。`putAll` 会在写入前校验全部条目的类型和命名空间 TTL 约束，避免调用方参数错误导致部分写入；Redis 后端以单次 pipeline 提交独立键写入，并在提交后逐条校验执行结果，任一条目失败即抛出 `RedisBackendException`（fail-fast），`getAll` 与 `deleteAll` 分别使用原生批量读取和删除命令。注意批量操作不保证原子性，失败后缓存可能处于部分写入状态。
 
-TTL 生命周期中，`remainingTtl` 对不存在键返回空、对永久键返回 `CacheExpiry.eternal()`；`expire` 和 `persist` 仅对已有键成功时返回 `true`。强制 TTL 命名空间不能调用 `persist`，以保证临时安全状态不会变成永久值。
+TTL 生命周期中，`remainingTtl` 对不存在键返回空、对永久键返回 `CacheExpiry.eternal()`；`expire` 和 `persist` 仅对已有键成功时返回 `true`。强制 TTL 命名空间不能调用 `persist`，以保证临时安全状态不会变成永久值。`getAndExpire` 提供滑动续期：原子读取原值并把 TTL 重置为给定到期策略，键不存在时返回空且不创建键；传入 `CacheExpiry.eternal()` 时把临时键续期为永久（强制 TTL 命名空间除外），适合会话类"访问即续期"场景。
 
 ### 测试
 

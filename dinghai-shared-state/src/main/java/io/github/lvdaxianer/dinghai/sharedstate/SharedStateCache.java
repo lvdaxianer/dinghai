@@ -109,6 +109,23 @@ public interface SharedStateCache {
     /** 原子读取旧值并写入新值。 */
     <T> Optional<T> getAndSet(CacheKey<T> key, T value, CacheExpiry expiry);
 
+    /**
+     * 原子读取缓存值并把键的有效期重置为给定到期策略（滑动续期）。
+     *
+     * <p>键不存在时返回空且不创建键；对永久键调用时返回原值并把键转为给定到期策略；
+     * {@code expiry} 为 {@link CacheExpiry#eternal()} 时等效于续期为永久。强制 TTL
+     * 命名空间允许携带正数 TTL 续期，但永久续期仍会被拒绝并抛出
+     * {@link IllegalArgumentException}。</p>
+     *
+     * @param key    类型化缓存键
+     * @param expiry 续期后的到期策略
+     * @param <T>    缓存值类型
+     * @return 续期前的缓存值，键不存在时为空
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    <T> Optional<T> getAndExpire(CacheKey<T> key, CacheExpiry expiry);
+
     /** 查询键的剩余有效期。 */
     Optional<CacheExpiry> remainingTtl(CacheKey<?> key);
 

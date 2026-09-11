@@ -309,6 +309,110 @@ public abstract class SharedStateCacheContract {
     }
 
     /**
+     * getAndExpire 应原子读取原值并把剩余 TTL 重置为新到期策略。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldReadAndResetTtlAtomically() {
+        CacheKey<String> key = stringKey("get-and-expire");
+        cache.put(key, "value", CacheExpiry.after(Duration.ofSeconds(5L)));
+
+        Assert.assertEquals(Optional.of("value"),
+                cache.getAndExpire(key, CacheExpiry.after(Duration.ofSeconds(30L))));
+
+        // 返回原值且键保持可读，剩余 TTL 已被重置为新的到期时长。
+        Assert.assertEquals(Optional.of("value"), cache.get(key));
+        long remainingMillis = cache.remainingTtl(key).orElseThrow().ttl().toMillis();
+        Assert.assertTrue(remainingMillis > Duration.ofSeconds(5L).toMillis());
+    }
+
+    /**
+     * getAndExpire 对不存在的键应返回空且不创建键。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldReturnEmptyAndNotCreateKeyWhenGetAndExpireMisses() {
+        CacheKey<String> key = stringKey("get-and-expire-missing");
+
+        Assert.assertEquals(Optional.empty(),
+                cache.getAndExpire(key, CacheExpiry.after(Duration.ofSeconds(30L))));
+        Assert.assertFalse(cache.exists(key));
+    }
+
+    /**
+     * getAndExpire 应把永久键续期为临时键。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldRenewEternalKeyToExpiring() {
+        CacheKey<String> key = stringKey("get-and-expire-eternal");
+        cache.put(key, "value", ETERNAL);
+
+        Assert.assertEquals(Optional.of("value"),
+                cache.getAndExpire(key, CacheExpiry.after(Duration.ofSeconds(30L))));
+
+        // 永久键被转为临时键，剩余 TTL 为正数。
+        CacheExpiry remaining = cache.remainingTtl(key).orElseThrow();
+        Assert.assertFalse(remaining.isEternal());
+        Assert.assertTrue(remaining.ttl().toMillis() > 0L);
+    }
+
+    /**
+     * getAndExpire 应把普通命名空间的临时键续期为永久键。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldRenewExpiringKeyToEternal() {
+        CacheKey<String> key = stringKey("get-and-expire-to-eternal");
+        cache.put(key, "value", CacheExpiry.after(Duration.ofSeconds(30L)));
+
+        Assert.assertEquals(Optional.of("value"), cache.getAndExpire(key, ETERNAL));
+        Assert.assertTrue(cache.remainingTtl(key).orElseThrow().isEternal());
+    }
+
+    /**
+     * 强制 TTL 命名空间的 getAndExpire 携带正数 TTL 续期合法。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldAllowGetAndExpireWithTtlForTransientNamespace() {
+        CacheKey<String> key = transientStringKey("get-and-expire-renew");
+        cache.put(key, "value", CacheExpiry.after(Duration.ofSeconds(5L)));
+
+        Assert.assertEquals(Optional.of("value"),
+                cache.getAndExpire(key, CacheExpiry.after(Duration.ofSeconds(30L))));
+        Assert.assertTrue(cache.remainingTtl(key).orElseThrow().ttl().toMillis()
+                > Duration.ofSeconds(5L).toMillis());
+    }
+
+    /**
+     * 强制 TTL 命名空间的 getAndExpire 必须先校验再执行，拒绝永久续期。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldRejectEternalGetAndExpireForTransientNamespace() {
+        CacheKey<String> key = transientStringKey("get-and-expire");
+        cache.put(key, "value", CacheExpiry.after(Duration.ofSeconds(30L)));
+
+        Assert.assertThrows(IllegalArgumentException.class,
+                () -> cache.getAndExpire(key, ETERNAL));
+        // 校验先于执行，键保持原有 TTL 未被清除。
+        Assert.assertFalse(cache.remainingTtl(key).orElseThrow().isEternal());
+    }
+
+    /**
      * 批量操作应保留命中结果、独立 TTL 和唯一删除计数。
      *
      * @author lvdaxianer@yeah.net

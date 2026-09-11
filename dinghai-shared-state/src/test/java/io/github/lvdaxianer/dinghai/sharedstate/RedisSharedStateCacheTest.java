@@ -166,6 +166,80 @@ public class RedisSharedStateCacheTest {
     }
 
     /**
+     * 滑动续期应通过服务端 Lua 脚本原子完成读取并重置 TTL。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldRenewTtlWithAtomicRedisScript() {
+        // 步骤 1：构建普通缓存键，并准备脚本执行后返回的信封文本。
+        CacheKey<String> key = keyBuilder.build(CACHE_KEYS, "sliding", String.class);
+        String encoded = codec.encode(CacheEnvelope.of(String.class, "sliding-value"));
+        when(operations.execute(eq(RedisLuaScripts.GET_AND_EXPIRE), eq(List.of(key.value())),
+                eq("30000"))).thenReturn(encoded);
+
+        // 步骤 2：执行滑动续期。
+        Optional<String> result = cache.getAndExpire(key, CacheExpiry.after(Duration.ofSeconds(30L)));
+
+        // 步骤 3：断言返回原值，且 TTL 毫秒参数原样传递给脚本。
+        Assert.assertEquals(Optional.of("sliding-value"), result);
+        verify(operations).execute(eq(RedisLuaScripts.GET_AND_EXPIRE), eq(List.of(key.value())),
+                eq("30000"));
+    }
+
+    /**
+     * 滑动续期脚本未命中键时应返回空。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldReturnEmptyWhenRenewScriptFindsNoKey() {
+        // 步骤 1：模拟脚本对不存在的键返回空。
+        CacheKey<String> key = keyBuilder.build(CACHE_KEYS, "sliding-missing", String.class);
+        when(operations.execute(eq(RedisLuaScripts.GET_AND_EXPIRE), eq(List.of(key.value())),
+                eq("30000"))).thenReturn(null);
+
+        // 步骤 2 与 3：执行滑动续期并断言返回空，不产生解码。
+        Assert.assertEquals(Optional.empty(),
+                cache.getAndExpire(key, CacheExpiry.after(Duration.ofSeconds(30L))));
+    }
+
+    /**
+     * 永久续期应以零 TTL 参数走脚本的 PERSIST 分支。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldPassEternalRenewalAsPersistToScript() {
+        // 步骤 1：构建普通缓存键，模拟脚本以 '0' 参数续期为永久。
+        CacheKey<String> key = keyBuilder.build(CACHE_KEYS, "sliding-eternal", String.class);
+        String encoded = codec.encode(CacheEnvelope.of(String.class, "value"));
+        when(operations.execute(eq(RedisLuaScripts.GET_AND_EXPIRE), eq(List.of(key.value())),
+                eq("0"))).thenReturn(encoded);
+
+        // 步骤 2 与 3：执行永久续期并断言返回原值与脚本参数。
+        Assert.assertEquals(Optional.of("value"), cache.getAndExpire(key, CacheExpiry.eternal()));
+        verify(operations).execute(eq(RedisLuaScripts.GET_AND_EXPIRE), eq(List.of(key.value())),
+                eq("0"));
+    }
+
+    /**
+     * 强制 TTL 命名空间的永久续期应在访问 Redis 前被拒绝。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test(expected = IllegalArgumentException.class)
+    public void shouldRejectEternalGetAndExpireForTransientState() {
+        // 构建强制 TTL 的临时状态键并以永久策略续期，本地校验阶段直接抛出。
+        CacheKey<String> key = keyBuilder.build(STATE_KEYS, "sliding-eternal", String.class);
+        cache.getAndExpire(key, CacheExpiry.eternal());
+    }
+
+    /**
      * Redis TTL 哨兵值应映射为公开到期策略。
      *
      * @author lvdaxianer@yeah.net

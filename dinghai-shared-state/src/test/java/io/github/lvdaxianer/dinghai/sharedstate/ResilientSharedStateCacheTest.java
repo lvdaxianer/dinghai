@@ -419,6 +419,70 @@ public class ResilientSharedStateCacheTest {
     }
 
     /**
+     * Redis 熔断降级时 getAndExpire 应走本地镜像完成滑动续期。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldRenewLocalMirrorWhenRedisGetAndExpireFails() {
+        // 准备：Redis 滑动续期失败，本地镜像已有旧值。
+        when(redis.getAndExpire(eq(cacheKey), any())).thenThrow(redisFailure());
+        caffeine.put(cacheKey, "local", CacheExpiry.eternal());
+
+        // 执行：降级路径下本地镜像完成滑动续期。
+        Optional<String> result = cache.getAndExpire(cacheKey,
+                CacheExpiry.after(Duration.ofSeconds(30L)));
+
+        // 断言：返回本地镜像原值，本地镜像 TTL 被重置，并记录一次降级。
+        Assert.assertEquals(Optional.of("local"), result);
+        Assert.assertEquals(1L, cache.metrics().fallbackCount());
+        Assert.assertTrue(caffeine.remainingTtl(cacheKey).orElseThrow().ttl().toMillis() > 0L);
+    }
+
+    /**
+     * Redis 滑动续期成功时应把返回值和新 TTL 回填到本地镜像。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldMirrorRenewedValueAndTtlAfterSuccessfulRedisGetAndExpire() {
+        // 准备：Redis 续期成功返回原值，本地存在值陈旧的永久镜像。
+        CacheExpiry renewal = CacheExpiry.after(Duration.ofSeconds(60L));
+        when(redis.getAndExpire(eq(cacheKey), any())).thenReturn(Optional.of("remote"));
+        caffeine.put(cacheKey, "stale", CacheExpiry.eternal());
+
+        // 执行：通过容错门面滑动续期。
+        Assert.assertEquals(Optional.of("remote"), cache.getAndExpire(cacheKey, renewal));
+
+        // 断言：请求到达 Redis，本地镜像被回填为 Redis 返回值且 TTL 同步为续期策略。
+        verify(redis).getAndExpire(cacheKey, renewal);
+        Assert.assertEquals(Optional.of("remote"), caffeine.get(cacheKey));
+        Assert.assertTrue(caffeine.remainingTtl(cacheKey).orElseThrow().ttl().toMillis() > 0L);
+    }
+
+    /**
+     * Redis 滑动续期成功时本地镜像缺失也应回填 Redis 返回值。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Test
+    public void shouldBackfillMissingMirrorAfterSuccessfulRedisGetAndExpire() {
+        // 准备：Redis 续期成功返回原值，本地镜像不存在。
+        when(redis.getAndExpire(eq(cacheKey), any())).thenReturn(Optional.of("remote"));
+
+        // 执行：通过容错门面滑动续期。
+        Assert.assertEquals(Optional.of("remote"),
+                cache.getAndExpire(cacheKey, CacheExpiry.after(Duration.ofSeconds(60L))));
+
+        // 断言：缺失的本地镜像被回填为 Redis 返回值且 TTL 已生效。
+        Assert.assertEquals(Optional.of("remote"), caffeine.get(cacheKey));
+        Assert.assertTrue(caffeine.remainingTtl(cacheKey).orElseThrow().ttl().toMillis() > 0L);
+    }
+
+    /**
      * 创建互相等待对方进入的回源加载器，用于强制两个 loader 并发重叠。
      *
      * @param entered 本 loader 进入门闩

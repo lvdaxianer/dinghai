@@ -191,6 +191,24 @@ public final class ResilientSharedStateCache implements SharedStateCache {
                 ignored -> caffeine.put(key, value, localExpiry(key, expiry))));
     }
 
+    /**
+     * 滑动续期并同步本地镜像 TTL，Redis 故障时按命名空间策略降级到本地镜像。
+     *
+     * @param key 类型化缓存键
+     * @param expiry 续期后的到期策略
+     * @param <T> 缓存值类型
+     * @return 续期前的缓存值，键不存在时为空
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Override
+    public <T> Optional<T> getAndExpire(CacheKey<T> key, CacheExpiry expiry) {
+        return execution.execute(key, new SharedStateCacheOperationPlan<>(
+                backend -> backend.getAndExpire(key, expiry),
+                () -> caffeine.getAndExpire(key, localExpiry(key, expiry)),
+                result -> mirrorRenewed(key, expiry, result)));
+    }
+
     @Override
     public Optional<CacheExpiry> remainingTtl(CacheKey<?> key) {
         return execution.execute(key, new SharedStateCacheOperationPlan<>(
@@ -333,6 +351,25 @@ public final class ResilientSharedStateCache implements SharedStateCache {
     private void mirrorExpiry(CacheKey<?> key, CacheExpiry expiry, boolean updated) {
         if (updated) {
             caffeine.expire(key, localExpiry(key, expiry));
+        } else {
+            caffeine.delete(key);
+        }
+    }
+
+    /**
+     * 将 Redis 确认的滑动续期结果回填本地镜像。
+     *
+     * @param key 类型化缓存键
+     * @param expiry 续期后的到期策略
+     * @param result Redis 续期前的缓存值
+     * @param <T> 值类型
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    private <T> void mirrorRenewed(CacheKey<T> key, CacheExpiry expiry, Optional<T> result) {
+        // Redis 命中时用返回值与续期策略回填镜像，同时覆盖镜像缺失和镜像陈旧两种边角。
+        if (result.isPresent()) {
+            caffeine.put(key, result.orElseThrow(), localExpiry(key, expiry));
         } else {
             caffeine.delete(key);
         }
