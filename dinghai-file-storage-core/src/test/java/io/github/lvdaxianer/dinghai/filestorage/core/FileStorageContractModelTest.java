@@ -82,9 +82,21 @@ public class FileStorageContractModelTest {
     @Test
     public void exposesStableErrorCode() {
         FileStorageException exception = new FileStorageException(
-                FileStorageErrorCode.OBJECT_NOT_FOUND, "object missing", new IOException("backend"));
+                FileStorageErrorCode.OBJECT_NOT_FOUND,
+                "object missing at https://minio.example.test/bucket/a.txt?secret-key=top-secret",
+                new IOException("backend"));
         assertEquals(FileStorageErrorCode.OBJECT_NOT_FOUND, exception.errorCode());
-        assertEquals("object missing", exception.getMessage());
+        assertEquals("object missing at [REDACTED_URI]", exception.getMessage());
+    }
+
+    /** 异常消息不得暴露本地绝对路径。 */
+    @Test
+    public void redactsAbsolutePathFromErrorMessage() {
+        FileStorageException exception = new FileStorageException(
+                FileStorageErrorCode.STORAGE_UNAVAILABLE,
+                "cannot read /var/lib/dinghai/files/1/1/1.png",
+                null);
+        assertEquals("cannot read [REDACTED_PATH]", exception.getMessage());
     }
 
     /** 测试用可观测关闭流。 */
