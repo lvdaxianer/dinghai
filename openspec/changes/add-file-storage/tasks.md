@@ -22,11 +22,11 @@
 
 ## 4. MinIO 适配器
 
-- [ ] 4.1 TDD：先添加 MinIO 配置验证和异常映射测试，覆盖必需属性缺失、bucket 不自动创建、不存在对象、认证失败和超时分类
-- [ ] 4.2 实现固定 bucket 的 `MinioFileStorageAdapter`，设置连接/读取/写入超时，映射内容类型、缓存控制、ETag 和最后修改时间
-- [ ] 4.3 TDD：先添加 MinIO 预签名测试，验证 GET URL 与 POST policy 绑定 key、过期时间、大小、内容类型、inline/attachment 和缓存响应参数
-- [ ] 4.4 实现 MinIO 原生预签名上传/下载，并确保 secret/access key、完整签名 URL 和 SDK 原始异常不进入日志或公共错误
-- [ ] 4.5 运行 `mvn -pl dinghai-file-storage-minio -am test`；真实 MinIO/Testcontainers 契约测试仅在显式环境开关启用
+- [x] 4.1 TDD：先添加 MinIO 配置验证和异常映射测试，覆盖必需属性缺失、bucket 不自动创建、不存在对象、认证失败和超时分类
+- [x] 4.2 实现固定 bucket 的 `MinioFileStorageAdapter`，设置连接/读取/写入超时，映射内容类型、缓存控制、ETag 和最后修改时间
+- [x] 4.3 TDD：先添加 MinIO 预签名测试，验证 GET URL 与 POST policy 绑定 key、过期时间、大小、内容类型、inline/attachment 和缓存响应参数
+- [x] 4.4 实现 MinIO 原生预签名上传/下载，并确保 secret/access key、完整签名 URL 和 SDK 原始异常不进入日志或公共错误
+- [x] 4.5 运行 `mvn -pl dinghai-file-storage-minio -am test`；真实 MinIO/Testcontainers 契约测试仅在显式环境开关启用
 
 ## 5. Spring Boot Starter 与后端路由
 
