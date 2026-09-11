@@ -44,7 +44,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <spring-boot.version>3.5.5</spring-boot.version>
-        <caffeine.version>2.9.3</caffeine.version>
+        <caffeine.version>3.1.8</caffeine.version>
         <commons-codec.version>1.15</commons-codec.version>
         <commons-lang3.version>3.12.0</commons-lang3.version>
         <junit.version>4.13.2</junit.version>
@@ -67,7 +67,7 @@
                 <scope>import</scope>
             </dependency>
 
-            <!-- 与抽离来源仓库保持一致的显式钉版，避免抽离夹带行为变化 -->
+            <!-- Caffeine 3.x（Java 11+ 基线）与本项目 Java 21/Boot 3 技术栈对齐，显式钉版避免被动升级 -->
             <dependency>
                 <groupId>com.github.ben-manes.caffeine</groupId>
                 <artifactId>caffeine</artifactId>

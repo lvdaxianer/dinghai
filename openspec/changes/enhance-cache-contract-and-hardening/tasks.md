@@ -47,9 +47,9 @@
 
 ## 8. Caffeine 3.x 升级（features/✅CHG-002-T8--Caffeine版本升级）
 
-- [ ] 8.1 升级 Caffeine 至 3.x 并消除 API 差异
-- [ ] 8.2 全量测试回归（含契约与容错测试）
-- [ ] 8.3 README 依赖说明同步
+- [x] 8.1 升级 Caffeine 至 3.x 并消除 API 差异
+- [x] 8.2 全量测试回归（含契约与容错测试）
+- [x] 8.3 README 依赖说明同步
 
 ## 9. 收尾
 
