@@ -109,6 +109,15 @@ dinghai:
 - `SharedStateCacheHealthProvider#getHealth()` 返回 `SharedStateCacheHealth` 健康快照：`isRedisConfigured`、`circuitState`、`consecutiveFailures`、`activeBackend`、`isDegraded`；
 - `SharedStateCacheMetricsProvider#getMetrics()` 返回 `SharedStateCacheMetrics` 指标快照：`totals` 全局总计与 `dimensionCounts` 按事件/命名空间维度的计数，并提供 `redisFailureCount()`、`circuitOpenCount()`、`fallbackCount()`、`consistencyLossCount()`、`recoveryCount()`、`halfOpenCount()`、`backendSelectionCount()` 等便捷访问方法。
 
+### Micrometer / Actuator 软集成
+
+`micrometer-core` 与 `spring-boot-actuator` 以 optional 软依赖声明，不强制传递给应用；类路径存在对应组件时以下两个自动装配类（同样注册于 `AutoConfiguration.imports`，在 `SharedStateCacheConfiguration` 之后生效）自动启用：
+
+- **Micrometer 指标**（`SharedStateCacheMetricsAutoConfiguration`，条件：类路径存在 `MeterRegistry` 且容器存在其 Bean；应用声明自定义 `SharedStateCacheMetricsBinder` Bean 时默认实现退位）：
+  - `dinghai.cache.circuit.state`（Gauge）：熔断状态，直读健康快照，`CLOSED=0`、`HALF_OPEN=1`、`OPEN=2`；
+  - `dinghai.cache.events`（Counter，按 `event` 标签区分）：七类事件 `failure`、`circuit-open`、`fallback`、`consistency-loss`、`recovery`、`half-open`、`backend-selection`。计数器由可观测组件的事件订阅钩子驱动递增（装配时按指标快照播种一次，此后只随事件递增、不回写）；快照提供器仍是指标的唯一查询入口。
+- **Actuator 健康端点**（`SharedStateCacheHealthAutoConfiguration`，条件：类路径存在 `HealthIndicator`；应用声明同名 Bean 时默认实现退位）：注册名为 `sharedStateCacheHealthIndicator` 的 `HealthIndicator`（健康端点中显示为 `sharedStateCache`）。降级是可工作态，状态始终为 `UP`，details 携带健康快照全部字段：`isRedisConfigured`、`circuitState`、`consecutiveFailures`、`activeBackend`、`isDegraded`。
+
 ### 键格式
 
 缓存键统一为 `dinghai:{module}:{resource}:{identifier}` 格式，由 `CacheKeyBuilder` 负责构建：

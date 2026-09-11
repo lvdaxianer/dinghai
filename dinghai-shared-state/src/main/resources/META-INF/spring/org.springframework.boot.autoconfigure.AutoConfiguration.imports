@@ -1,1 +1,3 @@
 io.github.lvdaxianer.dinghai.sharedstate.SharedStateCacheConfiguration
+io.github.lvdaxianer.dinghai.sharedstate.SharedStateCacheMetricsAutoConfiguration
+io.github.lvdaxianer.dinghai.sharedstate.SharedStateCacheHealthAutoConfiguration

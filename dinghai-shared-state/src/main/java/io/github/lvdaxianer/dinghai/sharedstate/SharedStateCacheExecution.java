@@ -179,6 +179,17 @@ final class SharedStateCacheExecution {
     }
 
     /**
+     * 注册七类运行事件的订阅监听器。
+     *
+     * @param listener 事件监听器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    void addEventListener(SharedStateCacheEventListener listener) {
+        observability.addEventListener(listener);
+    }
+
+    /**
      * 执行单次 Redis 操作并只捕获 Redis 后端异常。
      *
      * @param key 类型化缓存键

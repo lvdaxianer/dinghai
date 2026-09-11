@@ -34,10 +34,10 @@
 
 ## 6. 标准可观测性集成（features/✅CHG-002-T6--标准可观测性集成）
 
-- [ ] 6.1 TDD：存在/缺失 MeterRegistry、存在 Actuator 时装配行为；指标注册与计数递增；HealthIndicator 输出
-- [ ] 6.2 pom 增加 optional 依赖 micrometer-core、spring-boot-actuator；`SharedStateCacheObservability` 暴露事件订阅钩子
-- [ ] 6.3 Micrometer 指标注册类（熔断 gauge + 事件 counter）与 Actuator HealthIndicator 配置类，均软条件装配
-- [ ] 6.4 README 可观测性章节补充
+- [x] 6.1 TDD：存在/缺失 MeterRegistry、存在 Actuator 时装配行为；指标注册与计数递增；HealthIndicator 输出
+- [x] 6.2 pom 增加 optional 依赖 micrometer-core、spring-boot-actuator；`SharedStateCacheObservability` 暴露事件订阅钩子
+- [x] 6.3 Micrometer 指标注册类（熔断 gauge + 事件 counter）与 Actuator HealthIndicator 配置类，均软条件装配
+- [x] 6.4 README 可观测性章节补充
 
 ## 7. Maven Central 发布配置（features/✅CHG-002-T7--发布配置补齐）
 
