@@ -51,4 +51,4 @@
 - [x] 7.2 添加/更新模块契约与配置文档测试，验证默认 provider、100 MB 上限、`/files` 默认路径和敏感配置仅由环境注入
 - [x] 7.3 运行 `openspec validate add-file-storage --strict`、`mvn -q test`、必要的 `mvn -q verify`，并记录 MinIO 集成测试是否跳过及原因
 - [x] 7.4 执行 plan-implementation consistency audit、backend-reliability checklist、logging-boundaries 和 code-review-spec 全量审查，修复所有应修问题后重跑 focused/broader verification
-- [ ] 7.5 通过门禁后逐项勾选任务，按任务分支提交带 OpenSpec footer 的原子提交，合并回 `main`，最终审计并归档 `add-file-storage`
+- [x] 7.5 通过门禁后逐项勾选任务，按任务分支提交带 OpenSpec footer 的原子提交，合并回 `main`，最终审计并归档 `add-file-storage`
