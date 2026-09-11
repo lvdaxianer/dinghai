@@ -6,11 +6,11 @@
 
 ## 2. Core 契约与安全模型
 
-- [ ] 2.1 TDD：先添加 `ObjectKeyTest`、请求模型校验测试，覆盖中文、多级 key、空值、绝对路径、`..`、反斜杠、控制字符和 UTF-8/段长度边界
-- [ ] 2.2 实现 `ObjectKey`、`UploadRequest`、`ObjectMetadata`、`DownloadObject`、缓存策略和上传限制模型；所有新类/方法补齐项目约定的类级与方法级 Javadoc 和 author
-- [ ] 2.3 TDD：先添加 `FileStorageContractTest`，覆盖 put/get/stat/exists/delete 统一返回语义、覆盖写入和稳定异常分类
-- [ ] 2.4 实现 `FileStorage`、预签名请求/结果模型、`FileStorageException` 错误码和输入校验；不引用任何供应商 SDK
-- [ ] 2.5 运行 core focused tests 与 `mvn -pl dinghai-file-storage-core test`，确认无 null 返回、参数数量和魔法常量违规
+- [x] 2.1 TDD：先添加 `ObjectKeyTest`、请求模型校验测试，覆盖中文、多级 key、空值、绝对路径、`..`、反斜杠、控制字符和 UTF-8/段长度边界
+- [x] 2.2 实现 `ObjectKey`、`UploadRequest`、`ObjectMetadata`、`DownloadObject`、缓存策略和上传限制模型；所有新类/方法补齐项目约定的类级与方法级 Javadoc 和 author
+- [x] 2.3 TDD：先添加 `FileStorageContractTest`，覆盖 put/get/stat/exists/delete 统一返回语义、覆盖写入和稳定异常分类
+- [x] 2.4 实现 `FileStorage`、预签名请求/结果模型、`FileStorageException` 错误码和输入校验；不引用任何供应商 SDK
+- [x] 2.5 运行 core focused tests 与 `mvn -pl dinghai-file-storage-core test`，确认无 null 返回、参数数量和魔法常量违规
 
 ## 3. Local 适配器
 
