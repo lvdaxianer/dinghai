@@ -1,8 +1,8 @@
 ## 1. Maven 模块与项目基线
 
-- [ ] 1.1 在父 `pom.xml` 注册 core、local、minio、spring-boot-starter 四个模块，集中管理 Java 21、Spring Boot 与 MinIO SDK 版本
-- [ ] 1.2 创建四个模块 POM、包结构和自动装配资源；按模块隔离 MinIO、Spring Web 与测试依赖
-- [ ] 1.3 执行 project-hygiene：扫描新增 Maven/Java/YAML/环境变量，更新托管基线块与 `.env.example` 占位符；运行 `git ls-files` 密钥检查和 `git check-ignore/check-attr` 抽查
+- [x] 1.1 在父 `pom.xml` 注册 core、local、minio、spring-boot-starter 四个模块，集中管理 Java 21、Spring Boot 与 MinIO SDK 版本
+- [x] 1.2 创建四个模块 POM、包结构和自动装配资源；按模块隔离 MinIO、Spring Web 与测试依赖
+- [x] 1.3 执行 project-hygiene：扫描新增 Maven/Java/YAML/环境变量，更新托管基线块与 `.env.example` 占位符；运行 `git ls-files` 密钥检查和 `git check-ignore/check-attr` 抽查
 
 ## 2. Core 契约与安全模型
 

@@ -35,6 +35,10 @@
 
     <modules>
         <module>dinghai-shared-state</module>
+        <module>dinghai-file-storage-core</module>
+        <module>dinghai-file-storage-local</module>
+        <module>dinghai-file-storage-minio</module>
+        <module>dinghai-file-storage-spring-boot-starter</module>
     </modules>
 
     <properties>
@@ -49,6 +53,7 @@
         <commons-lang3.version>3.12.0</commons-lang3.version>
         <junit.version>4.13.2</junit.version>
         <mockito.version>4.11.0</mockito.version>
+        <minio.version>8.5.17</minio.version>
 
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
         <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
@@ -82,6 +87,11 @@
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-lang3</artifactId>
                 <version>${commons-lang3.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.minio</groupId>
+                <artifactId>minio</artifactId>
+                <version>${minio.version}</version>
             </dependency>
             <dependency>
                 <groupId>junit</groupId>
