@@ -4,6 +4,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
+import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
@@ -50,23 +51,23 @@ public class FileStorageWebController {
     /** HTTP 日期格式化器。 */
     private static final DateTimeFormatter HTTP_DATE = DateTimeFormatter.RFC_1123_DATE_TIME;
 
-    /** 本地文件存储。 */
-    private final LocalFileStorageAdapter storage;
+    /** 后端中立的文件存储。 */
+    private final FileStorage storage;
     /** 直接访问授权器。 */
     private final FileStorageDirectAccessAuthorizer authorizer;
     /** 当前时间源。 */
     private final Clock clock;
 
     /**
-     * 创建本地文件存储端点。
+     * 创建后端中立的文件存储端点。
      *
-     * @param storage 本地文件存储
+     * @param storage 文件存储
      * @param authorizer 直接访问授权器
      * @param clock 当前时间源
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    public FileStorageWebController(LocalFileStorageAdapter storage,
+    public FileStorageWebController(FileStorage storage,
                                     FileStorageDirectAccessAuthorizer authorizer, Clock clock) {
         this.storage = java.util.Objects.requireNonNull(storage, "storage");
         this.authorizer = java.util.Objects.requireNonNull(authorizer, "authorizer");
@@ -115,7 +116,7 @@ public class FileStorageWebController {
             }
             PresignUploadRequest request = new PresignUploadRequest(objectKey, expiry(expires),
                     decode(contentType), maxSize, new CacheControl(decode(cacheControl)));
-            storage.verifyPresignedUpload(request, timestamp(expires), signature, clock.instant());
+            localStorage().verifyPresignedUpload(request, timestamp(expires), signature, clock.instant());
             validateContentType(request.contentType(), requestContentType);
             validateContentLength(contentLength, request.maxSizeBytes());
             storage.put(new UploadRequest(objectKey, input, contentLength, request.contentType(),
@@ -238,7 +239,7 @@ public class FileStorageWebController {
         }
         PresignDownloadRequest request = new PresignDownloadRequest(key, expiry(expires), disposition,
                 new CacheControl(decode(cacheControl)));
-        storage.verifyPresignedDownload(request, timestamp(expires), signature, clock.instant());
+        localStorage().verifyPresignedDownload(request, timestamp(expires), signature, clock.instant());
     }
 
     /**
@@ -485,6 +486,14 @@ public class FileStorageWebController {
             throw new FileStorageException(FileStorageErrorCode.OBJECT_TOO_LARGE,
                     "upload exceeds maximum size");
         }
+    }
+
+    /** 获取支持旧本地预签名契约的适配器。 */
+    private LocalFileStorageAdapter localStorage() {
+        if (storage instanceof LocalFileStorageAdapter localStorage) {
+            return localStorage;
+        }
+        throw invalidPresign();
     }
 
     /**
