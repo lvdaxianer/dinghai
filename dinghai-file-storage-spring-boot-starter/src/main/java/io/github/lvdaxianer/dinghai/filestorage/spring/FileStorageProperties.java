@@ -2,6 +2,7 @@ package io.github.lvdaxianer.dinghai.filestorage.spring;
 
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -30,6 +31,8 @@ public class FileStorageProperties {
     private final Security security = new Security();
     /** Web 访问配置。 */
     private final Web web = new Web();
+    /** 非本地 provider 读取缓存配置。 */
+    private final Cache cache = new Cache();
 
     /**
      * 获取后端类型。
@@ -128,6 +131,17 @@ public class FileStorageProperties {
      */
     public Web getWeb() {
         return web;
+    }
+
+    /**
+     * 获取非本地 provider 读取缓存配置。
+     *
+     * @return 读取缓存配置
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    public Cache getCache() {
+        return cache;
     }
 
     /**
@@ -557,5 +571,39 @@ public class FileStorageProperties {
         public void setDirectAccess(boolean directAccess) {
             this.directAccess = directAccess;
         }
+    }
+
+    /**
+     * 非本地 provider 的二级磁盘缓存属性。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    public static class Cache {
+        /** 非本地 provider 默认启用。 */
+        private boolean enabled = true;
+        /** 默认落在系统临时目录下的组件专属缓存根。 */
+        private Path root = Paths.get(System.getProperty("java.io.tmpdir"), "dinghai-file-storage-cache");
+        /** 允许异步落盘的最大对象大小。 */
+        private long maxObjectSize = 50L * 1024L * 1024L;
+        /** 空闲缓存副本的保留时间。 */
+        private Duration idleTtl = Duration.ofDays(7L);
+
+        /** 获取是否启用缓存。 */
+        public boolean isEnabled() { return enabled; }
+        /** 设置是否启用缓存。 */
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        /** 获取缓存根目录。 */
+        public Path getRoot() { return root; }
+        /** 设置缓存根目录。 */
+        public void setRoot(Path root) { this.root = root; }
+        /** 获取异步落盘的最大对象大小。 */
+        public long getMaxObjectSize() { return maxObjectSize; }
+        /** 设置异步落盘的最大对象大小。 */
+        public void setMaxObjectSize(long maxObjectSize) { this.maxObjectSize = maxObjectSize; }
+        /** 获取缓存空闲保留时间。 */
+        public Duration getIdleTtl() { return idleTtl; }
+        /** 设置缓存空闲保留时间。 */
+        public void setIdleTtl(Duration idleTtl) { this.idleTtl = idleTtl; }
     }
 }

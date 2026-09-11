@@ -59,6 +59,8 @@ public class FileStorageWebController {
     private final Clock clock;
     /** 稳定文件读取服务。 */
     private final StableFileAccessService stableAccess;
+    /** 可选非本地 provider 读取缓存。 */
+    private final ProviderFileReadCache readCache;
 
     /**
      * 创建后端中立的文件存储端点。
@@ -87,10 +89,29 @@ public class FileStorageWebController {
     public FileStorageWebController(FileStorage storage,
                                     FileStorageDirectAccessAuthorizer authorizer, Clock clock,
                                     StableFileAccessService stableAccess) {
+        this(storage, authorizer, clock, stableAccess, null);
+    }
+
+    /**
+     * 创建带稳定 ID 与二级缓存读取能力的文件存储端点。
+     *
+     * @param storage 文件存储
+     * @param authorizer 直接访问授权器
+     * @param clock 当前时间源
+     * @param stableAccess 稳定文件读取服务
+     * @param readCache 非本地 provider 读取缓存
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    public FileStorageWebController(FileStorage storage,
+                                    FileStorageDirectAccessAuthorizer authorizer, Clock clock,
+                                    StableFileAccessService stableAccess,
+                                    ProviderFileReadCache readCache) {
         this.storage = java.util.Objects.requireNonNull(storage, "storage");
         this.authorizer = java.util.Objects.requireNonNull(authorizer, "authorizer");
         this.clock = java.util.Objects.requireNonNull(clock, "clock");
         this.stableAccess = stableAccess;
+        this.readCache = readCache;
     }
 
     /**
@@ -127,7 +148,7 @@ public class FileStorageWebController {
             requireDirectAccess(principal, objectKey, FileStorageAccessOperation.UPLOAD);
             validateContentType(requestContentType, requestContentType);
             validateContentLength(contentLength, UploadRequest.DEFAULT_MAX_SIZE_BYTES);
-            storage.put(new UploadRequest(objectKey, input, contentLength, requestContentType,
+            writeObject(new UploadRequest(objectKey, input, contentLength, requestContentType,
                     CacheControl.privateNoCache()));
         } else {
             if (expires == null || contentType == null || maxSize == null || cacheControl == null) {
@@ -138,7 +159,7 @@ public class FileStorageWebController {
             localStorage().verifyPresignedUpload(request, timestamp(expires), signature, clock.instant());
             validateContentType(request.contentType(), requestContentType);
             validateContentLength(contentLength, request.maxSizeBytes());
-            storage.put(new UploadRequest(objectKey, input, contentLength, request.contentType(),
+            writeObject(new UploadRequest(objectKey, input, contentLength, request.contentType(),
                     request.cacheControl()));
         }
         return ResponseEntity.noContent().build();
@@ -384,7 +405,7 @@ public class FileStorageWebController {
     private ResponseEntity<StreamingResponseBody> readObject(ObjectKey key, String ifNoneMatch,
                                                               String ifModifiedSince, String range,
                                                               PresignDownloadRequest.ResponseDisposition disposition) {
-        ObjectMetadata metadata = storage.stat(key).orElseThrow(this::notFound);
+        ObjectMetadata metadata = readMetadata(key).orElseThrow(this::notFound);
         HttpHeaders headers = responseHeaders(metadata, disposition);
         if (isNotModified(metadata, ifNoneMatch, ifModifiedSince)) {
             return new ResponseEntity<>(null, headers, HttpStatus.NOT_MODIFIED);
@@ -468,7 +489,7 @@ public class FileStorageWebController {
      */
     private ResponseEntity<StreamingResponseBody> stream(ObjectKey key, HttpHeaders headers,
                                                           HttpStatus status, long skip, long length) {
-        DownloadObject download = storage.get(key).orElseThrow(this::notFound);
+        DownloadObject download = readObject(key).orElseThrow(this::notFound);
         StreamingResponseBody body = output -> copyRange(download, output, skip, length);
         return new ResponseEntity<>(body, headers, status);
     }
@@ -677,6 +698,25 @@ public class FileStorageWebController {
         }
         throw new FileStorageException(FileStorageErrorCode.INVALID_CONFIGURATION,
                 "stable file access is unavailable");
+    }
+
+    /** 通过可用缓存或原始 provider 查询对象元数据。 */
+    private Optional<ObjectMetadata> readMetadata(ObjectKey key) {
+        return readCache == null ? storage.stat(key) : readCache.stat(key);
+    }
+
+    /** 通过可用缓存或原始 provider 打开对象流。 */
+    private Optional<DownloadObject> readObject(ObjectKey key) {
+        return readCache == null ? storage.get(key) : readCache.get(key);
+    }
+
+    /** 通过缓存协作者写入对象并立即失效旧副本。 */
+    private void writeObject(UploadRequest request) {
+        if (readCache == null) {
+            storage.put(request);
+            return;
+        }
+        readCache.put(request);
     }
 
     /**

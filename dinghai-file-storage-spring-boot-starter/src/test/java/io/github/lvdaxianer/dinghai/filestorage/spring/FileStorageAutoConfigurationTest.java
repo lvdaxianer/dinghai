@@ -72,6 +72,20 @@ public class FileStorageAutoConfigurationTest {
                 });
     }
 
+    /** 本地 provider 默认关闭二级磁盘缓存。 */
+    @Test
+    public void shouldDisableDiskCacheByDefaultForLocalProvider() {
+        contextRunner.withPropertyValues(localProperties())
+                .run(context -> assertThat(context).doesNotHaveBean(ProviderFileReadCache.class));
+    }
+
+    /** 非本地 provider 默认开启二级磁盘缓存。 */
+    @Test
+    public void shouldEnableDiskCacheByDefaultForNonLocalProvider() {
+        contextRunner.withPropertyValues(minioProperties())
+                .run(context -> assertThat(context).hasSingleBean(ProviderFileReadCache.class));
+    }
+
     /**
      * 未知 provider 必须在容器启动时失败。
      *
