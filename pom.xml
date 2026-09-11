@@ -54,6 +54,7 @@
         <junit.version>4.13.2</junit.version>
         <mockito.version>4.11.0</mockito.version>
         <minio.version>8.5.17</minio.version>
+        <tink.version>1.13.0</tink.version>
 
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
         <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
@@ -92,6 +93,11 @@
                 <groupId>io.minio</groupId>
                 <artifactId>minio</artifactId>
                 <version>${minio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.crypto.tink</groupId>
+                <artifactId>tink</artifactId>
+                <version>${tink.version}</version>
             </dependency>
             <dependency>
                 <groupId>junit</groupId>

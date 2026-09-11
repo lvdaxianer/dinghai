@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -184,6 +185,34 @@ public class LocalFileStorageAdapterTest {
             fail("expected presign content type rejection");
         } catch (FileStorageException exception) {
             assertEquals("CONTENT_TYPE_NOT_ALLOWED", exception.errorCode().name());
+        }
+    }
+
+    /** 枚举必须产生对象元数据并在关闭时释放文件系统遍历资源。 */
+    @Test
+    public void listsObjectMetadataThroughClosableStream() throws Exception {
+        LocalFileStorageAdapter storage = storage();
+        storage.put(upload(ObjectKey.of("documents/a.txt"), "a"));
+        storage.put(upload(ObjectKey.of("用户资料/b.txt"), "b"));
+
+        try (Stream<ObjectMetadata> objects = storage.list()) {
+            assertEquals(Set.of("documents/a.txt", "用户资料/b.txt"), objects
+                    .map(metadata -> metadata.key().value()).collect(java.util.stream.Collectors.toSet()));
+        }
+    }
+
+    /** 枚举忽略存储根内的符号链接，避免把根外文件视为对象。 */
+    @Test
+    public void ignoresSymbolicLinksWhenListingObjects() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        Path outside = temporaryFolder.newFile("outside.txt").toPath();
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+        storage.put(upload(ObjectKey.of("documents/a.txt"), "a"));
+        Files.createSymbolicLink(root.resolve("linked.txt"), outside);
+
+        try (Stream<ObjectMetadata> objects = storage.list()) {
+            assertEquals(Set.of("documents/a.txt"), objects.map(metadata -> metadata.key().value())
+                    .collect(java.util.stream.Collectors.toSet()));
         }
     }
 
