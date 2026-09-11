@@ -28,9 +28,9 @@
 
 ## 5. 滑动续期 getAndExpire（features/✅CHG-002-T5--滑动续期方法）
 
-- [ ] 5.1 TDD：契约测试覆盖读取并重置 TTL、不存在键返回空、永久键续期、强制 TTL 命名空间续期合法
-- [ ] 5.2 `SharedStateCache` 新增 `getAndExpire`；Redis 用 Lua（GET+EXPIRE/PERSIST）原子实现，Caffeine 与 Resilient 层实现
-- [ ] 5.3 README 操作列表与 TTL 章节补充
+- [x] 5.1 TDD：契约测试覆盖读取并重置 TTL、不存在键返回空、永久键续期、强制 TTL 命名空间续期合法
+- [x] 5.2 `SharedStateCache` 新增 `getAndExpire`；Redis 用 Lua（GET+PEXPIRE/PERSIST）原子实现，Caffeine 与 Resilient 层实现
+- [x] 5.3 README 操作列表与 TTL 章节补充
 
 ## 6. 标准可观测性集成（features/✅CHG-002-T6--标准可观测性集成）
 

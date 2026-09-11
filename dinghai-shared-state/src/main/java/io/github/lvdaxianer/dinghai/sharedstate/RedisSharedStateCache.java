@@ -229,6 +229,26 @@ public final class RedisSharedStateCache implements SharedStateCache {
         return Optional.ofNullable(previous).map(item -> decode(validKey, item));
     }
 
+    /**
+     * 使用 Lua 原子读取 Redis 值并重置有效期。
+     *
+     * @param key 类型化缓存键
+     * @param expiry 续期后的到期策略
+     * @param <T> 缓存值类型
+     * @return 续期前的缓存值，键不存在时为空
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Override
+    public <T> Optional<T> getAndExpire(CacheKey<T> key, CacheExpiry expiry) {
+        CacheKey<T> validKey = Objects.requireNonNull(key, "key");
+        // 先校验到期策略，强制 TTL 命名空间的永久续期在访问 Redis 前快速失败。
+        validateExpiry(validKey, expiry);
+        String previous = RedisBackendOperations.call(() -> operations.execute(
+                RedisLuaScripts.GET_AND_EXPIRE, List.of(validKey.value()), ttlMillis(expiry)));
+        return Optional.ofNullable(previous).map(item -> decode(validKey, item));
+    }
+
     @Override
     public Optional<CacheExpiry> remainingTtl(CacheKey<?> key) {
         CacheKey<?> validKey = Objects.requireNonNull(key, "key");

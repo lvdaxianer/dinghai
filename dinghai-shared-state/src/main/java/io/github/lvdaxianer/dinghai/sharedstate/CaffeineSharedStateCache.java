@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
@@ -228,6 +229,29 @@ public final class CaffeineSharedStateCache implements SharedStateCache {
         CaffeineStoredEntry entry = createEntry(key, value, expiry);
         CaffeineStoredEntry previous = cache.asMap().put(Objects.requireNonNull(key, "key").value(), entry);
         return Optional.ofNullable(previous).map(item -> readValue(key, item));
+    }
+
+    /**
+     * 单进程内原子读取缓存值并按新到期策略重放写入。
+     *
+     * @param key 类型化缓存键
+     * @param expiry 续期后的到期策略
+     * @param <T> 缓存值类型
+     * @return 续期前的缓存值，键不存在时为空且不创建键
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-11
+     */
+    @Override
+    public <T> Optional<T> getAndExpire(CacheKey<T> key, CacheExpiry expiry) {
+        CacheKey<T> validKey = Objects.requireNonNull(key, "key");
+        validateExpiry(validKey, expiry);
+        AtomicReference<CaffeineStoredEntry> previous = new AtomicReference<>();
+        // computeIfPresent 保证读取与 TTL 重放写入在单进程内原子完成，键不存在时不创建。
+        cache.asMap().computeIfPresent(validKey.value(), (ignored, entry) -> {
+            previous.set(entry);
+            return recreateEntry(validKey, entry, expiry);
+        });
+        return Optional.ofNullable(previous.get()).map(entry -> readValue(validKey, entry));
     }
 
     @Override
