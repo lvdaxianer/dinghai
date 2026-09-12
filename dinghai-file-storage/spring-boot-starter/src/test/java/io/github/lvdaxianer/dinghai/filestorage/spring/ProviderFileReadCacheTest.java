@@ -22,6 +22,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -36,6 +37,8 @@ import static org.junit.Assert.assertTrue;
  * @date 2026-09-11
  */
 public class ProviderFileReadCacheTest {
+    /** 测试异步等待超时。 */
+    private static final long TEST_TIMEOUT_SECONDS = 2L;
     /** 测试对象 key。 */
     private static final ObjectKey KEY = ObjectKey.of("reports/cache.txt");
     /** 测试对象元数据。 */
@@ -106,16 +109,21 @@ public class ProviderFileReadCacheTest {
         CountingStorage storage = new CountingStorage();
         ProviderFileReadCache cache = new ProviderFileReadCache(storage, "documents",
                 temporaryFolder.newFolder("cache").toPath(), true, 1024L);
-
-        try (DownloadObject first = cache.get(KEY).orElseThrow();
-             DownloadObject second = cache.get(KEY).orElseThrow()) {
-            first.stream().readAllBytes();
-            second.stream().readAllBytes();
+        storage.blockFillStream();
+        try {
+            try (DownloadObject first = cache.get(KEY).orElseThrow()) {
+                first.stream().readAllBytes();
+            }
+            assertTrue(storage.awaitFillStreamStart(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+            try (DownloadObject second = cache.get(KEY).orElseThrow()) {
+                assertEquals("hello", new String(second.stream().readAllBytes(), StandardCharsets.UTF_8));
+            }
+        } finally {
+            storage.releaseFillStream();
+            cache.awaitIdle(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            cache.close();
         }
-        cache.awaitIdle(2L, TimeUnit.SECONDS);
-
         assertEquals(3, storage.getCalls.get());
-        cache.close();
     }
 
     /** 超过空闲期限的完整缓存副本和 sidecar 必须一同删除。 */
@@ -139,8 +147,25 @@ public class ProviderFileReadCacheTest {
     private static final class CountingStorage implements FileStorage {
         /** get 调用次数。 */
         private final AtomicInteger getCalls = new AtomicInteger();
+        /** 缓存填充流开始读取的信号。 */
+        private final CountDownLatch fillStreamStarted = new CountDownLatch(1);
+        /** 允许缓存填充流继续读取的信号。 */
+        private final CountDownLatch fillStreamRelease = new CountDownLatch(1);
         /** 当前对象元数据。 */
         private volatile ObjectMetadata metadata = METADATA;
+        /** 是否阻塞缓存填充流。 */
+        private volatile boolean isFillStreamBlocked;
+
+        /** 阻塞第二次 get 返回的缓存填充流。 */
+        private void blockFillStream() { isFillStreamBlocked = true; }
+
+        /** 等待缓存填充任务开始读取其独立流。 */
+        private boolean awaitFillStreamStart(long timeout, TimeUnit unit) throws InterruptedException {
+            return fillStreamStarted.await(timeout, unit);
+        }
+
+        /** 解除缓存填充流阻塞。 */
+        private void releaseFillStream() { fillStreamRelease.countDown(); }
 
         /** 返回独立输入流和当前元数据。 */
         @Override
@@ -148,9 +173,46 @@ public class ProviderFileReadCacheTest {
             if (!KEY.equals(key)) {
                 return Optional.empty();
             }
-            getCalls.incrementAndGet();
+            int getCall = getCalls.incrementAndGet();
             byte[] value = metadata.contentLength() == 5L ? bytes("hello") : bytes("changed");
-            return Optional.of(new DownloadObject(new ByteArrayInputStream(value), metadata));
+            InputStream stream = new ByteArrayInputStream(value);
+            if (isFillStreamBlocked && getCall == 2) {
+                stream = blockingFillStream(stream);
+            }
+            return Optional.of(new DownloadObject(stream, metadata));
+        }
+
+        /** 返回会在首次读取前等待测试释放的缓存填充流。 */
+        private InputStream blockingFillStream(InputStream source) {
+            return new InputStream() {
+                /** 首次读取前等待测试线程确认并发窗口。 */
+                private void awaitRelease() throws java.io.IOException {
+                    fillStreamStarted.countDown();
+                    try {
+                        if (!fillStreamRelease.await(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                            throw new java.io.IOException("cache fill stream was not released");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new java.io.IOException("cache fill stream was interrupted", exception);
+                    }
+                }
+
+                /** 阻塞后读取一个字节。 */
+                @Override public int read() throws java.io.IOException {
+                    awaitRelease();
+                    return source.read();
+                }
+
+                /** 阻塞后批量读取字节。 */
+                @Override public int read(byte[] buffer, int offset, int length) throws java.io.IOException {
+                    awaitRelease();
+                    return source.read(buffer, offset, length);
+                }
+
+                /** 关闭底层测试流。 */
+                @Override public void close() throws java.io.IOException { source.close(); }
+            };
         }
 
         /** 返回当前远程元数据。 */
