@@ -19,6 +19,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
@@ -53,10 +54,11 @@ public class FileStorageAutoConfiguration {
     @Bean
     @Primary
     @ConditionalOnMissingBean(FileStorage.class)
-    public FileStorage fileStorage(FileStorageProperties properties) {
+    public FileStorage fileStorage(FileStorageProperties properties, Environment environment) {
         validateWebPathPrefix(properties.getWeb().getPathPrefix());
         String bucket = validateBucket(properties.getBucket());
         if (properties.getProvider() == FileStorageProvider.LOCAL) {
+            validateLocalCacheConfiguration(properties, environment, bucket);
             return localStorage(properties, bucket);
         }
         if (properties.getProvider() == FileStorageProvider.MINIO) {
@@ -128,23 +130,6 @@ public class FileStorageAutoConfiguration {
                 cache.getMaxConcurrentFills(), cache.getQueueCapacity());
     }
 
-    /** 为本地 provider 在显式开启时创建二级磁盘读取缓存。 */
-    @Bean(destroyMethod = "close")
-    @ConditionalOnMissingBean
-    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "local")
-    @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true")
-    public ProviderFileReadCache localProviderFileReadCache(FileStorage storage,
-                                                             FileStorageProperties properties) {
-        FileStorageProperties.Cache cache = properties.getCache();
-        if (cache.getRoot() == null) {
-            throw invalidConfiguration("local cache root is required", null);
-        }
-        validateResourceProperties(properties);
-        return new ProviderFileReadCache(storage, properties.getStorageAlias(), cache.getRoot(),
-                true, cache.getMaxObjectSize(), intSize(cache.getBufferSize().toBytes()),
-                cache.getMaxConcurrentFills(), cache.getQueueCapacity());
-    }
-
     /** 创建非本地 provider 缓存的午夜清理任务。 */
     @Bean
     @ConditionalOnMissingBean
@@ -153,17 +138,6 @@ public class FileStorageAutoConfiguration {
             matchIfMissing = true)
     public ProviderFileReadCacheCleaner providerFileReadCacheCleaner(ProviderFileReadCache cache,
                                                                       FileStorageProperties properties) {
-        return new ProviderFileReadCacheCleaner(cache, Clock.systemDefaultZone(),
-                properties.getCache().getIdleTtl());
-    }
-
-    /** 创建本地 provider 显式启用缓存时的午夜清理任务。 */
-    @Bean
-    @ConditionalOnMissingBean
-    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "local")
-    @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true")
-    public ProviderFileReadCacheCleaner localProviderFileReadCacheCleaner(
-            ProviderFileReadCache cache, FileStorageProperties properties) {
         return new ProviderFileReadCacheCleaner(cache, Clock.systemDefaultZone(),
                 properties.getCache().getIdleTtl());
     }
@@ -393,6 +367,24 @@ public class FileStorageAutoConfiguration {
             throw invalidConfiguration("file storage bucket is invalid", null);
         }
         return bucketRoot;
+    }
+
+    /** 校验 Local 主存储不会复用可清理缓存目录，并拒绝已移除的显式缓存配置。 */
+    private void validateLocalCacheConfiguration(FileStorageProperties properties,
+                                                 Environment environment, String bucket) {
+        if ("true".equalsIgnoreCase(environment.getProperty("dinghai.file-storage.cache.enabled"))) {
+            throw invalidConfiguration("local disk cache has been removed; remove cache.enabled", null);
+        }
+        Path cacheRoot = properties.getCache().getRoot();
+        Path localRoot = properties.getLocal().getRoot();
+        if (cacheRoot == null || localRoot == null) {
+            return;
+        }
+        Path primaryRoot = resolveLocalBucketRoot(localRoot, bucket);
+        Path normalizedCache = cacheRoot.toAbsolutePath().normalize();
+        if (normalizedCache.startsWith(primaryRoot) || primaryRoot.startsWith(normalizedCache)) {
+            throw invalidConfiguration("cache root overlaps local storage root", null);
+        }
     }
 
     private void validateResourceProperties(FileStorageProperties properties) {

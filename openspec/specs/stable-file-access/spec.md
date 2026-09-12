@@ -29,7 +29,7 @@ Starter SHALL 提供以稳定文件 ID 为路径参数的读取、预览和下�
 - **THEN** Starter 仅校验稳定 ID 后读取对象，不调用 `FileStorageAccessPolicy`
 
 ### Requirement: 按 provider 默认启用二级磁盘读取缓存
-Starter SHALL 按 provider 默认启用本地二级磁盘缓存：仅 `local` provider 默认关闭，所有非 `local` provider 默认开启；显式 `cache.enabled` MUST 能覆盖这两个默认值。缓存命中时 MUST 先向对象存储查询元数据，并且仅在 ETag、长度和最后修改时间均匹配时从磁盘副本返回；对象不存在或元数据不匹配时 MUST 删除副本并从 provider 流式读取。未命中且对象大小不超过配置阈值时，当前请求 MUST 直接流式返回 provider 内容，同时由独立、有界执行器重新打开对象流异步写入临时缓存文件，校验后原子发布。缓存键和 sidecar MUST 不暴露对象 key。
+Starter SHALL 按 provider 默认启用二级磁盘缓存：`local` provider 不得创建或使用二级读取缓存，所有非 `local` provider 默认开启；对于 `local`，显式 `cache.enabled=true` MUST 使应用启动失败并提示删除该配置，对于非 `local`，显式 `cache.enabled=false` MUST 禁用缓存。缓存命中时 MUST 先向对象存储查询元数据，并且仅在 ETag、长度和最后修改时间均匹配时从磁盘副本返回；对象不存在或元数据不匹配时 MUST 删除副本并从 provider 流式读取。未命中且对象大小不超过配置阈值时，当前请求 MUST 直接流式返回 provider 内容，同时由独立、有界执行器重新打开对象流异步写入临时缓存文件，校验后原子发布。缓存键和 sidecar MUST 不暴露对象 key。
 
 #### Scenario: 按 provider 应用缓存默认开关
 - **WHEN** 应用使用默认缓存配置

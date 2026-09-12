@@ -234,6 +234,74 @@ public class FileStorageWebControllerTest {
                 .andExpect(header().string("Content-Range", "bytes */5"));
     }
 
+    /** Tomcat 支持时完整本地对象应注册 sendfile 而非启动异步流式复制。 */
+    @Test
+    public void shouldRegisterTomcatSendfileForCompleteLocalObject() throws Exception {
+        PresignedDownload preview = storage.presignDownload(downloadRequest(
+                "documents/readme.txt", PresignDownloadRequest.ResponseDisposition.INLINE));
+
+        MvcResult result = mockMvc.perform(get(preview.url())
+                        .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
+                .andExpect(status().isOk()).andExpect(request().asyncNotStarted()).andReturn();
+
+        assertTrue(result.getRequest().getAttribute(TomcatSendfileTransfer.FILENAME) != null);
+        assertEquals(0L, result.getRequest().getAttribute(TomcatSendfileTransfer.START));
+        assertEquals(5L, result.getRequest().getAttribute(TomcatSendfileTransfer.END));
+    }
+
+    /** 单个合法 Range 应注册对应的 Tomcat sendfile 字节区间。 */
+    @Test
+    public void shouldRegisterTomcatSendfileForLocalSingleRange() throws Exception {
+        PresignedDownload preview = storage.presignDownload(downloadRequest(
+                "documents/readme.txt", PresignDownloadRequest.ResponseDisposition.INLINE));
+
+        MvcResult result = mockMvc.perform(get(preview.url()).header("Range", "bytes=1-3")
+                        .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
+                .andExpect(status().isPartialContent()).andExpect(request().asyncNotStarted())
+                .andExpect(header().string("Content-Range", "bytes 1-3/5")).andReturn();
+
+        assertEquals(1L, result.getRequest().getAttribute(TomcatSendfileTransfer.START));
+        assertEquals(4L, result.getRequest().getAttribute(TomcatSendfileTransfer.END));
+    }
+
+    /** Tomcat 响应会压缩时必须保留原有有界异步流式路径。 */
+    @Test
+    public void shouldFallBackToStreamingWhenTomcatRequestAcceptsCompression() throws Exception {
+        PresignedDownload preview = storage.presignDownload(downloadRequest(
+                "documents/readme.txt", PresignDownloadRequest.ResponseDisposition.INLINE));
+
+        mockMvc.perform(get(preview.url()).header("Accept-Encoding", "gzip")
+                        .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
+                .andExpect(status().isOk()).andExpect(request().asyncStarted());
+    }
+
+    /** 已校验的远程缓存热读应注册 Tomcat sendfile，而不是重新打开远程对象流。 */
+    @Test
+    public void shouldRegisterTomcatSendfileForVerifiedRemoteCacheHit() throws Exception {
+        InMemoryFileStorage provider = new InMemoryFileStorage("remote");
+        ProviderFileReadCache cache = new ProviderFileReadCache(provider, "documents",
+                temporaryFolder.newFolder("cache").toPath(), true, 1024L);
+        try (DownloadObject object = cache.get(ObjectKey.of("reports/remote.txt")).orElseThrow()) {
+            object.stream().readAllBytes();
+        }
+        cache.awaitIdle(2L, java.util.concurrent.TimeUnit.SECONDS);
+        FileStorageWebController controller = new FileStorageWebController(provider,
+                new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC),
+                stableAccess, cache);
+        MockMvc cacheMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new FileStorageExceptionHandler()).build();
+        String payload = stableAccess.identifier(ObjectKey.of("reports/remote.txt")).substring("v1.".length());
+
+        MvcResult result = cacheMvc.perform(get("/files/read/v1/" + payload)
+                        .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
+                .andExpect(status().isOk()).andExpect(request().asyncNotStarted()).andReturn();
+
+        assertTrue(result.getRequest().getAttribute(TomcatSendfileTransfer.FILENAME) != null);
+        assertEquals(0L, result.getRequest().getAttribute(TomcatSendfileTransfer.START));
+        assertEquals(6L, result.getRequest().getAttribute(TomcatSendfileTransfer.END));
+        cache.close();
+    }
+
     /** 稳定读取地址不带认证主体也可预览、下载和按范围读取私有对象。 */
     @Test
     public void shouldReadPrivateObjectThroughStableIdWithoutPrincipal() throws Exception {

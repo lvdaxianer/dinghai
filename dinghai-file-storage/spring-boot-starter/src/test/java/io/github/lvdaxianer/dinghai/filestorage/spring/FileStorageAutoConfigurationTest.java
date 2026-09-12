@@ -105,7 +105,10 @@ public class FileStorageAutoConfigurationTest {
     @Test
     public void shouldDisableDiskCacheByDefaultForLocalProvider() {
         contextRunner.withPropertyValues(localProperties())
-                .run(context -> assertThat(context).doesNotHaveBean(ProviderFileReadCache.class));
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(ProviderFileReadCache.class);
+                    assertThat(context).doesNotHaveBean(ProviderFileReadCacheCleaner.class);
+                });
     }
 
     /** 非本地 provider 默认开启二级磁盘缓存。 */
@@ -115,12 +118,26 @@ public class FileStorageAutoConfigurationTest {
                 .run(context -> assertThat(context).hasSingleBean(ProviderFileReadCache.class));
     }
 
-    /** 本地 provider 显式开启缓存后应创建二级缓存。 */
+    /** 本地 provider 显式开启已移除的二级缓存配置必须启动失败。 */
     @Test
-    public void shouldEnableDiskCacheForLocalProviderWhenExplicitlyEnabled() {
+    public void shouldRejectExplicitDiskCacheForLocalProvider() {
         contextRunner.withPropertyValues(localProperties())
                 .withPropertyValues("dinghai.file-storage.cache.enabled=true")
-                .run(context -> assertThat(context).hasSingleBean(ProviderFileReadCache.class));
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining("local disk cache");
+                });
+    }
+
+    /** 本地主 bucket 与缓存目录重叠时必须拒绝启动，避免清理器误删主数据。 */
+    @Test
+    public void shouldRejectOverlappingLocalStorageAndCacheRoots() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.cache.root=" + storageRoot())
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining("cache root overlaps");
+                });
     }
 
     /** 非本地 provider 显式关闭缓存后不得创建二级缓存。 */

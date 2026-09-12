@@ -5,6 +5,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.LocalFileSource;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
@@ -14,6 +15,7 @@ import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLDecoder;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.time.Clock;
@@ -34,6 +36,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 /**
  * 本地文件存储的受预签名保护 HTTP 端点。
@@ -557,6 +561,13 @@ public class FileStorageWebController {
     private ResponseEntity<StreamingResponseBody> stream(ObjectKey key, HttpHeaders headers,
                                                           HttpStatus status, long skip, long length) {
         WebTransferLimiter.Permit permit = transferLimiter.acquireRead();
+        Optional<Path> localFile = localFile(key);
+        if (localFile.isPresent() && headers.getFirst(HttpHeaders.CONTENT_ENCODING) == null
+                && currentRequest().map(request ->
+                TomcatSendfileTransfer.register(request, localFile.get(), skip, length)).orElse(false)) {
+            permit.close();
+            return new ResponseEntity<>(null, headers, status);
+        }
         DownloadObject download;
         try {
             download = readObject(key).orElseThrow(this::notFound);
@@ -628,8 +639,7 @@ public class FileStorageWebController {
     private void copyRange(DownloadObject download, java.io.OutputStream output, long skip, long length,
                            WebTransferLimiter.Permit permit)
             throws IOException {
-        try (WebTransferLimiter.Permit ignored = permit;
-             DownloadObject ignoredDownload = download) {
+        try (WebTransferLimiter.Permit ignored = permit; DownloadObject ignoredDownload = download) {
             InputStream input = download.stream();
             input.skipNBytes(skip);
             byte[] buffer = new byte[bufferSize];
@@ -784,6 +794,25 @@ public class FileStorageWebController {
     /** 通过可用缓存或原始 provider 打开对象流。 */
     private Optional<DownloadObject> readObject(ObjectKey key) {
         return readCache == null ? storage.get(key) : readCache.get(key);
+    }
+
+    /** 返回已验证的本地对象或远程缓存副本路径。 */
+    private Optional<Path> localFile(ObjectKey key) {
+        if (readCache != null) {
+            return readCache.localFile(key);
+        }
+        if (storage instanceof LocalFileSource source) {
+            return source.localFile(key);
+        }
+        return Optional.empty();
+    }
+
+    /** 获取当前 Servlet 请求；非 Web 调用时不尝试容器传输。 */
+    private Optional<jakarta.servlet.http.HttpServletRequest> currentRequest() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            return Optional.of(attributes.getRequest());
+        }
+        return Optional.empty();
     }
 
     /** 通过缓存协作者写入对象并立即失效旧副本。 */

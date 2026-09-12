@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
@@ -21,6 +22,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
@@ -31,6 +33,9 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 /**
  * 为非本地 provider 提供元数据校验的二级磁盘读取缓存。
@@ -39,6 +44,8 @@ import java.util.stream.Stream;
  * @date 2026-09-11
  */
 public final class ProviderFileReadCache implements AutoCloseable {
+    /** 缓存业务日志。 */
+    private static final Logger LOGGER = LoggerFactory.getLogger(ProviderFileReadCache.class);
     /** 缓存复制缓冲区大小。 */
     private static final int DEFAULT_BUFFER_SIZE = 128 * 1024;
     /** 缓存异步线程数。 */
@@ -58,6 +65,8 @@ public final class ProviderFileReadCache implements AutoCloseable {
     private final ThreadPoolExecutor executor;
     /** 正在异步填充的对象摘要。 */
     private final Set<String> filling = ConcurrentHashMap.newKeySet();
+    /** 按对象串行化缓存副本操作。 */
+    private final ConcurrentHashMap<String, Object> locks = new ConcurrentHashMap<>();
 
     /**
      * 创建二级缓存包装器。
@@ -81,7 +90,7 @@ public final class ProviderFileReadCache implements AutoCloseable {
                                  int maxConcurrentFills, int queueCapacity) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.storageAlias = Objects.requireNonNull(storageAlias, "storageAlias");
-        this.root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
+        this.root = prepareRoot(root);
         if (maxObjectSize < 0L) {
             throw new IllegalArgumentException("max object size must be non-negative");
         }
@@ -122,6 +131,35 @@ public final class ProviderFileReadCache implements AutoCloseable {
     /** 查询远程元数据。 */
     public Optional<ObjectMetadata> stat(ObjectKey key) { return provider.stat(key); }
 
+    /** 返回元数据已校验的完整缓存副本，未命中或失效时返回空。 */
+    Optional<Path> localFile(ObjectKey key) {
+        if (!enabled) {
+            return Optional.empty();
+        }
+        Optional<ObjectMetadata> remote = provider.stat(key);
+        if (remote.isEmpty()) {
+            removeCachedObject(key);
+            return Optional.empty();
+        }
+        synchronized (lock(key)) {
+            Path data = dataPath(key);
+            Path sidecar = sidecarPath(key);
+            if (!isRegularFile(data) || !isRegularFile(sidecar)) return Optional.empty();
+            try {
+                Properties values = load(sidecar);
+                if (!matches(values, remote.get()) || Files.size(data) != remote.get().contentLength()) {
+                    removeCachedObject(key);
+                    return Optional.empty();
+                }
+                touch(values, sidecar);
+                return Optional.of(data);
+            } catch (IOException exception) {
+                removeCachedObject(key);
+                return Optional.empty();
+            }
+        }
+    }
+
     /** 写入对象后清除可能的旧缓存。 */
     public ObjectMetadata put(UploadRequest request) {
         ObjectMetadata metadata = provider.put(request);
@@ -146,7 +184,7 @@ public final class ProviderFileReadCache implements AutoCloseable {
     }
 
     /** 判断对象是否已生成完整缓存文件。 */
-    boolean hasCachedObject(ObjectKey key) { return Files.isRegularFile(dataPath(key)); }
+    boolean hasCachedObject(ObjectKey key) { return isRegularFile(dataPath(key)); }
 
     /**
      * 清理最后访问时间已超出 idle TTL 的完整缓存副本。
@@ -166,6 +204,12 @@ public final class ProviderFileReadCache implements AutoCloseable {
     /** 关闭缓存异步执行器。 */
     @Override public void close() {
         executor.shutdown();
+        try {
+            if (!executor.awaitTermination(30L, TimeUnit.SECONDS)) executor.shutdownNow();
+        } catch (InterruptedException exception) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     /** 创建缓存根目录。 */
@@ -181,20 +225,20 @@ public final class ProviderFileReadCache implements AutoCloseable {
     private Optional<DownloadObject> cached(ObjectMetadata remote) {
         Path data = dataPath(remote.key());
         Path sidecar = sidecarPath(remote.key());
-        if (!Files.isRegularFile(data) || !Files.isRegularFile(sidecar)) {
-            return Optional.empty();
-        }
-        try {
-            Properties values = load(sidecar);
-            if (!matches(values, remote) || Files.size(data) != remote.contentLength()) {
+        synchronized (lock(remote.key())) {
+            if (!isRegularFile(data) || !isRegularFile(sidecar)) return Optional.empty();
+            try {
+                Properties values = load(sidecar);
+                if (!matches(values, remote) || Files.size(data) != remote.contentLength()) {
+                    removeCachedObject(remote.key());
+                    return Optional.empty();
+                }
+                touch(values, sidecar);
+                return Optional.of(new DownloadObject(Files.newInputStream(data, LinkOption.NOFOLLOW_LINKS), remote));
+            } catch (IOException exception) {
                 removeCachedObject(remote.key());
                 return Optional.empty();
             }
-            touch(values, sidecar);
-            return Optional.of(new DownloadObject(Files.newInputStream(data), remote));
-        } catch (IOException exception) {
-            removeCachedObject(remote.key());
-            return Optional.empty();
         }
     }
 
@@ -208,11 +252,16 @@ public final class ProviderFileReadCache implements AutoCloseable {
             return;
         }
         try {
+            Map<String, String> context = MDC.getCopyOfContextMap();
             executor.execute(() -> {
+                if (context != null) MDC.setContextMap(context);
                 try {
                     fill(key, expected);
+                } catch (RuntimeException exception) {
+                    LOGGER.warn("[文件存储缓存] 异步填充失败, keyDigest={}", digest, exception);
                 } finally {
                     filling.remove(digest);
+                    MDC.clear();
                 }
             });
         } catch (RejectedExecutionException ignored) {
@@ -223,32 +272,42 @@ public final class ProviderFileReadCache implements AutoCloseable {
 
     /** 使用第二条 provider 流写入临时文件并原子发布。 */
     private void fill(ObjectKey key, ObjectMetadata expected) {
-        Path temporary = root.resolve(dataPath(key).getFileName() + ".tmp-" + Thread.currentThread().getId());
+        Path temporary = null;
         try (DownloadObject download = provider.get(key).orElseThrow();
-             InputStream input = download.stream();
-             OutputStream output = Files.newOutputStream(temporary)) {
-            copy(input, output);
+             InputStream input = download.stream()) {
+            temporary = Files.createTempFile(root, digest(key) + ".tmp-", "");
+            try (OutputStream output = Files.newOutputStream(temporary)) {
+                copy(input, output, expected.contentLength());
+            }
             ObjectMetadata current = provider.stat(key).orElseThrow();
             if (!sameMetadata(expected, current) || Files.size(temporary) != current.contentLength()) {
                 return;
             }
-            Files.move(temporary, dataPath(key), StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-            writeSidecar(current);
-        } catch (Exception ignored) {
-            // 缓存填充失败不得影响已返回的当前请求。
+            synchronized (lock(key)) {
+                Files.move(temporary, dataPath(key), StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+                writeSidecar(current);
+            }
+        } catch (IOException | RuntimeException exception) {
+            LOGGER.warn("[文件存储缓存] 缓存副本不可用, keyDigest={}", digest(key), exception);
         } finally {
-            delete(temporary);
+            if (temporary != null) delete(temporary);
         }
     }
 
-    /** 复制对象流。 */
-    private void copy(InputStream input, OutputStream output) throws IOException {
+    /** 按元数据和缓存阈值复制对象流。 */
+    private void copy(InputStream input, OutputStream output, long expectedLength) throws IOException {
         byte[] buffer = new byte[bufferSize];
         int read;
+        long total = 0L;
         while ((read = input.read(buffer)) != -1) {
+            total = Math.addExact(total, read);
+            if (total > expectedLength || total > maxObjectSize) {
+                throw new IOException("provider stream exceeds cache limit");
+            }
             output.write(buffer, 0, read);
         }
+        if (total != expectedLength) throw new IOException("provider stream ended before metadata length");
     }
 
     /** 写入不包含对象 key 的 sidecar。 */
@@ -271,7 +330,7 @@ public final class ProviderFileReadCache implements AutoCloseable {
     /** 读取 sidecar 属性。 */
     private Properties load(Path sidecar) throws IOException {
         Properties values = new Properties();
-        try (InputStream input = Files.newInputStream(sidecar)) {
+        try (InputStream input = Files.newInputStream(sidecar, LinkOption.NOFOLLOW_LINKS)) {
             values.load(input);
         }
         return values;
@@ -288,8 +347,15 @@ public final class ProviderFileReadCache implements AutoCloseable {
     /** 更新 sidecar 最后访问时间。 */
     private void touch(Properties values, Path sidecar) throws IOException {
         values.setProperty("lastAccessAt", Instant.now().toString());
-        try (OutputStream output = Files.newOutputStream(sidecar)) {
-            values.store(output, null);
+        Path temporary = Files.createTempFile(root, sidecar.getFileName().toString() + ".touch-", "");
+        try {
+            try (OutputStream output = Files.newOutputStream(temporary)) {
+                values.store(output, null);
+            }
+            Files.move(temporary, sidecar, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } finally {
+            delete(temporary);
         }
     }
 
@@ -301,8 +367,11 @@ public final class ProviderFileReadCache implements AutoCloseable {
 
     /** 删除单个路径并忽略清理失败。 */
     private void delete(Path path) {
+        if (path == null || !path.normalize().startsWith(root)) return;
         try { Files.deleteIfExists(path); }
-        catch (IOException ignored) { }
+        catch (IOException exception) {
+            LOGGER.debug("[文件存储缓存] 清理文件失败, path={}", path, exception);
+        }
     }
 
     /** 清理已过期 sidecar 对应的数据和元数据文件。 */
@@ -324,6 +393,31 @@ public final class ProviderFileReadCache implements AutoCloseable {
     private Path dataPath(ObjectKey key) { return root.resolve(digest(key) + ".data"); }
     /** 生成不泄露对象 key 的 sidecar 路径。 */
     private Path sidecarPath(ObjectKey key) { return root.resolve(digest(key) + SIDECAR_SUFFIX); }
+
+    /** 初始化并固定缓存根目录，拒绝符号链接目录。 */
+    private Path prepareRoot(Path configuredRoot) {
+        try {
+            Path absolute = Objects.requireNonNull(configuredRoot, "root").toAbsolutePath().normalize();
+            Files.createDirectories(absolute);
+            if (Files.isSymbolicLink(absolute)) {
+                throw new IOException("cache root must not be symbolic link");
+            }
+            return absolute.toRealPath(LinkOption.NOFOLLOW_LINKS);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("cache root is unavailable", exception);
+        }
+    }
+
+    /** 返回对象级锁。 */
+    private Object lock(ObjectKey key) {
+        return locks.computeIfAbsent(digest(key), ignored -> new Object());
+    }
+
+    /** 判断缓存路径是否为不跟随符号链接的普通文件。 */
+    private boolean isRegularFile(Path path) {
+        return Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS);
+    }
+
 
     /** 对逻辑别名和 key 做 SHA-256。 */
     private String digest(ObjectKey key) {

@@ -2,7 +2,12 @@
 
 ### Requirement: 主存储与远程临时缓存生命周期隔离
 
-Local provider SHALL 将 `local.root / bucket` 作为持久主存储，默认不得创建二级缓存或定时清理器，任何缓存清理任务 MUST NOT 删除主存储文件。MinIO/OSS provider SHALL 使用独立 `cache.root` 保存异步落盘副本，并仅清理完整、超过空闲 TTL 且属于该缓存根的副本。
+Local provider SHALL 将 `local.root / bucket` 作为持久主存储，不得创建二级缓存或定时清理器；显式配置 `cache.enabled=true` MUST 使应用启动失败。任何缓存清理任务 MUST NOT 删除主存储文件。MinIO/OSS provider SHALL 使用独立 `cache.root` 保存异步落盘副本，并仅清理完整、超过空闲 TTL 且属于该缓存根的副本。
+
+#### Scenario: Local 显式开启缓存被拒绝
+
+- **WHEN** provider 为 `local` 且配置显式设置 `dinghai.file-storage.cache.enabled=true`
+- **THEN** 应用启动失败并提示 Local 二级缓存已移除，需删除该配置项
 
 #### Scenario: Local 主存储不被清理
 

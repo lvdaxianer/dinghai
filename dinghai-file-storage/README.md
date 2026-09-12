@@ -100,7 +100,7 @@ MinIO 适配器**不会自动创建或修改 bucket**，需事先自行建好。
 
 | 配置键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `cache.enabled` | `boolean` | 见说明 | 三态语义：MinIO 后端缺省即为开启（缺失等同于 `true`），显式 `false` 关闭；Local 后端缺省为关闭，仅显式 `true` 开启 |
+| `cache.enabled` | `boolean` | 见说明 | MinIO 后端缺省开启，显式 `false` 关闭；Local 后端不使用二级缓存，显式 `true` 会在启动时失败（请删除旧配置） |
 | `cache.root` | `Path` | `${java.io.tmpdir}/dinghai-file-storage-cache` | 缓存根目录，为 null 或创建失败时启动失败。**生产环境应显式配置持久目录**，默认位置在系统临时目录下，可能被操作系统清理 |
 | `cache.max-object-size` | `long`（字节） | `50MB` | 超过该大小的对象不做异步落盘，读请求直接直通远端 |
 | `cache.idle-ttl` | `Duration` | `7d` | 空闲副本保留时长，按每个副本 sidecar 文件记录的最近访问时间判定 |
@@ -167,7 +167,7 @@ dinghai:
 
 迁移管理端点固定为 `POST /files/migration/export`、`POST /files/migration/import`（参数 `packageName`），不随 `web.path-prefix` 变化。
 
-预览/下载使用流式响应，支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304（If-None-Match / If-Modified-Since）和单区间 Range 206/416。
+预览/下载支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304（If-None-Match / If-Modified-Since）和单区间 Range 206/416。Local 主文件和 MinIO 已校验的热缓存文件在明文、未压缩的嵌入 Tomcat 中优先注册原生 `sendfile`；TLS、压缩、其他容器或容器不支持时自动回退到有界流式复制，调用方无需切换接口。
 
 ## 预签名与访问授权
 
@@ -186,13 +186,20 @@ dinghai:
 
 ## 读取缓存行为
 
-非 Local 后端默认启用经远端 `stat` 校验的二级磁盘读取缓存：
+非 Local 后端默认启用经远端 `stat` 校验的二级磁盘读取缓存；Local 不创建二级缓存或清理器：
 
 1. 每次读先 `stat` 远端元数据；本地副本的 ETag / 长度 / 修改时间与远端一致才命中，命中后刷新最近访问时间；
 2. 未命中且对象不超过 `cache.max-object-size` 时，当前请求直接流式读取远端，另开第二条流异步落盘（临时文件 + 原子移动发布）；
 3. `put` / `delete` 立即失效对应副本；
 4. 每天 00:00（服务器本地时区）清理超过 `cache.idle-ttl` 未访问的副本，清理失败静默留待下轮；
 5. 缓存文件名是 `SHA-256(alias + key)` 的十六进制摘要，不泄露原始对象 key。
+
+## 零拷贝与并发
+
+- Local 主文件和远程热缓存命中时，Tomcat 明文且未压缩请求优先使用原生 `sendfile`，不按文件大小分配 JVM 堆内存。
+- TLS、响应压缩、非 Tomcat 容器、文件暂不可用或容器拒绝注册时自动降级为有界流式复制，响应内容、条件请求和 Range 语义保持不变。
+- `web.max-concurrent-reads` 只限制流式回退，并覆盖异步复制任务的完整生命周期；Tomcat `sendfile` 不获取该 permit，由容器连接和执行器配置负责并发边界。
+- Local 升级时必须删除 `dinghai.file-storage.cache.enabled=true`；该配置已移除，继续保留会使应用启动失败。
 
 ## 离线迁移
 
@@ -207,7 +214,7 @@ Web 层 HTTP 映射：`OBJECT_NOT_FOUND` → 404，`OBJECT_TOO_LARGE` → 413，
 ## 设计要点
 
 - **无日志脱敏问题**：组件代码不输出任何日志，异常消息全部是固定安全文案，不回显密钥、签名 URL 或配置值。
-- **流式读写**：Local 通过临时文件 + 原子移动写入，读取全部流式进行，不把文件整体载入内存；`web.read-buffer-size` 与 `cache.buffer-size` 只是单次复制缓冲区。
+- **流式读写**：Local 通过临时文件 + 原子移动写入；可用时 Web 读取优先交给 Tomcat `sendfile`，其他场景使用有界流式复制，不把文件整体载入内存；`web.read-buffer-size` 与 `cache.buffer-size` 只是单次复制缓冲区。
 - **专用异步执行器**：流式响应使用文件存储专用的有界执行器（core=4 / max=16 / queue=64，线程前缀 `file-storage-web-`），避免依赖无界默认执行器。注意它注册为 Spring MVC 的全局异步执行器，会影响宿主其他 `StreamingResponseBody`，宿主可按需覆盖。
 - **显式优于隐式**：不自动创建 bucket、不在后端之间自动回退、无签名访问默认拒绝、配置非法一律启动失败。
 
@@ -232,7 +239,7 @@ mvn -f dinghai-file-storage/benchmark/pom.xml exec:java \
   -Dexec.args="--provider=minio --file=$HOME/Downloads/doc.zip --concurrency=4 --read-rounds=2"
 ```
 
-压测使用独立随机对象 key，完成后尽力删除对象；输出包含阶段耗时、吞吐量、平均/P95/P99 延迟和错误数，不输出密钥。Local 已用 `982-合0820.FBX`（412,202,320 bytes）完成上述参数的实测：4 并发上传共 1.53 GiB，平均 1298 ms、P95 1406 ms、吞吐 1117 MiB/s；随后 8 次并发冷读共 3.07 GiB，平均 200 ms、P95 230 ms、吞吐 7765 MiB/s，SHA-256 校验全部通过且错误数为 0。该读数会受操作系统文件缓存影响，不能视为纯物理磁盘吞吐。不要将凭据或完整预签名 URL 提交到仓库。
+压测使用独立随机对象 key，完成后尽力删除对象；输出包含阶段耗时、吞吐量、平均/P95/P99 延迟和错误数，不输出密钥。Local 已用 `982-合0820.FBX`（412,202,320 bytes）完成上述参数的实测：4 并发上传共 1.53 GiB，平均 1298 ms、P95 1406 ms、吞吐 1117 MiB/s；随后 8 次并发冷读共 3.07 GiB，平均 200 ms、P95 230 ms、吞吐 7765 MiB/s。Docker MinIO（映射端口 9100）已用 `doc.zip`（约 61 MiB）完成 4 并发实测：上传 48 MiB/s、冷读 371 MiB/s、缓存填充 180 MiB/s、热读 6079 MiB/s，所有阶段错误数均为 0。所有 SHA-256 校验通过。该读数会受操作系统和 MinIO 缓存影响，不能视为纯物理磁盘吞吐。不要将凭据或完整预签名 URL 提交到仓库。
 
 ## 测试
 
