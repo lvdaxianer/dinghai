@@ -28,7 +28,11 @@ public class FileStorageExceptionHandler {
     @ExceptionHandler(FileStorageException.class)
     public ResponseEntity<Map<String, String>> handleFileStorageException(
             FileStorageException exception) {
-        return ResponseEntity.status(status(exception.errorCode()))
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(status(exception.errorCode()));
+        if (exception.errorCode() == FileStorageErrorCode.RATE_LIMITED) {
+            response.header("Retry-After", "1");
+        }
+        return response
                 .body(Map.of("code", exception.errorCode().name(), "message", exception.getMessage()));
     }
 
@@ -53,6 +57,9 @@ public class FileStorageExceptionHandler {
         }
         if (errorCode == FileStorageErrorCode.STORAGE_UNAVAILABLE) {
             return HttpStatus.SERVICE_UNAVAILABLE;
+        }
+        if (errorCode == FileStorageErrorCode.RATE_LIMITED) {
+            return HttpStatus.TOO_MANY_REQUESTS;
         }
         return HttpStatus.BAD_REQUEST;
     }

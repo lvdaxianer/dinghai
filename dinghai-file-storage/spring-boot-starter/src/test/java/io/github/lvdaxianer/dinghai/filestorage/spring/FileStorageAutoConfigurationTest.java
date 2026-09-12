@@ -319,6 +319,7 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(properties.getWeb().isEnabled()).isTrue();
                     assertThat(properties.getWeb().getReadBufferSize().toBytes()).isEqualTo(128L * 1024L);
                     assertThat(properties.getWeb().getMaxConcurrentReads()).isEqualTo(128);
+                    assertThat(properties.getWeb().getMaxConcurrentUploads()).isEqualTo(16);
                     assertThat(properties.getCache().getBufferSize().toBytes()).isEqualTo(128L * 1024L);
                     assertThat(properties.getCache().getMaxConcurrentFills()).isEqualTo(4);
                     assertThat(properties.getCache().getQueueCapacity()).isEqualTo(32);
@@ -370,6 +371,13 @@ public class FileStorageAutoConfigurationTest {
     public void shouldFailFastForInvalidWebPathPrefix() {
         contextRunner.withPropertyValues(localProperties())
                 .withPropertyValues("dinghai.file-storage.web.path-prefix=files?token=value")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    public void shouldFailFastForInvalidWebUploadConcurrency() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.web.max-concurrent-uploads=0")
                 .run(context -> assertThat(context).hasFailed());
     }
 

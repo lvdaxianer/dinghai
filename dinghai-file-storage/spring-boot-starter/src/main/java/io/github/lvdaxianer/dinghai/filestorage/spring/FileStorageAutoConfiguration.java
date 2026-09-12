@@ -219,7 +219,7 @@ public class FileStorageAutoConfiguration {
         validateResourceProperties(properties);
         return new FileStorageWebController(fileStorage, authorizer, Clock.systemUTC(), stableAccess,
                 readCache.orElse(null), intSize(properties.getWeb().getReadBufferSize().toBytes()),
-                properties.getWeb().getMaxConcurrentReads());
+                properties.getWeb().getMaxConcurrentReads(), properties.getWeb().getMaxConcurrentUploads());
     }
 
     /**
@@ -392,6 +392,7 @@ public class FileStorageAutoConfiguration {
         FileStorageProperties.Cache cache = properties.getCache();
         if (web.getReadBufferSize() == null || web.getReadBufferSize().toBytes() <= 0L
                 || web.getMaxConcurrentReads() <= 0
+                || web.getMaxConcurrentUploads() <= 0
                 || cache.getBufferSize() == null || cache.getBufferSize().toBytes() <= 0L
                 || cache.getMaxConcurrentFills() <= 0 || cache.getQueueCapacity() <= 0) {
             throw invalidConfiguration("file storage resource limits must be positive", null);
