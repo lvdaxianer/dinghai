@@ -91,9 +91,10 @@ The MinIO adapter **does not create or modify buckets automatically**; create th
 | --- | --- | --- | --- |
 | `web.enabled` | `boolean` | `true` | Whether to register the file web endpoints, the async executor, and the MVC configuration |
 | `web.path-prefix` | `String` | `/files` | Path prefix of the file endpoints; also used as the prefix of local presigned URLs. Must be non-empty, start with `/`, and contain no `?`, `#`, `\r`, or `\n`. Note: the migration management endpoints are fixed at `/files/migration/*` and **do not follow this prefix** |
-| `web.direct-access` | `boolean` | `false` | Whether to allow direct access without presign credentials. Even when enabled, the host must provide a `FileStorageAccessPolicy` Bean and it must return allow — the two conditions are ANDed; both default to deny |
+| `web.direct-access` | `boolean` | `false` | Whether to allow Web uploads without presign credentials. Even when enabled, the host must provide a `FileStorageAccessPolicy` Bean and it must return allow; Web reads do not require component credentials but remain concurrency-limited |
 | `web.read-buffer-size` | `DataSize` | `128KB` | Copy buffer size per response stream; this is a per-copy buffer, not whole-file memory. Must be positive and not exceed `Integer.MAX_VALUE` |
-| `web.max-concurrent-reads` | `int` | `128` | Semaphore limit on concurrently executing response reads; when exhausted, the read fails immediately with an IOException instead of queueing |
+| `web.max-concurrent-reads` | `int` | `128` | Maximum concurrent Web response reads; when exhausted, the request returns HTTP 429 instead of queueing. Covers streaming, cached-file, and zero-copy transfers |
+| `web.max-concurrent-uploads` | `int` | `16` | Maximum concurrent Web uploads; when exhausted, the request returns HTTP 429 before reading its body. SDK uploads are not affected |
 
 ### cache (Two-Level Disk Read Cache)
 
@@ -161,7 +162,7 @@ With `web.enabled=true`, the following endpoints are registered (default prefix 
 | `PUT /upload/{*key}` | Local presigned upload (HMAC); without a signature, direct-access authorization applies |
 | `GET /download/{*key}` | Presigned download; forces the `attachment` response mode |
 | `GET /preview/{*key}` | Presigned preview; forces the `inline` response mode |
-| `GET /read/key/{*key}` plus `/read/key/preview/{*key}` and `/read/key/download/{*key}` | Direct read by the real object key; still subject to presign or direct-access authorization |
+| `GET /read/key/{*key}` plus `/read/key/preview/{*key}` and `/read/key/download/{*key}` | Anonymous read by the real object key; no component read credential required, but limited by `web.max-concurrent-reads` |
 | `GET /read/v1/{id}` plus `/read/v1/preview/{id}` and `/read/v1/download/{id}` | Anonymous read by stable file ID — no user authentication and no signature required (see next section) |
 
 The migration management endpoints are fixed at `POST /files/migration/export` and `POST /files/migration/import` (parameter `packageName`) and do not follow `web.path-prefix`.
@@ -172,7 +173,7 @@ Preview/download uses streaming responses and supports `Content-Type`, ETag, Las
 
 - **Local backend**: the component implements its own HMAC-SHA-256 presigning. Signed URLs carry query parameters such as `expires` (Unix seconds) and `signature` (Base64URL); upload signatures can additionally bind `contentType`, `maxSize`, and `cacheControl`, while download signatures bind the `inline` or `attachment` response mode. The validity period is limited by `security.maximum-presign-expiry`.
 - **MinIO backend**: uses MinIO native presigning (PostPolicy for uploads, `getPresignedObjectUrl` for downloads). Local signature verification is only supported by the Local adapter; presenting a local-style signed URL to a non-Local backend throws `INVALID_PRESIGN`.
-- **Direct access**: unsigned access is denied by default; it requires both `web.direct-access=true` and a host-provided `FileStorageAccessPolicy` Bean that returns allow for the operation (UPLOAD / DOWNLOAD / PREVIEW).
+- **Direct upload**: unsigned uploads are denied by default; they require both `web.direct-access=true` and a host-provided `FileStorageAccessPolicy` Bean that allows UPLOAD. Web downloads, previews, and reads do not require component credentials but remain limited by `web.max-concurrent-reads`; hosts should apply identity and rate policies at the gateway/WAF layer.
 - All Beans carry `@ConditionalOnMissingBean`, so the host can replace any default implementation (including `FileStorage` itself).
 
 ## Stable File ID

@@ -523,6 +523,8 @@ public class FileStorageProperties {
         private DataSize readBufferSize = DataSize.ofKilobytes(128L);
         /** 同时执行的最大响应读取数。 */
         private int maxConcurrentReads = 128;
+        /** 同时执行的最大 Web 上传数。 */
+        private int maxConcurrentUploads = 16;
 
         /**
          * 判断是否注册 Web 端点。
@@ -598,6 +600,10 @@ public class FileStorageProperties {
         public int getMaxConcurrentReads() { return maxConcurrentReads; }
         /** 设置同时执行的最大响应读取数。 */
         public void setMaxConcurrentReads(int maxConcurrentReads) { this.maxConcurrentReads = maxConcurrentReads; }
+        /** 获取同时执行的最大 Web 上传数。 */
+        public int getMaxConcurrentUploads() { return maxConcurrentUploads; }
+        /** 设置同时执行的最大 Web 上传数。 */
+        public void setMaxConcurrentUploads(int maxConcurrentUploads) { this.maxConcurrentUploads = maxConcurrentUploads; }
     }
 
     /**

@@ -25,6 +25,8 @@ public enum FileStorageErrorCode {
     INVALID_PRESIGN,
     /** 配置非法。 */
     INVALID_CONFIGURATION,
+    /** Web 资源并发达到上限。 */
+    RATE_LIMITED,
     /** 未分类故障。 */
     INTERNAL_ERROR
 }

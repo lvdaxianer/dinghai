@@ -21,7 +21,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Optional;
-import java.util.concurrent.Semaphore;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpRange;
 import org.springframework.http.HttpStatus;
@@ -63,7 +62,7 @@ public class FileStorageWebController {
     /** 可选非本地 provider 读取缓存。 */
     private final ProviderFileReadCache readCache;
     private final int bufferSize;
-    private final Semaphore readPermits;
+    private final WebTransferLimiter transferLimiter;
 
     /**
      * 创建后端中立的文件存储端点。
@@ -118,16 +117,25 @@ public class FileStorageWebController {
                                     StableFileAccessService stableAccess,
                                     ProviderFileReadCache readCache,
                                     int bufferSize, int maxConcurrentReads) {
+        this(storage, authorizer, clock, stableAccess, readCache, bufferSize, maxConcurrentReads, 16);
+    }
+
+    public FileStorageWebController(FileStorage storage,
+                                    FileStorageDirectAccessAuthorizer authorizer, Clock clock,
+                                    StableFileAccessService stableAccess,
+                                    ProviderFileReadCache readCache,
+                                    int bufferSize, int maxConcurrentReads,
+                                    int maxConcurrentUploads) {
         this.storage = java.util.Objects.requireNonNull(storage, "storage");
         this.authorizer = java.util.Objects.requireNonNull(authorizer, "authorizer");
         this.clock = java.util.Objects.requireNonNull(clock, "clock");
         this.stableAccess = stableAccess;
         this.readCache = readCache;
-        if (bufferSize <= 0 || maxConcurrentReads <= 0) {
-            throw new IllegalArgumentException("web read resource limits must be positive");
+        if (bufferSize <= 0 || maxConcurrentReads <= 0 || maxConcurrentUploads <= 0) {
+            throw new IllegalArgumentException("web transfer resource limits must be positive");
         }
         this.bufferSize = bufferSize;
-        this.readPermits = new Semaphore(maxConcurrentReads);
+        this.transferLimiter = new WebTransferLimiter(maxConcurrentUploads, maxConcurrentReads);
     }
 
     /**
@@ -159,6 +167,7 @@ public class FileStorageWebController {
                                        @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false,
                                                defaultValue = "-1") long contentLength,
                                        InputStream input, Principal principal) {
+        try (WebTransferLimiter.Permit ignored = transferLimiter.acquireUpload()) {
         ObjectKey objectKey = objectKey(key);
         if (signature == null || signature.isBlank()) {
             requireDirectAccess(principal, objectKey, FileStorageAccessOperation.UPLOAD);
@@ -179,6 +188,7 @@ public class FileStorageWebController {
                     request.cacheControl()));
         }
         return ResponseEntity.noContent().build();
+        }
     }
 
     /**
@@ -487,7 +497,6 @@ public class FileStorageWebController {
                                   Principal principal,
                                   PresignDownloadRequest.ResponseDisposition disposition) {
         if (signature == null || signature.isBlank()) {
-            requireDirectAccess(principal, key, operation(disposition));
             return;
         }
         PresignDownloadRequest request = new PresignDownloadRequest(key, expiry(expires), disposition,
@@ -547,8 +556,15 @@ public class FileStorageWebController {
      */
     private ResponseEntity<StreamingResponseBody> stream(ObjectKey key, HttpHeaders headers,
                                                           HttpStatus status, long skip, long length) {
-        DownloadObject download = readObject(key).orElseThrow(this::notFound);
-        StreamingResponseBody body = output -> copyRange(download, output, skip, length);
+        WebTransferLimiter.Permit permit = transferLimiter.acquireRead();
+        DownloadObject download;
+        try {
+            download = readObject(key).orElseThrow(this::notFound);
+        } catch (RuntimeException exception) {
+            permit.close();
+            throw exception;
+        }
+        StreamingResponseBody body = output -> copyRange(download, output, skip, length, permit);
         return new ResponseEntity<>(body, headers, status);
     }
 
@@ -609,15 +625,11 @@ public class FileStorageWebController {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    private void copyRange(DownloadObject download, java.io.OutputStream output, long skip, long length)
+    private void copyRange(DownloadObject download, java.io.OutputStream output, long skip, long length,
+                           WebTransferLimiter.Permit permit)
             throws IOException {
-        boolean acquired = false;
-        try {
-            acquired = readPermits.tryAcquire();
-            if (!acquired) {
-                throw new IOException("file storage read capacity exhausted");
-            }
-        try (DownloadObject ignored = download) {
+        try (WebTransferLimiter.Permit ignored = permit;
+             DownloadObject ignoredDownload = download) {
             InputStream input = download.stream();
             input.skipNBytes(skip);
             byte[] buffer = new byte[bufferSize];
@@ -629,11 +641,6 @@ public class FileStorageWebController {
                 }
                 output.write(buffer, 0, read);
                 remaining -= read;
-            }
-        }
-        } finally {
-            if (acquired) {
-                readPermits.release();
             }
         }
     }

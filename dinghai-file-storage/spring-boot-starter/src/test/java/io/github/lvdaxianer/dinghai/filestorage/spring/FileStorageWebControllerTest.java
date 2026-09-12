@@ -104,17 +104,13 @@ public class FileStorageWebControllerTest {
         assertEquals("new content", read(ObjectKey.of("uploads/new.txt")));
     }
 
-    /**
-     * 无签名的预览请求必须被默认策略拒绝。
-     *
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-11
-     */
+    /** 无签名预览按匿名读取契约启动响应。 */
     @Test
-    public void shouldRejectUnsignedPreviewByDefault() throws Exception {
+    public void shouldReadUnsignedPreviewByDefault() throws Exception {
         mockMvc.perform(get("/files/preview/documents/readme.txt"))
-                .andExpect(status().isForbidden());
+                .andExpect(request().asyncStarted());
     }
+
 
     /** 启用宿主直接访问后，真实对象 key 读取地址应可用。 */
     @Test
@@ -130,6 +126,15 @@ public class FileStorageWebControllerTest {
         directMvc.perform(asyncDispatch(started)).andExpect(status().isOk())
                 .andExpect(content().string("hello"))
                 .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("inline")));
+    }
+
+    /** 真实 key 读取不应调用宿主直接访问授权。 */
+    @Test
+    public void shouldReadRealObjectKeyWhenDirectAccessIsDisabled() throws Exception {
+        MvcResult started = mockMvc.perform(get("/files/read/key/documents/readme.txt"))
+                .andExpect(request().asyncStarted()).andReturn();
+        mockMvc.perform(asyncDispatch(started)).andExpect(status().isOk())
+                .andExpect(content().string("hello"));
     }
 
     /**
