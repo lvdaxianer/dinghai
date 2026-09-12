@@ -18,4 +18,4 @@
 ## 4. 验证与集成
 
 - [x] 4.1 运行 starter 模块及依赖模块 Maven 测试、OpenSpec 严格校验和 diff 检查。
-- [ ] 4.2 完成代码审查、归档 OpenSpec，并将已验证任务合并回 `main`。
+- [x] 4.2 完成代码审查、归档 OpenSpec，并将已验证任务合并回 `main`。
