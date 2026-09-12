@@ -66,11 +66,20 @@ dinghai:
       enabled: true
       path-prefix: /files
       direct-access: false
+      read-buffer-size: 128KB
+      max-concurrent-reads: 128
+    cache:
+      max-object-size: 50MB
+      buffer-size: 128KB
+      max-concurrent-fills: 4
+      queue-capacity: 32
     upload:
       max-size: 100MB
 ```
 
 Starter 默认注册 `/files/upload/{*key}`、`/files/download/{*key}` 和 `/files/preview/{*key}`。上传和下载 URL 均可预签名；下载签名绑定 `inline` 或 `attachment` 响应模式。预览/下载使用流式响应，并支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304 和单 Range 206/416。流式响应使用文件存储专用的有界异步执行器，避免依赖无界默认执行器。无签名访问默认拒绝，直接访问必须显式开启并提供 `FileStorageAccessPolicy`。
+
+除稳定 `fileId` 地址外，也可使用真实 object key 地址 `/files/read/key/{*key}`、`/files/read/key/preview/{*key}` 和 `/files/read/key/download/{*key}`；这些地址仍遵守预签名或宿主直接访问授权。`web.read-buffer-size` 和 `cache.buffer-size` 是单次复制缓冲区，不代表整文件内存；`web.max-concurrent-reads`、`cache.max-concurrent-fills` 和 `cache.queue-capacity` 分别限制响应读取并发、缓存落盘并发和等待队列长度。
 
 MinIO 配置需要 `endpoint`、`bucket`、`access-key` 和 `secret-key`，不自动创建 bucket，也不会在 Local 与 MinIO 之间自动回退。签名密钥、访问密钥和完整签名 URL 不写入日志或错误响应。
 

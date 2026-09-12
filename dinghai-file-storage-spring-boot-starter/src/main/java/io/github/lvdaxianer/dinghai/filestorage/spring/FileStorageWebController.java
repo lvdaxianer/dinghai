@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Optional;
+import java.util.concurrent.Semaphore;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpRange;
 import org.springframework.http.HttpStatus;
@@ -46,7 +47,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 public class FileStorageWebController {
 
     /** 缓冲区大小。 */
-    private static final int BUFFER_SIZE = 8192;
+    private static final int DEFAULT_BUFFER_SIZE = 128 * 1024;
     /** 默认文件路径前缀。 */
     /** HTTP 日期格式化器。 */
     private static final DateTimeFormatter HTTP_DATE = DateTimeFormatter.RFC_1123_DATE_TIME;
@@ -61,6 +62,8 @@ public class FileStorageWebController {
     private final StableFileAccessService stableAccess;
     /** 可选非本地 provider 读取缓存。 */
     private final ProviderFileReadCache readCache;
+    private final int bufferSize;
+    private final Semaphore readPermits;
 
     /**
      * 创建后端中立的文件存储端点。
@@ -107,11 +110,24 @@ public class FileStorageWebController {
                                     FileStorageDirectAccessAuthorizer authorizer, Clock clock,
                                     StableFileAccessService stableAccess,
                                     ProviderFileReadCache readCache) {
+        this(storage, authorizer, clock, stableAccess, readCache, DEFAULT_BUFFER_SIZE, 128);
+    }
+
+    public FileStorageWebController(FileStorage storage,
+                                    FileStorageDirectAccessAuthorizer authorizer, Clock clock,
+                                    StableFileAccessService stableAccess,
+                                    ProviderFileReadCache readCache,
+                                    int bufferSize, int maxConcurrentReads) {
         this.storage = java.util.Objects.requireNonNull(storage, "storage");
         this.authorizer = java.util.Objects.requireNonNull(authorizer, "authorizer");
         this.clock = java.util.Objects.requireNonNull(clock, "clock");
         this.stableAccess = stableAccess;
         this.readCache = readCache;
+        if (bufferSize <= 0 || maxConcurrentReads <= 0) {
+            throw new IllegalArgumentException("web read resource limits must be positive");
+        }
+        this.bufferSize = bufferSize;
+        this.readPermits = new Semaphore(maxConcurrentReads);
     }
 
     /**
@@ -225,6 +241,48 @@ public class FileStorageWebController {
                                                            Principal principal) {
         return read(key, expires, cacheControl, signature, ifNoneMatch, ifModifiedSince, range,
                 principal, PresignDownloadRequest.ResponseDisposition.INLINE);
+    }
+
+    /** 通过真实对象 key 读取对象，保留宿主直接访问或预签名校验。 */
+    @GetMapping("/read/key/{*key}")
+    public ResponseEntity<StreamingResponseBody> keyRead(@PathVariable String key,
+                                                           @RequestParam(required = false) Long expires,
+                                                           @RequestParam(required = false) String cacheControl,
+                                                           @RequestParam(required = false) String signature,
+                                                           @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
+                                                           @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE, required = false) String ifModifiedSince,
+                                                           @RequestHeader(value = HttpHeaders.RANGE, required = false) String range,
+                                                           Principal principal) {
+        return read(key, expires, cacheControl, signature, ifNoneMatch, ifModifiedSince, range,
+                principal, PresignDownloadRequest.ResponseDisposition.INLINE);
+    }
+
+    /** 通过真实对象 key 在线预览对象。 */
+    @GetMapping("/read/key/preview/{*key}")
+    public ResponseEntity<StreamingResponseBody> keyPreview(@PathVariable String key,
+                                                              @RequestParam(required = false) Long expires,
+                                                              @RequestParam(required = false) String cacheControl,
+                                                              @RequestParam(required = false) String signature,
+                                                              @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
+                                                              @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE, required = false) String ifModifiedSince,
+                                                              @RequestHeader(value = HttpHeaders.RANGE, required = false) String range,
+                                                              Principal principal) {
+        return read(key, expires, cacheControl, signature, ifNoneMatch, ifModifiedSince, range,
+                principal, PresignDownloadRequest.ResponseDisposition.INLINE);
+    }
+
+    /** 通过真实对象 key 下载对象。 */
+    @GetMapping("/read/key/download/{*key}")
+    public ResponseEntity<StreamingResponseBody> keyDownload(@PathVariable String key,
+                                                               @RequestParam(required = false) Long expires,
+                                                               @RequestParam(required = false) String cacheControl,
+                                                               @RequestParam(required = false) String signature,
+                                                               @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
+                                                               @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE, required = false) String ifModifiedSince,
+                                                               @RequestHeader(value = HttpHeaders.RANGE, required = false) String range,
+                                                               Principal principal) {
+        return read(key, expires, cacheControl, signature, ifNoneMatch, ifModifiedSince, range,
+                principal, PresignDownloadRequest.ResponseDisposition.ATTACHMENT);
     }
 
     /**
@@ -553,10 +611,16 @@ public class FileStorageWebController {
      */
     private void copyRange(DownloadObject download, java.io.OutputStream output, long skip, long length)
             throws IOException {
+        boolean acquired = false;
+        try {
+            acquired = readPermits.tryAcquire();
+            if (!acquired) {
+                throw new IOException("file storage read capacity exhausted");
+            }
         try (DownloadObject ignored = download) {
             InputStream input = download.stream();
             input.skipNBytes(skip);
-            byte[] buffer = new byte[BUFFER_SIZE];
+            byte[] buffer = new byte[bufferSize];
             long remaining = length;
             while (remaining > 0L) {
                 int read = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
@@ -565,6 +629,11 @@ public class FileStorageWebController {
                 }
                 output.write(buffer, 0, read);
                 remaining -= read;
+            }
+        }
+        } finally {
+            if (acquired) {
+                readPermits.release();
             }
         }
     }

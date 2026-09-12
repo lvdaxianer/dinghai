@@ -120,8 +120,10 @@ public class FileStorageAutoConfiguration {
         if (cache.getRoot() == null) {
             throw invalidConfiguration("non-local cache root is required", null);
         }
+        validateResourceProperties(properties);
         return new ProviderFileReadCache(storage, properties.getStorageAlias(), cache.getRoot(),
-                cache.isEnabled(), cache.getMaxObjectSize());
+                cache.isEnabled(), cache.getMaxObjectSize(), intSize(cache.getBufferSize().toBytes()),
+                cache.getMaxConcurrentFills(), cache.getQueueCapacity());
     }
 
     /** 为本地 provider 在显式开启时创建二级磁盘读取缓存。 */
@@ -135,8 +137,10 @@ public class FileStorageAutoConfiguration {
         if (cache.getRoot() == null) {
             throw invalidConfiguration("local cache root is required", null);
         }
+        validateResourceProperties(properties);
         return new ProviderFileReadCache(storage, properties.getStorageAlias(), cache.getRoot(),
-                true, cache.getMaxObjectSize());
+                true, cache.getMaxObjectSize(), intSize(cache.getBufferSize().toBytes()),
+                cache.getMaxConcurrentFills(), cache.getQueueCapacity());
     }
 
     /** 创建非本地 provider 缓存的午夜清理任务。 */
@@ -234,9 +238,12 @@ public class FileStorageAutoConfiguration {
     public FileStorageWebController fileStorageWebController(FileStorage fileStorage,
                                                               FileStorageDirectAccessAuthorizer authorizer,
                                                               StableFileAccessService stableAccess,
-                                                              Optional<ProviderFileReadCache> readCache) {
+                                                              Optional<ProviderFileReadCache> readCache,
+                                                              FileStorageProperties properties) {
+        validateResourceProperties(properties);
         return new FileStorageWebController(fileStorage, authorizer, Clock.systemUTC(), stableAccess,
-                readCache.orElse(null));
+                readCache.orElse(null), intSize(properties.getWeb().getReadBufferSize().toBytes()),
+                properties.getWeb().getMaxConcurrentReads());
     }
 
     /**
@@ -349,6 +356,24 @@ public class FileStorageAutoConfiguration {
                 || pathPrefix.indexOf('\r') >= 0 || pathPrefix.indexOf('\n') >= 0) {
             throw invalidConfiguration("file storage web path prefix is invalid", null);
         }
+    }
+
+    private void validateResourceProperties(FileStorageProperties properties) {
+        FileStorageProperties.Web web = properties.getWeb();
+        FileStorageProperties.Cache cache = properties.getCache();
+        if (web.getReadBufferSize() == null || web.getReadBufferSize().toBytes() <= 0L
+                || web.getMaxConcurrentReads() <= 0
+                || cache.getBufferSize() == null || cache.getBufferSize().toBytes() <= 0L
+                || cache.getMaxConcurrentFills() <= 0 || cache.getQueueCapacity() <= 0) {
+            throw invalidConfiguration("file storage resource limits must be positive", null);
+        }
+    }
+
+    private int intSize(long value) {
+        if (value > Integer.MAX_VALUE) {
+            throw invalidConfiguration("file storage buffer size is too large", null);
+        }
+        return (int) value;
     }
 
     /**

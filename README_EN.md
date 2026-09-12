@@ -66,11 +66,20 @@ dinghai:
       enabled: true
       path-prefix: /files
       direct-access: false
+      read-buffer-size: 128KB
+      max-concurrent-reads: 128
+    cache:
+      max-object-size: 50MB
+      buffer-size: 128KB
+      max-concurrent-fills: 4
+      queue-capacity: 32
     upload:
       max-size: 100MB
 ```
 
 The Starter registers `/files/upload/{*key}`, `/files/download/{*key}`, and `/files/preview/{*key}` by default. Upload and download URLs can be presigned; download signatures bind the `inline` or `attachment` response disposition. Preview/download responses stream object content and support Content-Type, ETag, Last-Modified, Cache-Control, Expires, 304, and single-range 206/416 responses. Streaming uses a dedicated bounded async executor instead of an unbounded default executor. Unsigned access is denied by default; direct access requires explicit enablement and an application `FileStorageAccessPolicy`.
+
+In addition to stable `fileId` URLs, callers can use real object-key URLs `/files/read/key/{*key}`, `/files/read/key/preview/{*key}`, and `/files/read/key/download/{*key}`. These routes still require a valid presignature or host direct-access authorization. `web.read-buffer-size` and `cache.buffer-size` are per-copy buffers rather than whole-file allocations; the concurrency and queue settings bound active response reads, cache fills, and waiting fill tasks.
 
 MinIO requires `endpoint`, `bucket`, `access-key`, and `secret-key`. Buckets are not created automatically, and there is no automatic fallback between local disk and MinIO. Signing keys, access keys, and full presigned URLs are never written to logs or error responses.
 
