@@ -11,10 +11,7 @@ dinghai is lvdaxianer's personal open-source base-component library, distilled a
 | Module | Version | Description | Docs |
 | --- | --- | --- | --- |
 | `dinghai-shared-state` | 1.0.0 | Shared state cache: dual Redis/Caffeine backends, circuit-breaker fault tolerance, observability, Spring Boot 3 auto-configuration | [Docs](dinghai-shared-state/README_EN.md) |
-| `dinghai-file-storage-core` | 1.0.0 | Backend-neutral storage contracts, object models, presigned models, and stable error codes | [Docs](dinghai-file-storage/README_EN.md) |
-| `dinghai-file-storage-local` | 1.0.0 | Local-disk adapter with Unicode/nested keys, HMAC presigning, and streaming I/O | [Docs](dinghai-file-storage/README_EN.md) |
-| `dinghai-file-storage-minio` | 1.0.0 | Fixed-bucket MinIO adapter with native presigning | [Docs](dinghai-file-storage/README_EN.md) |
-| `dinghai-file-storage-spring-boot-starter` | 1.0.0 | Provider auto-configuration and local Web presigned endpoints | [Docs](dinghai-file-storage/README_EN.md) |
+| `dinghai-file-storage` | 1.0.0 | Unified file storage abstraction: local-disk and MinIO backends, presigned upload/download, Web endpoints, two-level disk read cache and offline migration, shipped as four artifacts — core / local / minio / spring-boot-starter | [Docs](dinghai-file-storage/README_EN.md) |
 
 See each module directory's README for full documentation (Maven coordinates, configuration, usage examples, testing).
 
