@@ -51,13 +51,14 @@ public final class FileStorageBenchmark {
         List<ObjectKey> keys = List.of();
         try {
             storage = storage(options, localRoot);
+            FileStorage activeStorage = storage;
             keys = keys(options.concurrency());
             String digest = digest(options.file());
             print("source", options, Files.size(options.file()), digest);
-            measure("upload", options, keys, key -> upload(storage, options.file(), key));
-            measure("read-cold", options, repeated(keys, options.readRounds()), key -> read(storage, key, digest));
+            measure("upload", options, keys, key -> upload(activeStorage, options.file(), key));
+            measure("read-cold", options, repeated(keys, options.readRounds()), key -> read(activeStorage, key, digest));
             if (options.provider() == FileStorageBenchmarkOptions.Provider.MINIO) {
-                measureCached(storage, options, keys, digest, localRoot);
+                measureCached(activeStorage, options, keys, digest, localRoot);
             } else {
                 print("read-hot", options, 0L, "not-applicable");
             }
@@ -167,9 +168,6 @@ public final class FileStorageBenchmark {
     private List<Future<Long>> submit(ExecutorService executor, List<ObjectKey> keys,
                                       CheckedConsumer<ObjectKey> task) {
         List<Future<Long>> futures = new ArrayList<>(keys.size());
-        if (storage == null) {
-            return;
-        }
         for (ObjectKey key : keys) {
             futures.add(executor.submit(timed(key, task)));
         }
