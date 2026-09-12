@@ -97,7 +97,8 @@ provider 流异步落盘；每天
 
 文件存储模块统一位于 `dinghai-file-storage/`：`core`、`local`、`minio` 和
 `spring-boot-starter` 保持原有 Maven artifactId 不变。仓库还提供仅用于开发验证的
-`dinghai-file-storage/benchmark` 模块，可对真实文件执行并发上传、读取和 SHA-256 校验。
+`dinghai-file-storage/benchmark` 模块，可对真实文件执行并发上传、冷读、MinIO 缓存填充/热读
+和 SHA-256 校验。
 
 ```bash
 # Local：并发上传 4 份、每份读取 2 轮
@@ -117,7 +118,11 @@ mvn -f dinghai-file-storage/benchmark/pom.xml exec:java \
 ```
 
 压测使用独立随机对象 key，完成后尽力删除对象；输出包含阶段耗时、吞吐量、平均/P95/P99
-延迟和错误数，不输出密钥。
+延迟和错误数，不输出密钥。Local 已用 `982-合0820.FBX`（412,202,320 bytes）完成上述参数的
+实测：4 并发上传共 1.53 GiB，平均 1298 ms、P95 1406 ms、吞吐 1117 MiB/s；随后 8 次并发冷读
+共 3.07 GiB，平均 200 ms、P95 230 ms、吞吐 7765 MiB/s，SHA-256 校验全部通过且错误数为 0。
+该读数会受操作系统文件缓存影响，不能视为纯物理磁盘吞吐。MinIO 压测在提供有效的运行时凭据后
+执行，并分别输出上传、冷读、缓存填充与热读数据；不要将凭据或完整预签名 URL 提交到仓库。
 
 离线迁移只处理服务器目录包，不通过 HTTP 上传大文件。显式设置
 `dinghai.file-storage.migration.enabled=true` 后，配置 `export-root`、`import-root`、

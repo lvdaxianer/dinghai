@@ -35,4 +35,5 @@ MinIO cache 场景通过 `ProviderFileReadCache` 执行：冷读先填充，然�
 - Maven reactor 在重组后执行完整测试。
 - benchmark 参数和 Local 并发流程单元测试。
 - 用 `~/Downloads/982-合0820.FBX` 执行 Local 并发实测。
-- 用 `~/Downloads/doc.zip` 执行 MinIO 并发实测；运行凭据仅由 Docker 容器环境注入。
+- 用 `~/Downloads/doc.zip` 执行 MinIO 并发实测；凭据仅通过运行时
+  `DINGHAI_FILE_STORAGE_MINIO_*` 环境变量提供，不写入仓库。

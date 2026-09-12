@@ -87,6 +87,8 @@ sharedStateCache.getAndExpire(sessionKey, CacheExpiry.after(Duration.ofMinutes(3
 - **Provider**：`local` 使用 `local.root`；`minio` 使用固定 bucket 的 `endpoint`、`bucket`、`access-key`、`secret-key`。
 - **安全默认值**：最大上传大小为 100 MB；本地签名密钥必须由环境变量或部署配置注入；Web 默认启用 `/files`，但 `direct-access=false`，无签名请求拒绝。
 - **Web**：Local 的预签名地址使用 `/files/upload/{*key}`、`/files/download/{*key}`、`/files/preview/{*key}`；下载强制 `attachment`，预览强制 `inline`，支持 ETag、304、Cache-Control 与单 Range，并使用独立有界异步执行器承载流式响应。
+- **稳定读取与缓存**：稳定 `fileId` 和真实 object key 都可读取；非 Local provider 默认启用经远端 `stat` 校验的二级磁盘缓存，未命中且对象不超过 `cache.max-object-size` 时主请求流式返回、第二条 provider 流异步落盘。Local 默认关闭该缓存；每日 00:00 清理超过 `cache.idle-ttl` 未访问的完整副本。
+- **模块与压测**：Maven 模块位于 `dinghai-file-storage/{core,local,minio,spring-boot-starter}`；开发验证使用 `dinghai-file-storage/benchmark`，它对真实文件执行可配置并发上传、冷读及 SHA-256 校验，MinIO 还报告缓存填充和热读。仅通过 `DINGHAI_FILE_STORAGE_MINIO_*` 运行时环境变量提供 MinIO 凭据。
 - **保密**：不要记录或返回 signing key、MinIO access/secret key、token、完整预签名 URL 或请求体。
 
 ### 最小配置
