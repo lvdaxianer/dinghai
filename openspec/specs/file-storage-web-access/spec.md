@@ -25,7 +25,7 @@
 - **THEN** Starter 从本地适配器流式返回对象，并应用签名中固定的响应模式和缓存策略
 
 ### Requirement: 默认拒绝直接 Web 访问
-Starter SHALL 默认以 `web.enabled=true`、`web.path-prefix=/files`、`web.direct-access=false` 注册文件端点。Web 上传无有效预签名凭据时 MUST 被拒绝；只有 `direct-access=true` 且应用提供 `FileStorageAccessPolicy` 时，上传端点才能根据宿主应用认证主体允许直接上传。Web 下载、预览及真实 key 读取不要求组件用户凭证或直接访问授权，但仍受 Web 读取并发限制。
+Starter SHALL 默认以 `web.enabled=true`、`web.path-prefix=/files`、`web.direct-access=false` 注册文件端点。Web 上传无有效预签名凭据时 MUST 被拒绝；只有 `direct-access=true` 且应用提供 `FileStorageAccessPolicy` 时，上传端点才能根据宿主应用认证主体允许直接上传。成功的直接或预签名 Web 上传 MUST 返回 HTTP `201 Created`、所持久对象的 `key`、`contentLength`、`contentType`、`etag`、`lastModified`、`cacheControl` 和 `previewUrl`，并将 `Location` 设为 `previewUrl`。`previewUrl` MUST 指向配置路径前缀下的真实 key 预览端点。Web 下载、预览及真实 key 读取不要求组件用户凭证或直接访问授权，但仍受 Web 读取并发限制。
 
 #### Scenario: 默认配置拒绝无签名预览
 - **WHEN** 客户端在默认配置下无预签名凭据访问 `/files/preview/{key}`

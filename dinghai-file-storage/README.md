@@ -162,13 +162,29 @@ dinghai:
 
 | 端点 | 说明 |
 | --- | --- |
-| `PUT /upload/{*key}` | 本地预签名上传（HMAC）；无签名时走直接上传授权，并受 `web.max-concurrent-uploads` 限制 |
+| `PUT /upload/{*key}` | 本地预签名上传（HMAC）；无签名时走直接上传授权，并受 `web.max-concurrent-uploads` 限制。成功返回 `201 Created`、`Location` 和已确认的对象元数据 |
 | `GET /download/{*key}` | 下载，强制 `attachment` 响应模式，受 `web.max-concurrent-reads` 限制 |
 | `GET /preview/{*key}` | 预览，强制 `inline` 响应模式，受 `web.max-concurrent-reads` 限制 |
 | `GET /read/key/{*key}` 及 `/read/key/preview/{*key}`、`/read/key/download/{*key}` | 按真实 object key 匿名直读，不要求组件读取凭证；受 `web.max-concurrent-reads` 限制 |
 | `GET /read/v1/{id}` 及 `/read/v1/preview/{id}`、`/read/v1/download/{id}` | 按稳定文件 ID 匿名读取，不做用户鉴权也不需要签名（见下节） |
 
 迁移管理端点固定为 `POST /files/migration/export`、`POST /files/migration/import`（参数 `packageName`），不随 `web.path-prefix` 变化。
+
+`PUT /upload/{*key}` 成功后响应体与 SDK `FileStorage.put` 的 `ObjectMetadata` 字段保持一致，并额外返回 `previewUrl`：
+
+```json
+{
+  "key": {"value": "1/1/1/1.png"},
+  "contentLength": 5,
+  "contentType": "image/png",
+  "etag": "provider-confirmed-etag",
+  "lastModified": "2026-09-12T15:37:23Z",
+  "cacheControl": {"value": "private, max-age=0"},
+  "previewUrl": "/files/read/key/preview/1/1/1/1.png"
+}
+```
+
+响应状态为 `201 Created`，`Location` 等于 `previewUrl`。`key`、长度、类型、ETag、修改时间和缓存策略都取自 provider 持久化后的确认结果，而不是客户端声明值。`previewUrl` 是配置 `web.path-prefix` 下的根相对地址，使用真实 object key（保留 `/` 层级并对路径字符编码）；浏览器可直接访问组件的匿名真实 key 预览端点。它不是本地磁盘路径、MinIO/OSS 原始 URL，也不包含部署主机名，反向代理或应用边界可按需补充公开域名。
 
 预览/下载支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304（If-None-Match / If-Modified-Since）和单区间 Range 206/416。Local 主文件和 MinIO 已校验的热缓存文件在明文、未压缩的嵌入 Tomcat 中优先注册原生 `sendfile`；TLS、压缩、其他容器或容器不支持时自动回退到有界流式复制，调用方无需切换接口。
 

@@ -162,13 +162,29 @@ With `web.enabled=true`, the following endpoints are registered (default prefix 
 
 | Endpoint | Description |
 | --- | --- |
-| `PUT /upload/{*key}` | Local presigned upload (HMAC); unsigned requests use direct-upload authorization and are limited by `web.max-concurrent-uploads` |
+| `PUT /upload/{*key}` | Local presigned upload (HMAC); unsigned requests use direct-upload authorization and are limited by `web.max-concurrent-uploads`. Successful uploads return `201 Created`, `Location`, and confirmed object metadata |
 | `GET /download/{*key}` | Download; forces `attachment` and is limited by `web.max-concurrent-reads` |
 | `GET /preview/{*key}` | Preview; forces `inline` and is limited by `web.max-concurrent-reads` |
 | `GET /read/key/{*key}` plus `/read/key/preview/{*key}` and `/read/key/download/{*key}` | Anonymous read by the real object key; no component read credential required, but limited by `web.max-concurrent-reads` |
 | `GET /read/v1/{id}` plus `/read/v1/preview/{id}` and `/read/v1/download/{id}` | Anonymous read by stable file ID — no user authentication and no signature required (see next section) |
 
 The migration management endpoints are fixed at `POST /files/migration/export` and `POST /files/migration/import` (parameter `packageName`) and do not follow `web.path-prefix`.
+
+A successful `PUT /upload/{*key}` response keeps the SDK `FileStorage.put` `ObjectMetadata` field names and adds `previewUrl`:
+
+```json
+{
+  "key": {"value": "1/1/1/1.png"},
+  "contentLength": 5,
+  "contentType": "image/png",
+  "etag": "provider-confirmed-etag",
+  "lastModified": "2026-09-12T15:37:23Z",
+  "cacheControl": {"value": "private, max-age=0"},
+  "previewUrl": "/files/read/key/preview/1/1/1/1.png"
+}
+```
+
+The response status is `201 Created`, and `Location` equals `previewUrl`. `key`, length, type, ETag, modification time, and cache control all come from the provider-confirmed persisted result, not client-declared values. `previewUrl` is a root-relative address under the configured `web.path-prefix`; it uses the real object key, preserves `/` hierarchy, and percent-encodes path characters. Browsers can use it with the component's anonymous real-key preview route. It is not a Local disk path or a raw MinIO/OSS URL, and it does not contain a deployment host; a reverse proxy or application boundary can prepend its public origin when needed.
 
 Preview/download supports `Content-Type`, ETag, Last-Modified, Cache-Control, Expires, 304 (If-None-Match / If-Modified-Since), and single-range Range 206/416. Local primary files and validated MinIO hot-cache files prefer native `sendfile` on plain, uncompressed embedded Tomcat; TLS, compression, other containers, or a rejected container registration automatically fall back to bounded streaming with the same caller-visible semantics.
 

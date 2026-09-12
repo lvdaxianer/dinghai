@@ -41,6 +41,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -103,9 +104,73 @@ public class FileStorageWebControllerTest {
                 ObjectKey.of("uploads/new.txt"), Duration.ofMinutes(10L), "text/plain", 20L));
 
         mockMvc.perform(put(upload.url()).contentType(MediaType.TEXT_PLAIN).content("new content"))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", "/files/read/key/preview/uploads/new.txt"))
+                .andExpect(jsonPath("$.key.value").value("uploads/new.txt"))
+                .andExpect(jsonPath("$.contentLength").value(11))
+                .andExpect(jsonPath("$.contentType").value("text/plain"))
+                .andExpect(jsonPath("$.etag").isNotEmpty())
+                .andExpect(jsonPath("$.lastModified").isNotEmpty())
+                .andExpect(jsonPath("$.cacheControl.value").value("private, max-age=0"))
+                .andExpect(jsonPath("$.previewUrl").value("/files/read/key/preview/uploads/new.txt"));
 
         assertEquals("new content", read(ObjectKey.of("uploads/new.txt")));
+    }
+
+    /**
+     * 直接上传也必须返回与预签名上传相同的对象结果。
+     *
+     * @throws Exception MVC 请求执行失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    @Test
+    public void shouldReturnMetadataAndRealKeyPreviewUrlForDirectUpload() throws Exception {
+        FileStorageWebController controller = new FileStorageWebController(storage,
+                new FileStorageDirectAccessAuthorizer(true, (principal, key, operation) -> true),
+                Clock.fixed(NOW, ZoneOffset.UTC), stableAccess);
+        MockMvc directMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new FileStorageExceptionHandler()).build();
+
+        directMvc.perform(put("/files/upload/1/1/1/1.png")
+                        .contentType(MediaType.IMAGE_PNG).content("image"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", "/files/read/key/preview/1/1/1/1.png"))
+                .andExpect(jsonPath("$.key.value").value("1/1/1/1.png"))
+                .andExpect(jsonPath("$.contentLength").value(5))
+                .andExpect(jsonPath("$.contentType").value("image/png"))
+                .andExpect(jsonPath("$.previewUrl").value("/files/read/key/preview/1/1/1/1.png"));
+    }
+
+    /**
+     * 自定义路径前缀的响应应保留 key 层级并编码路径字符。
+     *
+     * @throws Exception MVC 请求执行失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    @Test
+    public void shouldUseConfiguredPrefixAndEncodedKeyForPreviewUrl() throws Exception {
+        String pathPrefix = "/assets";
+        LocalFileStorageAdapter customStorage = new LocalFileStorageAdapter(
+                temporaryFolder.newFolder("custom-storage").toPath(), SIGNING_KEY, 1024L,
+                java.util.Set.of(), Duration.ofHours(1L), Clock.fixed(NOW, ZoneOffset.UTC), pathPrefix);
+        FileStorageWebController controller = new FileStorageWebController(customStorage,
+                new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC),
+                stableAccess, null, new WebTransferConfiguration(128 * 1024, 128, 16, 0, null, pathPrefix));
+        MockMvc customMvc = MockMvcBuilders.standaloneSetup(controller)
+                .addPlaceholderValue("dinghai.file-storage.web.path-prefix", pathPrefix)
+                .setControllerAdvice(new FileStorageExceptionHandler()).build();
+        ObjectKey key = ObjectKey.of("目录/hello world.png");
+        PresignedUpload upload = customStorage.presignUpload(new PresignUploadRequest(
+                key, Duration.ofMinutes(10L), "image/png", 20L));
+        String previewUrl = "/assets/read/key/preview/%E7%9B%AE%E5%BD%95/hello%20world.png";
+
+        customMvc.perform(put(upload.url()).contentType(MediaType.IMAGE_PNG).content("image"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", previewUrl))
+                .andExpect(jsonPath("$.key.value").value(key.value()))
+                .andExpect(jsonPath("$.previewUrl").value(previewUrl));
     }
 
     /** 无签名预览按匿名读取契约启动响应。 */
@@ -465,7 +530,7 @@ public class FileStorageWebControllerTest {
         blockingStorage.releaseFirstWrite();
         firstRequest.join(TimeUnit.SECONDS.toMillis(2L));
         assertTrue(!firstRequest.isAlive());
-        assertEquals(null, firstFailure.get());
+        assertTrue(firstFailure.get() == null);
     }
 
     /** 验证 resolver 降级场景仍使用全局读取许可。 */
@@ -515,7 +580,7 @@ public class FileStorageWebControllerTest {
         try {
             keyLimitedMvc.perform(put("/files/upload/uploads/first.txt").header("X-Tenant", "tenant-a")
                             .contentType(MediaType.TEXT_PLAIN).content("first"))
-                    .andExpect(status().isNoContent());
+                    .andExpect(status().isCreated());
         } catch (Exception exception) {
             failure.set(exception);
         }
