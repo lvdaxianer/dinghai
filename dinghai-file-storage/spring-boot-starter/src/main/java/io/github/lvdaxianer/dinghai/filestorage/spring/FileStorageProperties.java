@@ -525,6 +525,8 @@ public class FileStorageProperties {
         private int maxConcurrentReads = 128;
         /** 同时执行的最大 Web 上传数。 */
         private int maxConcurrentUploads = 16;
+        /** 单个宿主限流 key 的最大上传或读取并发数，零表示关闭。 */
+        private int maxConcurrentTransfersPerKey;
 
         /**
          * 判断是否注册 Web 端点。
@@ -604,6 +606,12 @@ public class FileStorageProperties {
         public int getMaxConcurrentUploads() { return maxConcurrentUploads; }
         /** 设置同时执行的最大 Web 上传数。 */
         public void setMaxConcurrentUploads(int maxConcurrentUploads) { this.maxConcurrentUploads = maxConcurrentUploads; }
+        /** 获取单个宿主限流 key 的最大上传或读取并发数。 */
+        public int getMaxConcurrentTransfersPerKey() { return maxConcurrentTransfersPerKey; }
+        /** 设置单个宿主限流 key 的最大上传或读取并发数。 */
+        public void setMaxConcurrentTransfersPerKey(int maxConcurrentTransfersPerKey) {
+            this.maxConcurrentTransfersPerKey = maxConcurrentTransfersPerKey;
+        }
     }
 
     /**

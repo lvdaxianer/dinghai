@@ -215,11 +215,14 @@ public class FileStorageAutoConfiguration {
                                                               FileStorageDirectAccessAuthorizer authorizer,
                                                               StableFileAccessService stableAccess,
                                                               Optional<ProviderFileReadCache> readCache,
+                                                              Optional<WebTransferRateLimitKeyResolver> keyResolver,
                                                               FileStorageProperties properties) {
         validateResourceProperties(properties);
         return new FileStorageWebController(fileStorage, authorizer, Clock.systemUTC(), stableAccess,
-                readCache.orElse(null), intSize(properties.getWeb().getReadBufferSize().toBytes()),
-                properties.getWeb().getMaxConcurrentReads(), properties.getWeb().getMaxConcurrentUploads());
+                readCache.orElse(null), new WebTransferConfiguration(
+                intSize(properties.getWeb().getReadBufferSize().toBytes()),
+                properties.getWeb().getMaxConcurrentReads(), properties.getWeb().getMaxConcurrentUploads(),
+                properties.getWeb().getMaxConcurrentTransfersPerKey(), keyResolver.orElse(null)));
     }
 
     /**
@@ -396,6 +399,9 @@ public class FileStorageAutoConfiguration {
                 || cache.getBufferSize() == null || cache.getBufferSize().toBytes() <= 0L
                 || cache.getMaxConcurrentFills() <= 0 || cache.getQueueCapacity() <= 0) {
             throw invalidConfiguration("file storage resource limits must be positive", null);
+        }
+        if (web.getMaxConcurrentTransfersPerKey() < 0) {
+            throw invalidConfiguration("file storage per-key transfer limit must not be negative", null);
         }
     }
 

@@ -57,4 +57,60 @@ public class WebTransferLimiterTest {
             held.close();
         }
     }
+
+    @Test
+    public void shouldRejectSameKeyWhenKeyLimitReached() {
+        WebTransferLimiter limiter = new WebTransferLimiter(2, 2, 1);
+        WebTransferLimiter.Permit permit = limiter.acquireUpload("tenant-a");
+        try {
+            limiter.acquireUpload("tenant-a");
+            fail("expected key rate limit");
+        } catch (FileStorageException exception) {
+            assertEquals(FileStorageErrorCode.RATE_LIMITED, exception.errorCode());
+        } finally {
+            permit.close();
+        }
+    }
+
+    @Test
+    public void shouldAllowDifferentKeysWithinGlobalLimit() {
+        WebTransferLimiter limiter = new WebTransferLimiter(2, 2, 1);
+        WebTransferLimiter.Permit first = limiter.acquireRead("tenant-a");
+        WebTransferLimiter.Permit second = limiter.acquireRead("tenant-b");
+        first.close();
+        second.close();
+    }
+
+    @Test
+    public void shouldKeepSameKeyUploadAndReadLimitsIndependent() {
+        WebTransferLimiter limiter = new WebTransferLimiter(1, 1, 1);
+        WebTransferLimiter.Permit upload = limiter.acquireUpload("tenant-a");
+        WebTransferLimiter.Permit read = limiter.acquireRead("tenant-a");
+        upload.close();
+        read.close();
+    }
+
+    @Test
+    public void shouldReleaseGlobalPermitWhenKeyLimitRejectsRequest() {
+        WebTransferLimiter limiter = new WebTransferLimiter(2, 1, 1);
+        WebTransferLimiter.Permit held = limiter.acquireUpload("tenant-a");
+        try {
+            limiter.acquireUpload("tenant-a");
+            fail("expected key rate limit");
+        } catch (FileStorageException exception) {
+            assertEquals(FileStorageErrorCode.RATE_LIMITED, exception.errorCode());
+        }
+        WebTransferLimiter.Permit otherKey = limiter.acquireUpload("tenant-b");
+        held.close();
+        otherKey.close();
+    }
+
+    @Test
+    public void shouldRemoveKeyStateAfterLastPermitRelease() {
+        WebTransferLimiter limiter = new WebTransferLimiter(1, 1, 1);
+        WebTransferLimiter.Permit permit = limiter.acquireRead("tenant-a");
+        assertEquals(1, limiter.activeKeyCount());
+        permit.close();
+        assertEquals(0, limiter.activeKeyCount());
+    }
 }
