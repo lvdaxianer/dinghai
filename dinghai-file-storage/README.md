@@ -212,6 +212,7 @@ WebTransferRateLimitKeyResolver webTransferRateLimitKeyResolver() {
 
 ## 零拷贝与并发
 
+- core 提供可选的 `LocalFileSource` 接口（`Optional<Path> localFile(ObjectKey)`）：Local 适配器和远程读取缓存在命中已校验副本时实现它，向 Web 层暴露经过根目录校验的本地文件路径；不实现该接口的 provider 只走流式路径。
 - Local 主文件和远程热缓存命中时，Tomcat 明文且未压缩请求优先使用原生 `sendfile`，不按文件大小分配 JVM 堆内存。
 - TLS、响应压缩、非 Tomcat 容器、文件暂不可用或容器拒绝注册时自动降级为有界流式复制，响应内容、条件请求和 Range 语义保持不变。
 - 全局读取上限和可选的每 key 读取上限均覆盖流式回退、缓存文件和 Tomcat `sendfile`，读取许可保持到响应完成或失败；并发达到上限时立即返回 HTTP 429。
@@ -225,7 +226,7 @@ WebTransferRateLimitKeyResolver webTransferRateLimitKeyResolver() {
 
 统一错误码定义在 `FileStorageErrorCode`：`INVALID_REQUEST`、`OBJECT_NOT_FOUND`、`INVALID_OBJECT_KEY`、`OBJECT_TOO_LARGE`、`CONTENT_TYPE_NOT_ALLOWED`、`AUTHENTICATION_FAILED`、`STORAGE_UNAVAILABLE`、`INVALID_PRESIGN`、`INVALID_CONFIGURATION`、`RATE_LIMITED`、`INTERNAL_ERROR`。
 
-Web 层 HTTP 映射：`OBJECT_NOT_FOUND` → 404，`OBJECT_TOO_LARGE` → 413，`INVALID_PRESIGN` / `AUTHENTICATION_FAILED` → 403，`STORAGE_UNAVAILABLE` → 503，其余 → 400；响应体为 `{code, message}`。
+Web 层 HTTP 映射：`OBJECT_NOT_FOUND` → 404，`OBJECT_TOO_LARGE` → 413，`INVALID_PRESIGN` / `AUTHENTICATION_FAILED` → 403，`STORAGE_UNAVAILABLE` → 503，`RATE_LIMITED` → 429（携带 `Retry-After: 1`），其余 → 400；响应体为 `{code, message}`。
 
 ## 设计要点
 

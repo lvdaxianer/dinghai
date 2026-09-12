@@ -212,6 +212,7 @@ Non-Local backends enable by default a two-level disk read cache validated again
 
 ## Zero-Copy and Concurrency
 
+- core exposes an optional `LocalFileSource` interface (`Optional<Path> localFile(ObjectKey)`): the Local adapter and the remote read cache (on a validated cache hit) implement it to hand the Web layer a root-validated local file path; providers without this capability stay on the streaming path.
 - Local primary files and validated remote cache hits prefer native Tomcat `sendfile` for plain, uncompressed requests without allocating JVM heap proportional to file size.
 - TLS, response compression, non-Tomcat containers, temporarily unavailable files, and rejected registrations automatically fall back to bounded streaming while preserving content, conditional-request, and Range semantics.
 - Both the global read limit and optional per-key read limit cover streaming fallbacks, cached files, and Tomcat `sendfile`; permits remain held until the response completes or fails, and saturated requests immediately return HTTP 429.
@@ -225,7 +226,7 @@ Offline migration only handles server-directory packages; large files are not up
 
 Unified error codes are defined in `FileStorageErrorCode`: `INVALID_REQUEST`, `OBJECT_NOT_FOUND`, `INVALID_OBJECT_KEY`, `OBJECT_TOO_LARGE`, `CONTENT_TYPE_NOT_ALLOWED`, `AUTHENTICATION_FAILED`, `STORAGE_UNAVAILABLE`, `INVALID_PRESIGN`, `INVALID_CONFIGURATION`, `RATE_LIMITED`, `INTERNAL_ERROR`.
 
-Web-layer HTTP mapping: `OBJECT_NOT_FOUND` → 404, `OBJECT_TOO_LARGE` → 413, `INVALID_PRESIGN` / `AUTHENTICATION_FAILED` → 403, `STORAGE_UNAVAILABLE` → 503, everything else → 400; the response body is `{code, message}`.
+Web-layer HTTP mapping: `OBJECT_NOT_FOUND` → 404, `OBJECT_TOO_LARGE` → 413, `INVALID_PRESIGN` / `AUTHENTICATION_FAILED` → 403, `STORAGE_UNAVAILABLE` → 503, `RATE_LIMITED` → 429 (with a `Retry-After: 1` header), everything else → 400; the response body is `{code, message}`.
 
 ## Design Notes
 

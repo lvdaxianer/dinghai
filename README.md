@@ -11,7 +11,7 @@ dinghai 是 lvdaxianer 的个人开源基础组件库，从生产项目沉淀、
 | 模块 | 版本 | 说明 | 文档 |
 | --- | --- | --- | --- |
 | `dinghai-shared-state` | 1.0.0 | 共享状态缓存：Redis/Caffeine 双后端、熔断容错、可观测性、Spring Boot 3 自动装配 | [文档](dinghai-shared-state/README.md) |
-| `dinghai-file-storage` | 1.0.0 | 统一文件存储适配层：本地磁盘与 MinIO 双后端、预签名上传下载、Web 端点、二级磁盘读取缓存与离线迁移，含 core / local / minio / spring-boot-starter 四个构件 | [文档](dinghai-file-storage/README.md) |
+| `dinghai-file-storage` | 1.0.0 | 统一文件存储适配层：本地磁盘与 MinIO 双后端、Tomcat sendfile 零拷贝读取、预签名上传下载、Web 端点并发限流、二级磁盘读取缓存与离线迁移，含 core / local / minio / spring-boot-starter 四个构件 | [文档](dinghai-file-storage/README.md) |
 
 各模块的完整文档（Maven 坐标、配置项、使用示例、测试）见对应模块目录下的 README。
 
