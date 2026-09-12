@@ -18,7 +18,7 @@
 - **THEN** 组件拒绝请求且不读取任何存储对象
 
 ### Requirement: 无组件登录鉴权的私有对象流式读取
-Starter SHALL 提供以稳定文件 ID 为路径参数的读取、预览和下载端点。端点 MUST 在不调用组件用户鉴权策略的前提下解密 ID、从当前 `FileStorage` provider 流式读取私有对象，并且不得暴露 bucket 地址、对象 key 或存储密钥。读取端点 MUST 支持 ETag、Last-Modified、Cache-Control、304 和单 Range 响应；预览 MUST 为 `inline`，下载 MUST 为 `attachment`。
+Starter SHALL 提供以稳定文件 ID 为路径参数的读取、预览和下载端点。端点 MUST 在不调用组件用户鉴权策略的前提下解密 ID、从当前 `FileStorage` provider 流式读取私有对象，并且不得暴露 bucket 地址、对象 key 或存储密钥。读取端点 MUST 支持 ETag、Last-Modified、Cache-Control、304 和单 Range 响应；预览 MUST 为 `inline`，下载 MUST 为 `attachment`。所有稳定 ID 读取 MUST 计入可配置的 `web.max-concurrent-reads` 并发限制。
 
 #### Scenario: 私有 MinIO 对象通过稳定 ID 预览
 - **WHEN** 浏览器请求有效稳定 ID 对应的私有 MinIO 对象预览地址
@@ -27,6 +27,10 @@ Starter SHALL 提供以稳定文件 ID 为路径参数的读取、预览和下�
 #### Scenario: 稳定读取地址不使用组件用户授权
 - **WHEN** 嵌入平台将有效稳定读取地址交给浏览器且请求不带组件认证主体
 - **THEN** Starter 仅校验稳定 ID 后读取对象，不调用 `FileStorageAccessPolicy`
+
+#### Scenario: 稳定读取并发达到上限
+- **WHEN** 同时执行的稳定 ID 读取数达到 `web.max-concurrent-reads`
+- **THEN** 新请求返回 HTTP 429 和 `Retry-After`，且不打开 provider 对象流
 
 ### Requirement: 按 provider 默认启用二级磁盘读取缓存
 Starter SHALL 按 provider 默认启用二级磁盘缓存：`local` provider 不得创建或使用二级读取缓存，所有非 `local` provider 默认开启；对于 `local`，显式 `cache.enabled=true` MUST 使应用启动失败并提示删除该配置，对于非 `local`，显式 `cache.enabled=false` MUST 禁用缓存。缓存命中时 MUST 先向对象存储查询元数据，并且仅在 ETag、长度和最后修改时间均匹配时从磁盘副本返回；对象不存在或元数据不匹配时 MUST 删除副本并从 provider 流式读取。未命中且对象大小不超过配置阈值时，当前请求 MUST 直接流式返回 provider 内容，同时由独立、有界执行器重新打开对象流异步写入临时缓存文件，校验后原子发布。缓存键和 sidecar MUST 不暴露对象 key。
