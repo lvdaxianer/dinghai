@@ -270,9 +270,10 @@ mvn test -Ddinghai.redis.contract-test=true
 dinghai:
   file-storage:
     provider: local
+    bucket: ${DINGHAI_FILE_STORAGE_BUCKET}
+    storage-alias: documents-v1
     local:
       root: /var/lib/app/files
-    storage-alias: documents
     security:
       signing-key: ${DINGHAI_FILE_STORAGE_SIGNING_KEY}
       stable-id-key: ${DINGHAI_FILE_STORAGE_STABLE_ID_KEY}
@@ -295,12 +296,18 @@ Starter 默认注册 `/files/upload/{*key}`、`/files/download/{*key}` 和 `/fil
 
 除稳定 `fileId` 地址外，也可使用真实 object key 地址 `/files/read/key/{*key}`、`/files/read/key/preview/{*key}` 和 `/files/read/key/download/{*key}`；这些地址仍遵守预签名或宿主直接访问授权。`web.read-buffer-size` 和 `cache.buffer-size` 是单次复制缓冲区，不代表整文件内存；`web.max-concurrent-reads`、`cache.max-concurrent-fills` 和 `cache.queue-capacity` 分别限制响应读取并发、缓存落盘并发和等待队列长度。
 
-MinIO 配置需要 `endpoint`、`bucket`、`access-key` 和 `secret-key`，不自动创建 bucket，也不会在 Local 与 MinIO 之间自动回退。签名密钥、访问密钥和完整签名 URL 不写入日志或错误响应。
+`bucket` 是所有 provider 的必填公共配置，必须是单段名称。Local 将对象 key
+`1/1/1/1.png` 保存为 `/var/lib/app/files/documents/1/1/1/1.png`；MinIO 将同一对象保存为
+`documents / 1/1/1/1.png`。MinIO 的 `minio` 子配置只包含 `endpoint`、`access-key` 和
+`secret-key`，不自动创建 bucket，也不会在 Local 与 MinIO 之间自动回退。签名密钥、访问密钥和完整签名 URL 不写入日志或错误响应。
 
 私有对象可使用稳定读取 URL：`/files/read/v1/{id}`，预览和下载分别为
 `/files/preview/v1/{id}`、`/files/download/v1/{id}`。`id` 只依赖
-`storage-alias + object key` 与活动 AES-SIV 密钥，因此从 Local 迁移到 MinIO 后保持不变；
+`storage-alias + object key` 与活动 AES-SIV 密钥，`storage-alias` 不参与物理存储定位，因此从 Local 迁移到 MinIO 后保持不变；
 轮换 `stable-id-key` 会使旧 URL 失效。该路由不执行组件内的用户鉴权，嵌入方负责浏览器前的权限控制。
+
+升级到公共 bucket 配置时，MinIO 将原 provider 专属 bucket 的值上提至 `bucket`；Local 需将已有对象从
+`local.root / objectKey` 移动到 `local.root / bucket / objectKey`，或使用离线迁移包导出后导入。
 
 非 Local provider 默认启用经远端 `stat` 校验的二级磁盘读取缓存；仅 Local/磁盘 provider
 默认关闭。未命中且对象不超过 `cache.max-object-size` 时，当前请求直接流式读取，另开第二条

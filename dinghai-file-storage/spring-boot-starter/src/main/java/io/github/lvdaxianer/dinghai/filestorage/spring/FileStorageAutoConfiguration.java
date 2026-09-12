@@ -8,6 +8,7 @@ import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioStorageConfiguration;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -54,11 +55,12 @@ public class FileStorageAutoConfiguration {
     @ConditionalOnMissingBean(FileStorage.class)
     public FileStorage fileStorage(FileStorageProperties properties) {
         validateWebPathPrefix(properties.getWeb().getPathPrefix());
+        String bucket = validateBucket(properties.getBucket());
         if (properties.getProvider() == FileStorageProvider.LOCAL) {
-            return localStorage(properties);
+            return localStorage(properties, bucket);
         }
         if (properties.getProvider() == FileStorageProvider.MINIO) {
-            return minioStorage(properties);
+            return minioStorage(properties, bucket);
         }
         throw invalidConfiguration("file storage provider is required or invalid", null);
     }
@@ -307,7 +309,7 @@ public class FileStorageAutoConfiguration {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    private FileStorage localStorage(FileStorageProperties properties) {
+    private FileStorage localStorage(FileStorageProperties properties, String bucket) {
         if (properties.getLocal().getRoot() == null) {
             throw invalidConfiguration("local storage root is required", null);
         }
@@ -315,7 +317,7 @@ public class FileStorageAutoConfiguration {
         if (signingKey == null || signingKey.isBlank()) {
             throw invalidConfiguration("local signing key is required", null);
         }
-        return new LocalFileStorageAdapter(properties.getLocal().getRoot(),
+        return new LocalFileStorageAdapter(resolveLocalBucketRoot(properties.getLocal().getRoot(), bucket),
                 signingKey.getBytes(StandardCharsets.UTF_8), properties.getUpload().getMaxSize(),
                 properties.getUpload().getContentTypeWhitelist(),
                 properties.getSecurity().getMaximumPresignExpiry(), Clock.systemUTC(),
@@ -330,11 +332,11 @@ public class FileStorageAutoConfiguration {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    private FileStorage minioStorage(FileStorageProperties properties) {
+    private FileStorage minioStorage(FileStorageProperties properties, String bucket) {
         FileStorageProperties.Minio minio = properties.getMinio();
         try {
             return new MinioFileStorageAdapter(new MinioStorageConfiguration(minio.getEndpoint(),
-                    minio.getBucket(), minio.getAccessKey(), minio.getSecretKey(),
+                    bucket, minio.getAccessKey(), minio.getSecretKey(),
                     minio.getConnectTimeout(), minio.getReadTimeout(), minio.getWriteTimeout()));
         } catch (IllegalArgumentException exception) {
             throw invalidConfiguration("minio configuration is incomplete", exception);
@@ -356,6 +358,41 @@ public class FileStorageAutoConfiguration {
                 || pathPrefix.indexOf('\r') >= 0 || pathPrefix.indexOf('\n') >= 0) {
             throw invalidConfiguration("file storage web path prefix is invalid", null);
         }
+    }
+
+    /**
+     * 校验公共 bucket 可安全地映射为本地单层目录。
+     *
+     * @param bucket 待校验的公共 bucket
+     * @return 已校验的公共 bucket
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    private String validateBucket(String bucket) {
+        String value = requireText(bucket, "file storage bucket");
+        if (value.equals(".") || value.equals("..") || value.indexOf('/') >= 0
+                || value.indexOf('\\') >= 0 || value.codePoints().anyMatch(Character::isISOControl)) {
+            throw invalidConfiguration("file storage bucket is invalid", null);
+        }
+        return value;
+    }
+
+    /**
+     * 将公共 bucket 解析为位于本地对象根目录下的专属目录。
+     *
+     * @param localRoot 本地对象根目录
+     * @param bucket 已校验的公共 bucket
+     * @return 归属于 bucket 的本地对象根目录
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    private Path resolveLocalBucketRoot(Path localRoot, String bucket) {
+        Path normalizedRoot = localRoot.toAbsolutePath().normalize();
+        Path bucketRoot = normalizedRoot.resolve(bucket).normalize();
+        if (!bucketRoot.startsWith(normalizedRoot)) {
+            throw invalidConfiguration("file storage bucket is invalid", null);
+        }
+        return bucketRoot;
     }
 
     private void validateResourceProperties(FileStorageProperties properties) {

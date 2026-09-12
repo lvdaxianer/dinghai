@@ -84,7 +84,7 @@ sharedStateCache.getAndExpire(sessionKey, CacheExpiry.after(Duration.ofMinutes(3
 
 - **适用**：应用需要统一上传、下载、删除、元数据查询、对象存在判断、预签名上传/下载、在线预览、HTTP 缓存或单 Range 响应。
 - **对象 key**：支持 `1/1/1/1.png` 和 `用户资料/头像.png`；拒绝绝对路径、`..`、反斜杠和控制字符。
-- **Provider**：`local` 使用 `local.root`；`minio` 使用固定 bucket 的 `endpoint`、`bucket`、`access-key`、`secret-key`。
+- **Provider**：所有 provider 都必须配置单段公共 `bucket`。Local 将对象定位为 `local.root / bucket / objectKey`，MinIO 定位为 `bucket / objectKey`；MinIO 子配置只包含 `endpoint`、`access-key`、`secret-key`。
 - **安全默认值**：最大上传大小为 100 MB；本地签名密钥必须由环境变量或部署配置注入；Web 默认启用 `/files`，但 `direct-access=false`，无签名请求拒绝。
 - **Web**：Local 的预签名地址使用 `/files/upload/{*key}`、`/files/download/{*key}`、`/files/preview/{*key}`；下载强制 `attachment`，预览强制 `inline`，支持 ETag、304、Cache-Control 与单 Range，并使用独立有界异步执行器承载流式响应。
 - **稳定读取与缓存**：稳定 `fileId` 和真实 object key 都可读取；非 Local provider 默认启用经远端 `stat` 校验的二级磁盘缓存，未命中且对象不超过 `cache.max-object-size` 时主请求流式返回、第二条 provider 流异步落盘。Local 默认关闭该缓存；每日 00:00 清理超过 `cache.idle-ttl` 未访问的完整副本。
@@ -97,6 +97,8 @@ sharedStateCache.getAndExpire(sessionKey, CacheExpiry.after(Duration.ofMinutes(3
 dinghai:
   file-storage:
     provider: local
+    bucket: ${DINGHAI_FILE_STORAGE_BUCKET}
+    storage-alias: documents-v1
     local:
       root: /var/lib/app/files
     security:
@@ -106,6 +108,9 @@ dinghai:
 对于无签名的 Web 访问，应用必须同时开启 `web.direct-access=true` 并提供
 `FileStorageAccessPolicy`，按当前认证主体、对象 key 和操作类型授权；不要把对象存储
 端点作为匿名静态文件服务。
+
+`storage-alias` 仅参与稳定 `fileId`，不参与物理对象定位。迁移旧配置时，将 MinIO 原 provider
+专属 bucket 上提为公共 `bucket`；Local 既有对象需移入 `local.root / bucket /` 或使用离线迁移。
 
 ## 何时使用 / 不使用
 

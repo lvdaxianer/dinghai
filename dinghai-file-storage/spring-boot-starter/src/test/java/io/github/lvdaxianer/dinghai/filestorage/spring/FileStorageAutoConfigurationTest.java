@@ -1,10 +1,15 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -43,6 +48,29 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(context).hasSingleBean(FileStorage.class);
                     assertThat(context).hasSingleBean(LocalFileStorageAdapter.class);
                     assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
+                });
+    }
+
+    /**
+     * local provider 应将对象保存到公共 bucket 子目录。
+     *
+     * @throws Exception 写入或读取临时文件失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    @Test
+    public void shouldStoreLocalObjectUnderConfiguredBucket() throws Exception {
+        contextRunner.withPropertyValues(localProperties())
+                .run(context -> {
+                    FileStorage storage = context.getBean(FileStorage.class);
+                    ObjectKey key = ObjectKey.of("1/1/1/1.png");
+                    byte[] content = "file-content".getBytes(StandardCharsets.UTF_8);
+
+                    storage.put(UploadRequest.of(key, new ByteArrayInputStream(content),
+                            content.length, "image/png"));
+
+                    Path expected = Path.of(storageRoot()).resolve("documents").resolve(key.value());
+                    assertThat(Files.readString(expected)).isEqualTo("file-content");
                 });
     }
 
@@ -160,7 +188,9 @@ public class FileStorageAutoConfigurationTest {
      */
     @Test
     public void shouldFailFastForUnknownProvider() {
-        contextRunner.withPropertyValues("dinghai.file-storage.provider=unknown")
+        contextRunner.withPropertyValues(
+                        "dinghai.file-storage.provider=unknown",
+                        "dinghai.file-storage.bucket=documents")
                 .run(context -> assertThat(context).hasFailed());
     }
 
@@ -174,7 +204,45 @@ public class FileStorageAutoConfigurationTest {
     public void shouldFailFastWhenSelectedLocalProviderIsIncomplete() {
         contextRunner.withPropertyValues(
                         "dinghai.file-storage.provider=local",
+                        "dinghai.file-storage.bucket=documents",
                         "dinghai.file-storage.security.signing-key=test-signing-key")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    /**
+     * 所有 provider 缺少公共 bucket 时必须在启动期失败。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    @Test
+    public void shouldFailFastWhenSelectedProviderHasNoPublicBucket() {
+        contextRunner.withPropertyValues(localPropertiesWithoutBucket())
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    /**
+     * 遗留 MinIO 子配置不能替代必填公共 bucket。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    @Test
+    public void shouldNotFallbackToLegacyMinioBucket() {
+        contextRunner.withPropertyValues(minioPropertiesWithoutPublicBucket())
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    /**
+     * 公共 bucket 不能作为本地文件系统路径使用。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    @Test
+    public void shouldFailFastForUnsafePublicBucket() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.bucket=documents/archive")
                 .run(context -> assertThat(context).hasFailed());
     }
 
@@ -189,6 +257,7 @@ public class FileStorageAutoConfigurationTest {
         contextRunner.withPropertyValues(
                         "spring.profiles.active=prod",
                         "dinghai.file-storage.provider=local",
+                        "dinghai.file-storage.bucket=documents",
                         "dinghai.file-storage.local.root=" + storageRoot())
                 .run(context -> assertThat(context).hasFailed());
     }
@@ -198,6 +267,7 @@ public class FileStorageAutoConfigurationTest {
     public void shouldFailFastWhenStableAccessHasNoStorageAlias() {
         contextRunner.withPropertyValues(
                         "dinghai.file-storage.provider=local",
+                        "dinghai.file-storage.bucket=documents",
                         "dinghai.file-storage.local.root=" + storageRoot(),
                         "dinghai.file-storage.security.signing-key=test-signing-key",
                         "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b")
@@ -209,6 +279,7 @@ public class FileStorageAutoConfigurationTest {
     public void shouldFailFastWhenStableAccessHasNoIdKey() {
         contextRunner.withPropertyValues(
                         "dinghai.file-storage.provider=local",
+                        "dinghai.file-storage.bucket=documents",
                         "dinghai.file-storage.local.root=" + storageRoot(),
                         "dinghai.file-storage.security.signing-key=test-signing-key",
                         "dinghai.file-storage.storage-alias=documents")
@@ -295,6 +366,7 @@ public class FileStorageAutoConfigurationTest {
     private String[] localProperties() {
         return new String[]{
                 "dinghai.file-storage.provider=local",
+                "dinghai.file-storage.bucket=documents",
                 "dinghai.file-storage.local.root=" + storageRoot(),
                 "dinghai.file-storage.security.signing-key=test-signing-key",
                 "dinghai.file-storage.storage-alias=documents",
@@ -314,12 +386,56 @@ public class FileStorageAutoConfigurationTest {
      * @date 2026-09-11
      */
     private String[] minioProperties() {
+        return minioProperties("dinghai.file-storage.bucket=test-bucket");
+    }
+
+    /**
+     * 返回携带指定 bucket 属性的 MinIO provider 属性。
+     *
+     * @param bucketProperty MinIO 或公共 bucket 属性
+     * @return 完整的 MinIO provider 属性
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    private String[] minioProperties(String bucketProperty) {
         return new String[]{
                 "dinghai.file-storage.provider=minio",
+                bucketProperty,
                 "dinghai.file-storage.minio.endpoint=http://localhost:9000",
-                "dinghai.file-storage.minio.bucket=test-bucket",
                 "dinghai.file-storage.minio.access-key=test-access-key",
                 "dinghai.file-storage.minio.secret-key=test-secret-key",
+                "dinghai.file-storage.storage-alias=documents",
+                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
+                "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
+                "dinghai.file-storage.migration.import-root=" + migrationRoot("import"),
+                "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
+                "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
+        };
+    }
+
+    /**
+     * 返回仅含遗留 MinIO bucket 的属性，用于验证不兼容旧配置。
+     *
+     * @return 不含公共 bucket 的 MinIO provider 属性
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    private String[] minioPropertiesWithoutPublicBucket() {
+        return minioProperties("dinghai.file-storage.minio.bucket=test-bucket");
+    }
+
+    /**
+     * 返回缺少公共 bucket 的 local provider 属性。
+     *
+     * @return 不含公共 bucket 的 local provider 属性
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    private String[] localPropertiesWithoutBucket() {
+        return new String[]{
+                "dinghai.file-storage.provider=local",
+                "dinghai.file-storage.local.root=" + storageRoot(),
+                "dinghai.file-storage.security.signing-key=test-signing-key",
                 "dinghai.file-storage.storage-alias=documents",
                 "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
                 "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),

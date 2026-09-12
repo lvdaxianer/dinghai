@@ -270,9 +270,10 @@ Example configuration, with sensitive values injected through the environment:
 dinghai:
   file-storage:
     provider: local
+    bucket: ${DINGHAI_FILE_STORAGE_BUCKET}
+    storage-alias: documents-v1
     local:
       root: /var/lib/app/files
-    storage-alias: documents
     security:
       signing-key: ${DINGHAI_FILE_STORAGE_SIGNING_KEY}
       stable-id-key: ${DINGHAI_FILE_STORAGE_STABLE_ID_KEY}
@@ -295,14 +296,24 @@ The Starter registers `/files/upload/{*key}`, `/files/download/{*key}`, and `/fi
 
 In addition to stable `fileId` URLs, callers can use real object-key URLs `/files/read/key/{*key}`, `/files/read/key/preview/{*key}`, and `/files/read/key/download/{*key}`. These routes still require a valid presignature or host direct-access authorization. `web.read-buffer-size` and `cache.buffer-size` are per-copy buffers rather than whole-file allocations; the concurrency and queue settings bound active response reads, cache fills, and waiting fill tasks.
 
-MinIO requires `endpoint`, `bucket`, `access-key`, and `secret-key`. Buckets are not created automatically, and there is no automatic fallback between local disk and MinIO. Signing keys, access keys, and full presigned URLs are never written to logs or error responses.
+`bucket` is a required shared setting for every provider and must be a single path segment. Local
+stores object key `1/1/1/1.png` at `/var/lib/app/files/documents/1/1/1/1.png`; MinIO stores the
+same object as `documents / 1/1/1/1.png`. The MinIO subsection contains only `endpoint`,
+`access-key`, and `secret-key`. Buckets are not created automatically, and there is no automatic
+fallback between local disk and MinIO. Signing keys, access keys, and full presigned URLs are never
+written to logs or error responses.
 
 Private objects can use stable read URLs: `/files/read/v1/{id}`, with
 `/files/preview/v1/{id}` and `/files/download/v1/{id}` for preview and download.
-An ID depends only on `storage-alias + object key` and the active AES-SIV key, so it stays
+An ID depends only on `storage-alias + object key` and the active AES-SIV key. `storage-alias` does
+not determine physical placement, so an ID stays
 unchanged when an object moves from Local to MinIO. Rotating `stable-id-key` invalidates old
 URLs. This route intentionally does not apply component-level user authorization; the embedding
 platform authorizes access before the browser request.
+
+When upgrading, move the existing provider-specific MinIO bucket value to the shared `bucket` setting. For
+Local, move existing objects from `local.root / objectKey` to `local.root / bucket / objectKey`, or
+export and import them through the offline migration package.
 
 Every non-Local provider enables a metadata-validated secondary disk read cache by default; only
 the Local/disk provider is disabled by default. On a cache miss below `cache.max-object-size`, the request streams directly

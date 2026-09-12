@@ -20,6 +20,8 @@ public class FileStorageProperties {
 
     /** 存储后端类型。 */
     private FileStorageProvider provider;
+    /** 所有存储后端共用的逻辑桶名称。 */
+    private String bucket;
     /** 不随物理后端变动的逻辑存储别名。 */
     private String storageAlias;
     /** 本地磁盘后端配置。 */
@@ -57,6 +59,28 @@ public class FileStorageProperties {
      */
     public void setProvider(FileStorageProvider provider) {
         this.provider = provider;
+    }
+
+    /**
+     * 获取公共逻辑桶名称。
+     *
+     * @return 公共逻辑桶名称
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    public String getBucket() {
+        return bucket;
+    }
+
+    /**
+     * 设置公共逻辑桶名称。
+     *
+     * @param bucket 公共逻辑桶名称
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    public void setBucket(String bucket) {
+        this.bucket = bucket;
     }
 
     /**
@@ -192,7 +216,7 @@ public class FileStorageProperties {
     }
 
     /**
-     * 固定 bucket 的 MinIO 后端属性。
+     * MinIO 后端属性。
      *
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
@@ -200,8 +224,6 @@ public class FileStorageProperties {
     public static class Minio {
         /** MinIO 服务端地址。 */
         private String endpoint;
-        /** 固定 bucket 名称。 */
-        private String bucket;
         /** 访问密钥。 */
         private String accessKey;
         /** 私密访问密钥。 */
@@ -233,28 +255,6 @@ public class FileStorageProperties {
          */
         public void setEndpoint(String endpoint) {
             this.endpoint = endpoint;
-        }
-
-        /**
-         * 获取固定 bucket 名称。
-         *
-         * @return bucket 名称
-         * @author lvdaxianer@yeah.net
-         * @date 2026-09-11
-         */
-        public String getBucket() {
-            return bucket;
-        }
-
-        /**
-         * 设置固定 bucket 名称。
-         *
-         * @param bucket bucket 名称
-         * @author lvdaxianer@yeah.net
-         * @date 2026-09-11
-         */
-        public void setBucket(String bucket) {
-            this.bucket = bucket;
         }
 
         /**
