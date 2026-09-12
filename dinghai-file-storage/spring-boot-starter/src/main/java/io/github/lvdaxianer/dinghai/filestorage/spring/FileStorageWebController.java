@@ -14,6 +14,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -38,6 +39,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.util.UriUtils;
 
 /**
  * 本地文件存储的受预签名保护 HTTP 端点。
@@ -53,9 +55,10 @@ public class FileStorageWebController {
 
     /** 缓冲区大小。 */
     private static final int DEFAULT_BUFFER_SIZE = 128 * 1024;
-    /** 默认文件路径前缀。 */
     /** HTTP 日期格式化器。 */
     private static final DateTimeFormatter HTTP_DATE = DateTimeFormatter.RFC_1123_DATE_TIME;
+    /** 真实 key 预览端点的固定路径。 */
+    private static final String REAL_KEY_PREVIEW_PATH = "/read/key/preview/";
 
     /** 后端中立的文件存储。 */
     private final FileStorage storage;
@@ -69,6 +72,8 @@ public class FileStorageWebController {
     private final ProviderFileReadCache readCache;
     /** 宿主可选的传输限流 key 解析器。 */
     private final WebTransferRateLimitKeyResolver keyResolver;
+    /** 已规范化的 Web 路径前缀。 */
+    private final String pathPrefix;
     private final int bufferSize;
     private final WebTransferLimiter transferLimiter;
 
@@ -167,6 +172,7 @@ public class FileStorageWebController {
         }
         this.bufferSize = transferConfiguration.bufferSize();
         this.keyResolver = transferConfiguration.keyResolver();
+        this.pathPrefix = normalizedPathPrefix(transferConfiguration.pathPrefix());
         this.transferLimiter = new WebTransferLimiter(transferConfiguration.maxConcurrentUploads(),
                 transferConfiguration.maxConcurrentReads(),
                 transferConfiguration.maxConcurrentTransfersPerKey());
@@ -185,12 +191,12 @@ public class FileStorageWebController {
      * @param contentLength 请求声明大小
      * @param input 请求体输入流
      * @param principal 当前认证主体
-     * @return 空成功响应
+     * @return 已确认的对象元数据与预览地址
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
     @PutMapping("/upload/{*key}")
-    public ResponseEntity<Void> upload(@PathVariable String key,
+    public ResponseEntity<WebUploadResult> upload(@PathVariable String key,
                                        @RequestParam(required = false) Long expires,
                                        @RequestParam(required = false) String contentType,
                                        @RequestParam(required = false) Long maxSize,
@@ -207,8 +213,8 @@ public class FileStorageWebController {
             requireDirectAccess(principal, objectKey, FileStorageAccessOperation.UPLOAD);
             validateContentType(requestContentType, requestContentType);
             validateContentLength(contentLength, UploadRequest.DEFAULT_MAX_SIZE_BYTES);
-            writeObject(new UploadRequest(objectKey, input, contentLength, requestContentType,
-                    CacheControl.privateNoCache()));
+            return uploadResult(writeObject(new UploadRequest(objectKey, input, contentLength,
+                    requestContentType, CacheControl.privateNoCache())));
         } else {
             if (expires == null || contentType == null || maxSize == null || cacheControl == null) {
                 throw invalidPresign();
@@ -218,10 +224,9 @@ public class FileStorageWebController {
             localStorage().verifyPresignedUpload(request, timestamp(expires), signature, clock.instant());
             validateContentType(request.contentType(), requestContentType);
             validateContentLength(contentLength, request.maxSizeBytes());
-            writeObject(new UploadRequest(objectKey, input, contentLength, request.contentType(),
-                    request.cacheControl()));
+            return uploadResult(writeObject(new UploadRequest(objectKey, input, contentLength,
+                    request.contentType(), request.cacheControl())));
         }
-        return ResponseEntity.noContent().build();
         }
     }
 
@@ -851,13 +856,62 @@ public class FileStorageWebController {
         }
     }
 
-    /** 通过缓存协作者写入对象并立即失效旧副本。 */
-    private void writeObject(UploadRequest request) {
+    /**
+     * 通过缓存协作者写入对象并立即失效旧副本。
+     *
+     * @param request 上传请求
+     * @return provider 确认的对象元数据
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    private ObjectMetadata writeObject(UploadRequest request) {
         if (readCache == null) {
-            storage.put(request);
-            return;
+            return storage.put(request);
         }
-        readCache.put(request);
+        return readCache.put(request);
+    }
+
+    /**
+     * 构造上传成功的创建响应。
+     *
+     * @param metadata provider 确认的对象元数据
+     * @return 包含根相对预览地址的 HTTP 创建响应
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    private ResponseEntity<WebUploadResult> uploadResult(ObjectMetadata metadata) {
+        WebUploadResult result = WebUploadResult.from(metadata, previewUrl(metadata.key()));
+        return ResponseEntity.created(URI.create(result.previewUrl())).body(result);
+    }
+
+    /**
+     * 构造真实 object key 的根相对预览地址。
+     *
+     * @param key 已验证的对象 key
+     * @return 可供浏览器访问的路径编码预览地址
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    private String previewUrl(ObjectKey key) {
+        return pathPrefix + REAL_KEY_PREVIEW_PATH + UriUtils.encodePath(key.value(), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * 规范化末尾斜杠，保证返回地址与请求映射一致。
+     *
+     * @param configuredPathPrefix 已校验的 Web 路径前缀
+     * @return 无末尾斜杠的路径前缀，根路径返回空字符串
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    private String normalizedPathPrefix(String configuredPathPrefix) {
+        java.util.Objects.requireNonNull(configuredPathPrefix, "configuredPathPrefix");
+        if ("/".equals(configuredPathPrefix)) {
+            return "";
+        }
+        return configuredPathPrefix.endsWith("/")
+                ? configuredPathPrefix.substring(0, configuredPathPrefix.length() - 1)
+                : configuredPathPrefix;
     }
 
     /**

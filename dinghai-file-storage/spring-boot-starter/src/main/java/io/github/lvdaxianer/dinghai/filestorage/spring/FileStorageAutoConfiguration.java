@@ -222,7 +222,8 @@ public class FileStorageAutoConfiguration {
                 readCache.orElse(null), new WebTransferConfiguration(
                 intSize(properties.getWeb().getReadBufferSize().toBytes()),
                 properties.getWeb().getMaxConcurrentReads(), properties.getWeb().getMaxConcurrentUploads(),
-                properties.getWeb().getMaxConcurrentTransfersPerKey(), keyResolver.orElse(null)));
+                properties.getWeb().getMaxConcurrentTransfersPerKey(), keyResolver.orElse(null),
+                properties.getWeb().getPathPrefix()));
     }
 
     /**
