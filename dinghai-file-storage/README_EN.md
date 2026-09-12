@@ -99,7 +99,7 @@ The MinIO adapter **does not create or modify buckets automatically**; create th
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `cache.enabled` | `boolean` | see description | Tri-state semantics: on the MinIO backend it is enabled by default (absent is equivalent to `true`); an explicit `false` disables it. On the Local backend it is disabled by default and only enabled by an explicit `true` |
+| `cache.enabled` | `boolean` | see description | Enabled by default for MinIO and disabled by explicit `false`; Local does not use a second-level cache, and explicit `true` fails startup (remove the old setting) |
 | `cache.root` | `Path` | `${java.io.tmpdir}/dinghai-file-storage-cache` | Cache root directory; null or creation failure fails startup. **Production deployments should explicitly configure a persistent directory** — the default location sits under the system temp directory and may be cleaned up by the OS |
 | `cache.max-object-size` | `long` (bytes) | `50MB` | Objects larger than this are not asynchronously persisted to disk; read requests pass through to the remote directly |
 | `cache.idle-ttl` | `Duration` | `7d` | How long an idle replica is retained, judged by the last-access time recorded in each replica's sidecar file |
@@ -166,7 +166,7 @@ With `web.enabled=true`, the following endpoints are registered (default prefix 
 
 The migration management endpoints are fixed at `POST /files/migration/export` and `POST /files/migration/import` (parameter `packageName`) and do not follow `web.path-prefix`.
 
-Preview/download uses streaming responses and supports `Content-Type`, ETag, Last-Modified, Cache-Control, Expires, 304 (If-None-Match / If-Modified-Since), and single-range Range 206/416.
+Preview/download supports `Content-Type`, ETag, Last-Modified, Cache-Control, Expires, 304 (If-None-Match / If-Modified-Since), and single-range Range 206/416. Local primary files and validated MinIO hot-cache files prefer native `sendfile` on plain, uncompressed embedded Tomcat; TLS, compression, other containers, or a rejected container registration automatically fall back to bounded streaming with the same caller-visible semantics.
 
 ## Presigning and Access Authorization
 
@@ -185,13 +185,20 @@ A stable ID is the persistent read address of a private object (the `/files/read
 
 ## Read Cache Behavior
 
-Non-Local backends enable by default a two-level disk read cache validated against remote `stat`:
+Non-Local backends enable by default a two-level disk read cache validated against remote `stat`; Local creates neither a second-level cache nor a cleaner:
 
 1. Every read first `stat`s the remote metadata; a local replica only hits when its ETag / length / modification time all match the remote, and on hit the last-access time is refreshed;
 2. On a miss, when the object does not exceed `cache.max-object-size`, the current request streams directly from the remote while a second stream asynchronously persists to disk (temporary file + atomic move to publish);
 3. `put` / `delete` immediately invalidate the corresponding replica;
 4. Every day at 00:00 (server local timezone), replicas that have not been accessed for longer than `cache.idle-ttl` are cleaned up; cleanup failures are silently left for the next round;
 5. Cache file names are the hex digest of `SHA-256(alias + key)` and do not leak the raw object key.
+
+## Zero-Copy and Concurrency
+
+- Local primary files and validated remote cache hits prefer native Tomcat `sendfile` for plain, uncompressed requests without allocating JVM heap proportional to file size.
+- TLS, response compression, non-Tomcat containers, temporarily unavailable files, and rejected registrations automatically fall back to bounded streaming while preserving content, conditional-request, and Range semantics.
+- `web.max-concurrent-reads` limits only streaming fallbacks and covers the full asynchronous copy lifecycle. Tomcat `sendfile` does not acquire this permit; container connections and executors provide its concurrency boundary.
+- When upgrading a Local deployment, remove `dinghai.file-storage.cache.enabled=true`. The setting is removed and retaining it fails startup.
 
 ## Offline Migration
 
@@ -206,7 +213,7 @@ Web-layer HTTP mapping: `OBJECT_NOT_FOUND` → 404, `OBJECT_TOO_LARGE` → 413, 
 ## Design Notes
 
 - **No log-redaction concerns**: the component code emits no logs at all, and every exception message is a fixed safe text that never echoes keys, signed URLs, or configuration values.
-- **Streaming I/O**: Local writes via temporary file + atomic move, and all reads are streamed — files are never loaded into memory as a whole; `web.read-buffer-size` and `cache.buffer-size` are only per-copy buffers.
+- **Streaming I/O**: Local writes via temporary file + atomic move; Web reads prefer Tomcat `sendfile` when available and otherwise use bounded streaming — files are never loaded into memory as a whole; `web.read-buffer-size` and `cache.buffer-size` are only per-copy buffers.
 - **Dedicated async executor**: streaming responses use a bounded executor dedicated to file storage (core=4 / max=16 / queue=64, thread prefix `file-storage-web-`), avoiding reliance on the unbounded default executor. Note that it is registered as Spring MVC's global async executor and therefore affects the host's other `StreamingResponseBody` usages; the host may override it as needed.
 - **Explicit over implicit**: no automatic bucket creation, no automatic fallback between backends, unsigned access denied by default, and any illegal configuration fails startup.
 
@@ -231,7 +238,7 @@ mvn -f dinghai-file-storage/benchmark/pom.xml exec:java \
   -Dexec.args="--provider=minio --file=$HOME/Downloads/doc.zip --concurrency=4 --read-rounds=2"
 ```
 
-The benchmark uses independent random object keys and best-effort deletes the objects on completion; the output includes per-phase duration, throughput, mean/P95/P99 latency, and error count, and never prints keys. Local has been measured with `982-合0820.FBX` (412,202,320 bytes) under the parameters above: 4 concurrent uploads totaling 1.53 GiB, mean 1298 ms, P95 1406 ms, throughput 1117 MiB/s; followed by 8 concurrent cold reads totaling 3.07 GiB, mean 200 ms, P95 230 ms, throughput 7765 MiB/s, with all SHA-256 verifications passing and zero errors. These figures are affected by the OS file cache and must not be treated as raw physical-disk throughput. Do not commit credentials or full presigned URLs to the repository.
+The benchmark uses independent random object keys and best-effort deletes the objects on completion; the output includes per-phase duration, throughput, mean/P95/P99 latency, and error count, and never prints keys. Local has been measured with `982-合0820.FBX` (412,202,320 bytes) under the parameters above: 4 concurrent uploads totaling 1.53 GiB, mean 1298 ms, P95 1406 ms, throughput 1117 MiB/s; followed by 8 concurrent cold reads totaling 3.07 GiB, mean 200 ms, P95 230 ms, throughput 7765 MiB/s. Docker MinIO (mapped port 9100) has been measured with `doc.zip` (about 61 MiB) at concurrency 4: upload 48 MiB/s, cold read 371 MiB/s, cache fill 180 MiB/s, and hot read 6079 MiB/s, with zero errors in every phase. All SHA-256 verifications passed. These figures are affected by OS and MinIO caches and must not be treated as raw physical-disk throughput. Do not commit credentials or full presigned URLs to the repository.
 
 ## Testing
 

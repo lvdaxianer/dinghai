@@ -36,7 +36,16 @@ Starter SHALL 默认以 `web.enabled=true`、`web.path-prefix=/files`、`web.dir
 - **THEN** 下载端点返回对象；策略拒绝时端点拒绝请求
 
 ### Requirement: 在线预览与 HTTP/CDN 缓存响应
-所有 `FileStorage` provider 的下载/预览端点 SHALL 设置对象的 Content-Type、ETag、Last-Modified、Cache-Control、Expires 与 Content-Disposition。预览 MUST 使用 `inline`，下载 MUST 使用 `attachment`；默认缓存策略 MUST 为 `private, max-age=0`，公开或 immutable 缓存 MUST 显式指定。端点 MUST 对 `If-None-Match` 与 `If-Modified-Since` 返回 304，并支持单字节范围请求以支持浏览器媒体预览。MinIO 预签名下载和稳定读取 ID 下载 MUST 固定相同的响应模式与允许的缓存响应语义。对于可直接解析的本地内容，端点 SHOULD 使用通道传输；对于对象存储内容，端点 MUST 使用有界缓冲流式转发，且不得将完整对象缓存至 JVM 内存。
+所有 `FileStorage` provider 的下载/预览端点 SHALL 设置对象的 Content-Type、ETag、Last-Modified、Cache-Control、Expires 与 Content-Disposition。预览 MUST 使用 `inline`，下载 MUST 使用 `attachment`；默认缓存策略 MUST 为 `private, max-age=0`，公开或 immutable 缓存 MUST 显式指定。端点 MUST 对 `If-None-Match` 与 `If-Modified-Since` 返回 304，并支持单字节范围请求以支持浏览器媒体预览。MinIO 预签名下载和稳定读取 ID 下载 MUST 固定相同的响应模式与允许的缓存响应语义。对于可安全解析的本地主文件或已校验缓存文件，端点 SHOULD 优先使用兼容容器的原生文件传输；TLS、压缩、其他容器或传输不可用时 MUST 自动回退到有界缓冲流式转发，且不得将完整对象缓存至 JVM 内存。
+
+#### Scenario: 本地文件传输自动回退
+
+- **WHEN** Local 主文件或已校验远程缓存命中，但请求使用 TLS、响应压缩、非 Tomcat 容器或容器拒绝文件传输
+- **THEN** 端点自动使用有界流式复制，并保持内容、条件请求和 Range 语义
+
+### Requirement: 零拷贝传输并发边界
+
+流式回退 MUST 使用 `web.max-concurrent-reads` permit 并覆盖异步复制任务全生命周期。原生 Tomcat `sendfile` 因无应用层完成回调 MUST 使用容器连接和执行器配置作为独立并发边界，不得声称受该 permit 控制。
 
 #### Scenario: 缓存命中返回 304
 - **WHEN** 客户端以当前对象的 ETag 发送 `If-None-Match` 请求

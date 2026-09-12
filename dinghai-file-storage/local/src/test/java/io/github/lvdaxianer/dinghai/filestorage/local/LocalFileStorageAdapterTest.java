@@ -3,6 +3,7 @@ package io.github.lvdaxianer.dinghai.filestorage.local;
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
+import io.github.lvdaxianer.dinghai.filestorage.core.LocalFileSource;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
@@ -44,6 +45,20 @@ public class LocalFileStorageAdapterTest {
 
         assertTrue(Files.isRegularFile(root.resolve("1/1/1/1.png")));
         assertEquals("image", read(storage.get(key)));
+    }
+
+    /** 可选本地文件来源只暴露根目录内已存在的普通对象文件。 */
+    @Test
+    public void exposesExistingObjectAsSafeLocalFileSource() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+        ObjectKey key = ObjectKey.of("1/1/1/1.png");
+        storage.put(upload(key, "image"));
+
+        LocalFileSource source = storage;
+
+        assertEquals(root.resolve(key.value()).toRealPath(), source.localFile(key).orElseThrow());
+        assertTrue(source.localFile(ObjectKey.of("missing.png")).isEmpty());
     }
 
     /** 中文 key 可往返内容与写入时的元数据。 */

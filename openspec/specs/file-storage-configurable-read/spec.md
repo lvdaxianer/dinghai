@@ -11,9 +11,8 @@ Starter SHALL expose positive defaults and configuration bindings for Web read b
 - **THEN** the starter uses `128KB`, `128`, `128KB`, `4`, and `32` respectively
 
 ### Requirement: 有界读取与缓存填充
-Web object transfer MUST remain streaming and MUST limit active response copies to the configured maximum. Cache fills MUST use the configured fixed worker count and bounded queue; queue saturation MUST not fail the user’s provider read and MUST not create an unbounded backlog.
+Web object transfer MUST use native container file transfer when a safe local file source and compatible request are available; all other transfers MUST remain bounded streaming and MUST limit active response copies to the configured maximum. Cache fills MUST use the configured fixed worker count and bounded queue; queue saturation MUST not fail the user’s provider read and MUST not create an unbounded backlog. Native Tomcat `sendfile` uses the container connection/executor boundary and does not consume the application streaming permit.
 
 #### Scenario: 队列满时读取继续直通
 - **WHEN** all cache workers and queue slots are occupied
 - **THEN** a cache fill is rejected while the current object response continues from the provider
-
