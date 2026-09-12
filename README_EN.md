@@ -36,92 +36,6 @@ A typed shared-state caching library providing backend-neutral contracts for cac
 
 Requirements: Java 21+, Spring Boot 3.x.
 
-## dinghai-file-storage
-
-The unified file-storage adapter supports local disk and MinIO. Application code depends on the `FileStorage` contract and can switch providers through configuration. The local provider accepts nested keys such as `1/1/1/1.png` and Unicode paths, and uses temporary files plus streaming I/O rather than loading whole objects into memory.
-
-Add the Starter:
-
-```xml
-<dependency>
-    <groupId>io.github.lvdaxianer</groupId>
-    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
-    <version>1.0.0</version>
-</dependency>
-```
-
-Example configuration, with sensitive values injected through the environment:
-
-```yaml
-dinghai:
-  file-storage:
-    provider: local
-    local:
-      root: /var/lib/app/files
-    storage-alias: documents
-    security:
-      signing-key: ${DINGHAI_FILE_STORAGE_SIGNING_KEY}
-      stable-id-key: ${DINGHAI_FILE_STORAGE_STABLE_ID_KEY}
-    web:
-      enabled: true
-      path-prefix: /files
-      direct-access: false
-      read-buffer-size: 128KB
-      max-concurrent-reads: 128
-    cache:
-      max-object-size: 50MB
-      buffer-size: 128KB
-      max-concurrent-fills: 4
-      queue-capacity: 32
-    upload:
-      max-size: 100MB
-```
-
-The Starter registers `/files/upload/{*key}`, `/files/download/{*key}`, and `/files/preview/{*key}` by default. Upload and download URLs can be presigned; download signatures bind the `inline` or `attachment` response disposition. Preview/download responses stream object content and support Content-Type, ETag, Last-Modified, Cache-Control, Expires, 304, and single-range 206/416 responses. Streaming uses a dedicated bounded async executor instead of an unbounded default executor. Unsigned access is denied by default; direct access requires explicit enablement and an application `FileStorageAccessPolicy`.
-
-In addition to stable `fileId` URLs, callers can use real object-key URLs `/files/read/key/{*key}`, `/files/read/key/preview/{*key}`, and `/files/read/key/download/{*key}`. These routes still require a valid presignature or host direct-access authorization. `web.read-buffer-size` and `cache.buffer-size` are per-copy buffers rather than whole-file allocations; the concurrency and queue settings bound active response reads, cache fills, and waiting fill tasks.
-
-MinIO requires `endpoint`, `bucket`, `access-key`, and `secret-key`. Buckets are not created automatically, and there is no automatic fallback between local disk and MinIO. Signing keys, access keys, and full presigned URLs are never written to logs or error responses.
-
-Private objects can use stable read URLs: `/files/read/v1/{id}`, with
-`/files/preview/v1/{id}` and `/files/download/v1/{id}` for preview and download.
-An ID depends only on `storage-alias + object key` and the active AES-SIV key, so it stays
-unchanged when an object moves from Local to MinIO. Rotating `stable-id-key` invalidates old
-URLs. This route intentionally does not apply component-level user authorization; the embedding
-platform authorizes access before the browser request.
-
-Every non-Local provider enables a metadata-validated secondary disk read cache by default; only
-the Local/disk provider is disabled by default. On a cache miss below `cache.max-object-size`, the request streams directly
-while a second provider stream is persisted asynchronously. At 00:00, complete replicas idle for
-longer than `cache.idle-ttl` are deleted. Production deployments should set a safe `cache.root`,
-for example `${DINGHAI_FILE_STORAGE_CACHE_ROOT}`. Set `cache.enabled` explicitly to override the
-default: `true` enables caching for Local, while `false` disables it for non-Local providers.
-
-All file-storage modules are grouped under `dinghai-file-storage/`: `core`, `local`, `minio`, and
-`spring-boot-starter` retain their existing Maven artifactIds. The development-only
-`dinghai-file-storage/benchmark` module performs concurrent uploads, cold reads, MinIO cache fills/
-hot reads, and SHA-256 integrity checks against real files. It accepts `--provider`, `--file`,
-`--concurrency`, and `--read-rounds`. For MinIO, provide endpoint, access key, secret key, and
-bucket through the corresponding `DINGHAI_FILE_STORAGE_MINIO_*` environment variables. Each run
-uses isolated object keys and prints phase duration, throughput, average/P95/P99 latency, and
-errors without printing secrets.
-
-Local was measured with `982-合0820.FBX` (412,202,320 bytes) using the documented parameters: four
-concurrent uploads transferred 1.53 GiB with 1298 ms average / 1406 ms P95 latency at 1117 MiB/s;
-eight concurrent cold reads transferred 3.07 GiB with 200 ms average / 230 ms P95 latency at
-7765 MiB/s. SHA-256 verification passed for every operation and errors were zero. Operating-system
-file caching materially affects the Local read figure, so it is not a raw physical-disk result.
-MinIO measurements remain runtime-environment dependent and must be run with valid credentials;
-they report upload, cold-read, cache-fill, and hot-read phases separately.
-
-Offline migration processes server-directory packages and never uploads large files over HTTP.
-Set `dinghai.file-storage.migration.enabled=true` and configure `export-root`, `import-root`,
-`completed-root`, and `failed-root`. Export writes `manifest.ndjson` and `objects/` with SHA-256
-verification. Successful imports move packages to completed; failed packages and `errors.ndjson`
-move to failed. The `/files/migration/export` and `/files/migration/import` management endpoints
-are registered only when the host provides `FileStorageMigrationAccessPolicy`, which must
-authorize `EXPORT` and `IMPORT` separately.
-
 ### Quick Start
 
 Add the Maven coordinates:
@@ -335,6 +249,92 @@ The following system properties specify the contract test target (default values
 | `dinghai.redis.contract-sentinel-nodes` (`127.0.0.1:26379`) | Sentinel node list |
 | `dinghai.redis.contract-sentinel-username` (empty) | Sentinel ACL username |
 | `dinghai.redis.contract-sentinel-password` (empty) | Sentinel ACL password |
+
+## dinghai-file-storage
+
+The unified file-storage adapter supports local disk and MinIO. Application code depends on the `FileStorage` contract and can switch providers through configuration. The local provider accepts nested keys such as `1/1/1/1.png` and Unicode paths, and uses temporary files plus streaming I/O rather than loading whole objects into memory.
+
+Add the Starter:
+
+```xml
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+Example configuration, with sensitive values injected through the environment:
+
+```yaml
+dinghai:
+  file-storage:
+    provider: local
+    local:
+      root: /var/lib/app/files
+    storage-alias: documents
+    security:
+      signing-key: ${DINGHAI_FILE_STORAGE_SIGNING_KEY}
+      stable-id-key: ${DINGHAI_FILE_STORAGE_STABLE_ID_KEY}
+    web:
+      enabled: true
+      path-prefix: /files
+      direct-access: false
+      read-buffer-size: 128KB
+      max-concurrent-reads: 128
+    cache:
+      max-object-size: 50MB
+      buffer-size: 128KB
+      max-concurrent-fills: 4
+      queue-capacity: 32
+    upload:
+      max-size: 100MB
+```
+
+The Starter registers `/files/upload/{*key}`, `/files/download/{*key}`, and `/files/preview/{*key}` by default. Upload and download URLs can be presigned; download signatures bind the `inline` or `attachment` response disposition. Preview/download responses stream object content and support Content-Type, ETag, Last-Modified, Cache-Control, Expires, 304, and single-range 206/416 responses. Streaming uses a dedicated bounded async executor instead of an unbounded default executor. Unsigned access is denied by default; direct access requires explicit enablement and an application `FileStorageAccessPolicy`.
+
+In addition to stable `fileId` URLs, callers can use real object-key URLs `/files/read/key/{*key}`, `/files/read/key/preview/{*key}`, and `/files/read/key/download/{*key}`. These routes still require a valid presignature or host direct-access authorization. `web.read-buffer-size` and `cache.buffer-size` are per-copy buffers rather than whole-file allocations; the concurrency and queue settings bound active response reads, cache fills, and waiting fill tasks.
+
+MinIO requires `endpoint`, `bucket`, `access-key`, and `secret-key`. Buckets are not created automatically, and there is no automatic fallback between local disk and MinIO. Signing keys, access keys, and full presigned URLs are never written to logs or error responses.
+
+Private objects can use stable read URLs: `/files/read/v1/{id}`, with
+`/files/preview/v1/{id}` and `/files/download/v1/{id}` for preview and download.
+An ID depends only on `storage-alias + object key` and the active AES-SIV key, so it stays
+unchanged when an object moves from Local to MinIO. Rotating `stable-id-key` invalidates old
+URLs. This route intentionally does not apply component-level user authorization; the embedding
+platform authorizes access before the browser request.
+
+Every non-Local provider enables a metadata-validated secondary disk read cache by default; only
+the Local/disk provider is disabled by default. On a cache miss below `cache.max-object-size`, the request streams directly
+while a second provider stream is persisted asynchronously. At 00:00, complete replicas idle for
+longer than `cache.idle-ttl` are deleted. Production deployments should set a safe `cache.root`,
+for example `${DINGHAI_FILE_STORAGE_CACHE_ROOT}`. Set `cache.enabled` explicitly to override the
+default: `true` enables caching for Local, while `false` disables it for non-Local providers.
+
+All file-storage modules are grouped under `dinghai-file-storage/`: `core`, `local`, `minio`, and
+`spring-boot-starter` retain their existing Maven artifactIds. The development-only
+`dinghai-file-storage/benchmark` module performs concurrent uploads, cold reads, MinIO cache fills/
+hot reads, and SHA-256 integrity checks against real files. It accepts `--provider`, `--file`,
+`--concurrency`, and `--read-rounds`. For MinIO, provide endpoint, access key, secret key, and
+bucket through the corresponding `DINGHAI_FILE_STORAGE_MINIO_*` environment variables. Each run
+uses isolated object keys and prints phase duration, throughput, average/P95/P99 latency, and
+errors without printing secrets.
+
+Local was measured with `982-合0820.FBX` (412,202,320 bytes) using the documented parameters: four
+concurrent uploads transferred 1.53 GiB with 1298 ms average / 1406 ms P95 latency at 1117 MiB/s;
+eight concurrent cold reads transferred 3.07 GiB with 200 ms average / 230 ms P95 latency at
+7765 MiB/s. SHA-256 verification passed for every operation and errors were zero. Operating-system
+file caching materially affects the Local read figure, so it is not a raw physical-disk result.
+MinIO measurements remain runtime-environment dependent and must be run with valid credentials;
+they report upload, cold-read, cache-fill, and hot-read phases separately.
+
+Offline migration processes server-directory packages and never uploads large files over HTTP.
+Set `dinghai.file-storage.migration.enabled=true` and configure `export-root`, `import-root`,
+`completed-root`, and `failed-root`. Export writes `manifest.ndjson` and `objects/` with SHA-256
+verification. Successful imports move packages to completed; failed packages and `errors.ndjson`
+move to failed. The `/files/migration/export` and `/files/migration/import` management endpoints
+are registered only when the host provides `FileStorageMigrationAccessPolicy`, which must
+authorize `EXPORT` and `IMPORT` separately.
 
 ## Release
 

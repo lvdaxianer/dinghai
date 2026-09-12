@@ -36,101 +36,6 @@ dinghai 是 lvdaxianer 的个人开源基础组件库，从生产项目沉淀、
 
 要求：Java 21+，Spring Boot 3.x。
 
-## dinghai-file-storage
-
-统一文件存储适配层支持本地磁盘和 MinIO，业务代码依赖 `FileStorage` 契约即可切换后端。Local 支持 `1/1/1/1.png`、中文目录等对象 key，并通过临时文件和流式读写避免把文件整体载入内存。
-
-引入 Starter：
-
-```xml
-<dependency>
-    <groupId>io.github.lvdaxianer</groupId>
-    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
-    <version>1.0.0</version>
-</dependency>
-```
-
-配置示例（敏感值使用环境变量注入）：
-
-```yaml
-dinghai:
-  file-storage:
-    provider: local
-    local:
-      root: /var/lib/app/files
-    storage-alias: documents
-    security:
-      signing-key: ${DINGHAI_FILE_STORAGE_SIGNING_KEY}
-      stable-id-key: ${DINGHAI_FILE_STORAGE_STABLE_ID_KEY}
-    web:
-      enabled: true
-      path-prefix: /files
-      direct-access: false
-      read-buffer-size: 128KB
-      max-concurrent-reads: 128
-    cache:
-      max-object-size: 50MB
-      buffer-size: 128KB
-      max-concurrent-fills: 4
-      queue-capacity: 32
-    upload:
-      max-size: 100MB
-```
-
-Starter 默认注册 `/files/upload/{*key}`、`/files/download/{*key}` 和 `/files/preview/{*key}`。上传和下载 URL 均可预签名；下载签名绑定 `inline` 或 `attachment` 响应模式。预览/下载使用流式响应，并支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304 和单 Range 206/416。流式响应使用文件存储专用的有界异步执行器，避免依赖无界默认执行器。无签名访问默认拒绝，直接访问必须显式开启并提供 `FileStorageAccessPolicy`。
-
-除稳定 `fileId` 地址外，也可使用真实 object key 地址 `/files/read/key/{*key}`、`/files/read/key/preview/{*key}` 和 `/files/read/key/download/{*key}`；这些地址仍遵守预签名或宿主直接访问授权。`web.read-buffer-size` 和 `cache.buffer-size` 是单次复制缓冲区，不代表整文件内存；`web.max-concurrent-reads`、`cache.max-concurrent-fills` 和 `cache.queue-capacity` 分别限制响应读取并发、缓存落盘并发和等待队列长度。
-
-MinIO 配置需要 `endpoint`、`bucket`、`access-key` 和 `secret-key`，不自动创建 bucket，也不会在 Local 与 MinIO 之间自动回退。签名密钥、访问密钥和完整签名 URL 不写入日志或错误响应。
-
-私有对象可使用稳定读取 URL：`/files/read/v1/{id}`，预览和下载分别为
-`/files/preview/v1/{id}`、`/files/download/v1/{id}`。`id` 只依赖
-`storage-alias + object key` 与活动 AES-SIV 密钥，因此从 Local 迁移到 MinIO 后保持不变；
-轮换 `stable-id-key` 会使旧 URL 失效。该路由不执行组件内的用户鉴权，嵌入方负责浏览器前的权限控制。
-
-非 Local provider 默认启用经远端 `stat` 校验的二级磁盘读取缓存；仅 Local/磁盘 provider
-默认关闭。未命中且对象不超过 `cache.max-object-size` 时，当前请求直接流式读取，另开第二条
-provider 流异步落盘；每天
-00:00 删除超过 `cache.idle-ttl` 未访问的完整副本。生产环境应显式配置安全的
-`cache.root`，例如 `${DINGHAI_FILE_STORAGE_CACHE_ROOT}`。`cache.enabled` 可显式覆盖默认值：
-对 Local 设置为 `true` 可开启缓存，对非 Local 设置为 `false` 可关闭缓存。
-
-文件存储模块统一位于 `dinghai-file-storage/`：`core`、`local`、`minio` 和
-`spring-boot-starter` 保持原有 Maven artifactId 不变。仓库还提供仅用于开发验证的
-`dinghai-file-storage/benchmark` 模块，可对真实文件执行并发上传、冷读、MinIO 缓存填充/热读
-和 SHA-256 校验。
-
-```bash
-# Local：并发上传 4 份、每份读取 2 轮
-mvn -pl dinghai-file-storage/benchmark -am -DskipTests install
-mvn -f dinghai-file-storage/benchmark/pom.xml exec:java \
-  -Dexec.mainClass=io.github.lvdaxianer.dinghai.filestorage.spring.FileStorageBenchmark \
-  -Dexec.args="--provider=local --file=$HOME/Downloads/982-合0820.FBX --concurrency=4 --read-rounds=2"
-
-# MinIO：运行时从环境变量读取 endpoint、access key、secret key 和 bucket
-export DINGHAI_FILE_STORAGE_MINIO_ENDPOINT=http://localhost:9000
-export DINGHAI_FILE_STORAGE_MINIO_ACCESS_KEY=CHANGE_ME
-export DINGHAI_FILE_STORAGE_MINIO_SECRET_KEY=CHANGE_ME
-export DINGHAI_FILE_STORAGE_MINIO_BUCKET=dinghai-benchmark
-mvn -f dinghai-file-storage/benchmark/pom.xml exec:java \
-  -Dexec.mainClass=io.github.lvdaxianer.dinghai.filestorage.spring.FileStorageBenchmark \
-  -Dexec.args="--provider=minio --file=$HOME/Downloads/doc.zip --concurrency=4 --read-rounds=2"
-```
-
-压测使用独立随机对象 key，完成后尽力删除对象；输出包含阶段耗时、吞吐量、平均/P95/P99
-延迟和错误数，不输出密钥。Local 已用 `982-合0820.FBX`（412,202,320 bytes）完成上述参数的
-实测：4 并发上传共 1.53 GiB，平均 1298 ms、P95 1406 ms、吞吐 1117 MiB/s；随后 8 次并发冷读
-共 3.07 GiB，平均 200 ms、P95 230 ms、吞吐 7765 MiB/s，SHA-256 校验全部通过且错误数为 0。
-该读数会受操作系统文件缓存影响，不能视为纯物理磁盘吞吐。MinIO 压测在提供有效的运行时凭据后
-执行，并分别输出上传、冷读、缓存填充与热读数据；不要将凭据或完整预签名 URL 提交到仓库。
-
-离线迁移只处理服务器目录包，不通过 HTTP 上传大文件。显式设置
-`dinghai.file-storage.migration.enabled=true` 后，配置 `export-root`、`import-root`、
-`completed-root`、`failed-root` 四个目录。导出产生 `manifest.ndjson` 和 `objects/`，内容以
-SHA-256 校验；导入成功后包移动到 completed，失败包及 `errors.ndjson` 移动到 failed。
-管理接口 `/files/migration/export` 与 `/files/migration/import` 仅在宿主提供
-`FileStorageMigrationAccessPolicy` 时注册，策略必须分别授权 `EXPORT` 与 `IMPORT` 操作。
-
 ### 快速开始
 
 引入 Maven 坐标：
@@ -344,6 +249,101 @@ mvn test -Ddinghai.redis.contract-test=true
 | `dinghai.redis.contract-sentinel-nodes`（`127.0.0.1:26379`） | Sentinel 节点列表 |
 | `dinghai.redis.contract-sentinel-username`（空） | Sentinel ACL 用户名 |
 | `dinghai.redis.contract-sentinel-password`（空） | Sentinel ACL 密码 |
+
+## dinghai-file-storage
+
+统一文件存储适配层支持本地磁盘和 MinIO，业务代码依赖 `FileStorage` 契约即可切换后端。Local 支持 `1/1/1/1.png`、中文目录等对象 key，并通过临时文件和流式读写避免把文件整体载入内存。
+
+引入 Starter：
+
+```xml
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+配置示例（敏感值使用环境变量注入）：
+
+```yaml
+dinghai:
+  file-storage:
+    provider: local
+    local:
+      root: /var/lib/app/files
+    storage-alias: documents
+    security:
+      signing-key: ${DINGHAI_FILE_STORAGE_SIGNING_KEY}
+      stable-id-key: ${DINGHAI_FILE_STORAGE_STABLE_ID_KEY}
+    web:
+      enabled: true
+      path-prefix: /files
+      direct-access: false
+      read-buffer-size: 128KB
+      max-concurrent-reads: 128
+    cache:
+      max-object-size: 50MB
+      buffer-size: 128KB
+      max-concurrent-fills: 4
+      queue-capacity: 32
+    upload:
+      max-size: 100MB
+```
+
+Starter 默认注册 `/files/upload/{*key}`、`/files/download/{*key}` 和 `/files/preview/{*key}`。上传和下载 URL 均可预签名；下载签名绑定 `inline` 或 `attachment` 响应模式。预览/下载使用流式响应，并支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304 和单 Range 206/416。流式响应使用文件存储专用的有界异步执行器，避免依赖无界默认执行器。无签名访问默认拒绝，直接访问必须显式开启并提供 `FileStorageAccessPolicy`。
+
+除稳定 `fileId` 地址外，也可使用真实 object key 地址 `/files/read/key/{*key}`、`/files/read/key/preview/{*key}` 和 `/files/read/key/download/{*key}`；这些地址仍遵守预签名或宿主直接访问授权。`web.read-buffer-size` 和 `cache.buffer-size` 是单次复制缓冲区，不代表整文件内存；`web.max-concurrent-reads`、`cache.max-concurrent-fills` 和 `cache.queue-capacity` 分别限制响应读取并发、缓存落盘并发和等待队列长度。
+
+MinIO 配置需要 `endpoint`、`bucket`、`access-key` 和 `secret-key`，不自动创建 bucket，也不会在 Local 与 MinIO 之间自动回退。签名密钥、访问密钥和完整签名 URL 不写入日志或错误响应。
+
+私有对象可使用稳定读取 URL：`/files/read/v1/{id}`，预览和下载分别为
+`/files/preview/v1/{id}`、`/files/download/v1/{id}`。`id` 只依赖
+`storage-alias + object key` 与活动 AES-SIV 密钥，因此从 Local 迁移到 MinIO 后保持不变；
+轮换 `stable-id-key` 会使旧 URL 失效。该路由不执行组件内的用户鉴权，嵌入方负责浏览器前的权限控制。
+
+非 Local provider 默认启用经远端 `stat` 校验的二级磁盘读取缓存；仅 Local/磁盘 provider
+默认关闭。未命中且对象不超过 `cache.max-object-size` 时，当前请求直接流式读取，另开第二条
+provider 流异步落盘；每天
+00:00 删除超过 `cache.idle-ttl` 未访问的完整副本。生产环境应显式配置安全的
+`cache.root`，例如 `${DINGHAI_FILE_STORAGE_CACHE_ROOT}`。`cache.enabled` 可显式覆盖默认值：
+对 Local 设置为 `true` 可开启缓存，对非 Local 设置为 `false` 可关闭缓存。
+
+文件存储模块统一位于 `dinghai-file-storage/`：`core`、`local`、`minio` 和
+`spring-boot-starter` 保持原有 Maven artifactId 不变。仓库还提供仅用于开发验证的
+`dinghai-file-storage/benchmark` 模块，可对真实文件执行并发上传、冷读、MinIO 缓存填充/热读
+和 SHA-256 校验。
+
+```bash
+# Local：并发上传 4 份、每份读取 2 轮
+mvn -pl dinghai-file-storage/benchmark -am -DskipTests install
+mvn -f dinghai-file-storage/benchmark/pom.xml exec:java \
+  -Dexec.mainClass=io.github.lvdaxianer.dinghai.filestorage.spring.FileStorageBenchmark \
+  -Dexec.args="--provider=local --file=$HOME/Downloads/982-合0820.FBX --concurrency=4 --read-rounds=2"
+
+# MinIO：运行时从环境变量读取 endpoint、access key、secret key 和 bucket
+export DINGHAI_FILE_STORAGE_MINIO_ENDPOINT=http://localhost:9000
+export DINGHAI_FILE_STORAGE_MINIO_ACCESS_KEY=CHANGE_ME
+export DINGHAI_FILE_STORAGE_MINIO_SECRET_KEY=CHANGE_ME
+export DINGHAI_FILE_STORAGE_MINIO_BUCKET=dinghai-benchmark
+mvn -f dinghai-file-storage/benchmark/pom.xml exec:java \
+  -Dexec.mainClass=io.github.lvdaxianer.dinghai.filestorage.spring.FileStorageBenchmark \
+  -Dexec.args="--provider=minio --file=$HOME/Downloads/doc.zip --concurrency=4 --read-rounds=2"
+```
+
+压测使用独立随机对象 key，完成后尽力删除对象；输出包含阶段耗时、吞吐量、平均/P95/P99
+延迟和错误数，不输出密钥。Local 已用 `982-合0820.FBX`（412,202,320 bytes）完成上述参数的
+实测：4 并发上传共 1.53 GiB，平均 1298 ms、P95 1406 ms、吞吐 1117 MiB/s；随后 8 次并发冷读
+共 3.07 GiB，平均 200 ms、P95 230 ms、吞吐 7765 MiB/s，SHA-256 校验全部通过且错误数为 0。
+该读数会受操作系统文件缓存影响，不能视为纯物理磁盘吞吐。MinIO 压测在提供有效的运行时凭据后
+执行，并分别输出上传、冷读、缓存填充与热读数据；不要将凭据或完整预签名 URL 提交到仓库。
+
+离线迁移只处理服务器目录包，不通过 HTTP 上传大文件。显式设置
+`dinghai.file-storage.migration.enabled=true` 后，配置 `export-root`、`import-root`、
+`completed-root`、`failed-root` 四个目录。导出产生 `manifest.ndjson` 和 `objects/`，内容以
+SHA-256 校验；导入成功后包移动到 completed，失败包及 `errors.ndjson` 移动到 failed。
+管理接口 `/files/migration/export` 与 `/files/migration/import` 仅在宿主提供
+`FileStorageMigrationAccessPolicy` 时注册，策略必须分别授权 `EXPORT` 与 `IMPORT` 操作。
 
 ## 发布
 
