@@ -22,6 +22,7 @@
 
 - `file-storage-configurable-read`: 读取资源配置需要明确零拷贝优先和流式回退的边界。
 - `file-storage-web-access`: Web 完整文件和单区间读取增加本地文件传输路径，同时保持现有条件请求和授权行为。
+- `stable-file-access`: Local 二级缓存不再允许由显式配置开启，避免主存储与可清理缓存混淆。
 
 ## Impact
 

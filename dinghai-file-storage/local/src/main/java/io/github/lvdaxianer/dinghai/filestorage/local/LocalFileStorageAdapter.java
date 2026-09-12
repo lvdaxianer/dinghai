@@ -3,6 +3,7 @@ package io.github.lvdaxianer.dinghai.filestorage.local;
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.LocalFileSource;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
@@ -32,7 +33,7 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 /** 基于本地磁盘的流式文件存储适配器。 */
-public final class LocalFileStorageAdapter implements FileStorage {
+public final class LocalFileStorageAdapter implements FileStorage, LocalFileSource {
     private static final int BUFFER_SIZE = 8192;
     private static final String DEFAULT_CONTENT_TYPE = "application/octet-stream";
     /** 本地预签名 URL 的默认最长有效期。 */
@@ -103,7 +104,7 @@ public final class LocalFileStorageAdapter implements FileStorage {
     @Override
     public Optional<DownloadObject> get(ObjectKey key) {
         Path path = paths.resolve(key);
-        if (!Files.isRegularFile(path)) {
+        if (!Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             return Optional.empty();
         }
         try {
@@ -120,11 +121,19 @@ public final class LocalFileStorageAdapter implements FileStorage {
         }
     }
 
+    /** 返回已完成且仍在本地存储根目录内的普通对象文件。 */
+    @Override
+    public Optional<Path> localFile(ObjectKey key) {
+        Path path = paths.resolve(key);
+        return Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                ? Optional.of(path) : Optional.empty();
+    }
+
     /** 获取对象元数据，不存在时返回空。 */
     @Override
     public Optional<ObjectMetadata> stat(ObjectKey key) {
         Path path = paths.resolve(key);
-        if (!Files.isRegularFile(path)) {
+        if (!Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             return Optional.empty();
         }
         try {
@@ -140,14 +149,14 @@ public final class LocalFileStorageAdapter implements FileStorage {
     /** 判断对象是否存在且为普通文件。 */
     @Override
     public boolean exists(ObjectKey key) {
-        return Files.isRegularFile(paths.resolve(key));
+        return Files.isRegularFile(paths.resolve(key), java.nio.file.LinkOption.NOFOLLOW_LINKS);
     }
 
     /** 删除对象和元数据；对象不存在时返回 false。 */
     @Override
     public boolean delete(ObjectKey key) {
         Path path = paths.resolve(key);
-        if (!Files.isRegularFile(path)) {
+        if (!Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             return false;
         }
         try {

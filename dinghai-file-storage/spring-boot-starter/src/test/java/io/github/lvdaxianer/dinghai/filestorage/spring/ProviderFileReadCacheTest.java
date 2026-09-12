@@ -66,6 +66,24 @@ public class ProviderFileReadCacheTest {
         cache.close();
     }
 
+    /** 仅完整且元数据匹配的缓存副本可作为本地文件传输来源。 */
+    @Test
+    public void shouldExposeVerifiedCacheHitAsLocalFile() throws Exception {
+        CountingStorage storage = new CountingStorage();
+        ProviderFileReadCache cache = new ProviderFileReadCache(storage, "documents",
+                temporaryFolder.newFolder("cache").toPath(), true, 1024L);
+        try (DownloadObject ignored = cache.get(KEY).orElseThrow()) {
+            ignored.stream().readAllBytes();
+        }
+        cache.awaitIdle(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+        Path localFile = cache.localFile(KEY).orElseThrow();
+
+        assertTrue(Files.isRegularFile(localFile));
+        assertEquals("hello", Files.readString(localFile));
+        cache.close();
+    }
+
     /** 元数据不匹配时必须丢弃旧副本并重新读取 provider。 */
     @Test
     public void shouldInvalidateCacheWhenRemoteMetadataChanges() throws Exception {
@@ -99,6 +117,21 @@ public class ProviderFileReadCacheTest {
         cache.awaitIdle(1L, TimeUnit.SECONDS);
 
         assertEquals(1, storage.getCalls.get());
+        assertTrue(!cache.hasCachedObject(KEY));
+        cache.close();
+    }
+
+    /** provider 实际流超过元数据长度时不得发布超长缓存。 */
+    @Test
+    public void shouldRejectProviderStreamLongerThanMetadata() throws Exception {
+        CountingStorage storage = new CountingStorage();
+        storage.overrideBytes = "hello-too-long".getBytes(StandardCharsets.UTF_8);
+        ProviderFileReadCache cache = new ProviderFileReadCache(storage, "documents",
+                temporaryFolder.newFolder("cache").toPath(), true, 1024L);
+        try (DownloadObject object = cache.get(KEY).orElseThrow()) {
+            object.stream().readAllBytes();
+        }
+        cache.awaitIdle(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         assertTrue(!cache.hasCachedObject(KEY));
         cache.close();
     }
@@ -155,6 +188,8 @@ public class ProviderFileReadCacheTest {
         private volatile ObjectMetadata metadata = METADATA;
         /** 是否阻塞缓存填充流。 */
         private volatile boolean isFillStreamBlocked;
+        /** 可选的故意超长 provider 数据。 */
+        private volatile byte[] overrideBytes;
 
         /** 阻塞第二次 get 返回的缓存填充流。 */
         private void blockFillStream() { isFillStreamBlocked = true; }
@@ -174,7 +209,8 @@ public class ProviderFileReadCacheTest {
                 return Optional.empty();
             }
             int getCall = getCalls.incrementAndGet();
-            byte[] value = metadata.contentLength() == 5L ? bytes("hello") : bytes("changed");
+            byte[] value = overrideBytes != null ? overrideBytes
+                    : (metadata.contentLength() == 5L ? bytes("hello") : bytes("changed"));
             InputStream stream = new ByteArrayInputStream(value);
             if (isFillStreamBlocked && getCall == 2) {
                 stream = blockingFillStream(stream);
