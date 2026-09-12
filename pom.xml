@@ -35,10 +35,11 @@
 
     <modules>
         <module>dinghai-shared-state</module>
-        <module>dinghai-file-storage-core</module>
-        <module>dinghai-file-storage-local</module>
-        <module>dinghai-file-storage-minio</module>
-        <module>dinghai-file-storage-spring-boot-starter</module>
+        <module>dinghai-file-storage/core</module>
+        <module>dinghai-file-storage/local</module>
+        <module>dinghai-file-storage/minio</module>
+        <module>dinghai-file-storage/spring-boot-starter</module>
+        <module>dinghai-file-storage/benchmark</module>
     </modules>
 
     <properties>
