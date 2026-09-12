@@ -95,6 +95,7 @@ MinIO 适配器**不会自动创建或修改 bucket**，需事先自行建好。
 | `web.read-buffer-size` | `DataSize` | `128KB` | 单个响应流的复制缓冲区大小，是单次复制缓冲而非整文件内存；必须为正且不超过 `Integer.MAX_VALUE` |
 | `web.max-concurrent-reads` | `int` | `128` | 同时执行的 Web 响应读取上限；耗尽时返回 HTTP 429，不排队等待。覆盖流式、缓存文件和零拷贝传输 |
 | `web.max-concurrent-uploads` | `int` | `16` | 同时执行的 Web 上传上限；耗尽时返回 HTTP 429，不读取被拒绝请求体。SDK 上传不受此限制 |
+| `web.max-concurrent-transfers-per-key` | `int` | `0`（关闭） | 宿主 resolver 返回非空 key 时该 key 的上传或读取并发上限；必须不小于 0。上传和读取分别计数，达到上限返回 HTTP 429；无活动传输的 key 状态立即回收 |
 
 ### cache（二级磁盘读取缓存）
 
@@ -144,6 +145,8 @@ dinghai:
       direct-access: false
       read-buffer-size: 128KB
       max-concurrent-reads: 128
+      max-concurrent-uploads: 16
+      max-concurrent-transfers-per-key: 4
     cache:
       max-object-size: 50MB
       buffer-size: 128KB
@@ -173,8 +176,21 @@ dinghai:
 
 - **Local 后端**：组件自实现的 HMAC-SHA-256 预签名。签名 URL 携带 `expires`（Unix 秒）、`signature`（Base64URL）等查询参数，上传签名还可绑定 `contentType`、`maxSize`、`cacheControl`；下载签名绑定 `inline` 或 `attachment` 响应模式。有效期受 `security.maximum-presign-expiry` 限制。
 - **MinIO 后端**：使用 MinIO 原生预签名（PostPolicy 上传、`getPresignedObjectUrl` 下载）。本地签名校验仅 Local 适配器支持，对非 Local 后端走本地签名 URL 会抛 `INVALID_PRESIGN`。
-- **直接上传**：无签名上传默认拒绝；必须同时满足 `web.direct-access=true` 且宿主提供 `FileStorageAccessPolicy` Bean 并对 UPLOAD 返回允许。Web 下载、预览和读取不要求组件凭证，但受 `web.max-concurrent-reads` 限制；宿主应在网关/WAF层负责身份和速率策略。
+- **直接上传**：无签名上传默认拒绝；必须同时满足 `web.direct-access=true` 且宿主提供 `FileStorageAccessPolicy` Bean 并对 UPLOAD 返回允许。Web 下载、预览和读取不要求组件凭证，但受读取并发限制保护。
 - 所有 Bean 均带 `@ConditionalOnMissingBean`，宿主可替换默认实现（包括 `FileStorage` 本身）。
+
+### 宿主按 key 隔离传输并发
+
+设置正数 `web.max-concurrent-transfers-per-key` 后，宿主可注册 `WebTransferRateLimitKeyResolver` Bean，以已验证的用户、租户或 API 客户端身份返回 key：
+
+```java
+@Bean
+WebTransferRateLimitKeyResolver webTransferRateLimitKeyResolver() {
+    return request -> currentTenantId();
+}
+```
+
+组件不从 IP、JWT、Cookie、转发头或 API Key 推导 key，也不会记录或回显该值。未注册 resolver、resolver 返回 `null`/空白值或抛出运行时异常时，请求仅受全局上传/读取上限限制。每 key 上限与全局上限叠加；同一 key 的上传与读取使用独立额度，且 SDK 的 `FileStorage.put/get` 不受 Web 限流影响。
 
 ## 稳定文件 ID
 
@@ -198,7 +214,7 @@ dinghai:
 
 - Local 主文件和远程热缓存命中时，Tomcat 明文且未压缩请求优先使用原生 `sendfile`，不按文件大小分配 JVM 堆内存。
 - TLS、响应压缩、非 Tomcat 容器、文件暂不可用或容器拒绝注册时自动降级为有界流式复制，响应内容、条件请求和 Range 语义保持不变。
-- `web.max-concurrent-reads` 覆盖流式回退、缓存文件和 Tomcat `sendfile`，读取许可保持到响应完成或失败；并发达到上限时立即返回 HTTP 429。
+- 全局读取上限和可选的每 key 读取上限均覆盖流式回退、缓存文件和 Tomcat `sendfile`，读取许可保持到响应完成或失败；并发达到上限时立即返回 HTTP 429。
 - Local 升级时必须删除 `dinghai.file-storage.cache.enabled=true`；该配置已移除，继续保留会使应用启动失败。
 
 ## 离线迁移

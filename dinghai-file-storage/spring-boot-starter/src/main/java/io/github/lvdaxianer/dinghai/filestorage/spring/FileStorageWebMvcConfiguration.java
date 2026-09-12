@@ -53,11 +53,22 @@ public class FileStorageWebMvcConfiguration implements WebMvcConfigurer {
             @Override
             public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
                                         Object handler, Exception exception) {
-                Object permit = request.getAttribute(FileStorageWebController.READ_PERMIT_ATTRIBUTE);
-                if (permit instanceof WebTransferLimiter.Permit readPermit) {
-                    readPermit.close();
-                }
+                releaseReadPermit(request);
             }
         });
+    }
+
+    /**
+     * 释放 sendfile 响应在请求上下文中保存的读取许可。
+     *
+     * @param request 已完成的 HTTP 请求
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    static void releaseReadPermit(HttpServletRequest request) {
+        Object permit = request.getAttribute(FileStorageWebController.READ_PERMIT_ATTRIBUTE);
+        if (permit instanceof WebTransferLimiter.Permit readPermit) {
+            readPermit.close();
+        }
     }
 }

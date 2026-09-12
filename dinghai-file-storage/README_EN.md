@@ -95,6 +95,7 @@ The MinIO adapter **does not create or modify buckets automatically**; create th
 | `web.read-buffer-size` | `DataSize` | `128KB` | Copy buffer size per response stream; this is a per-copy buffer, not whole-file memory. Must be positive and not exceed `Integer.MAX_VALUE` |
 | `web.max-concurrent-reads` | `int` | `128` | Maximum concurrent Web response reads; when exhausted, the request returns HTTP 429 instead of queueing. Covers streaming, cached-file, and zero-copy transfers |
 | `web.max-concurrent-uploads` | `int` | `16` | Maximum concurrent Web uploads; when exhausted, the request returns HTTP 429 before reading its body. SDK uploads are not affected |
+| `web.max-concurrent-transfers-per-key` | `int` | `0` (disabled) | Per-host-resolver-key upload or read concurrency limit; must be at least 0. Uploads and reads use separate counters, exhaustion returns HTTP 429, and idle key state is removed immediately |
 
 ### cache (Two-Level Disk Read Cache)
 
@@ -144,6 +145,8 @@ dinghai:
       direct-access: false
       read-buffer-size: 128KB
       max-concurrent-reads: 128
+      max-concurrent-uploads: 16
+      max-concurrent-transfers-per-key: 4
     cache:
       max-object-size: 50MB
       buffer-size: 128KB
@@ -173,8 +176,21 @@ Preview/download supports `Content-Type`, ETag, Last-Modified, Cache-Control, Ex
 
 - **Local backend**: the component implements its own HMAC-SHA-256 presigning. Signed URLs carry query parameters such as `expires` (Unix seconds) and `signature` (Base64URL); upload signatures can additionally bind `contentType`, `maxSize`, and `cacheControl`, while download signatures bind the `inline` or `attachment` response mode. The validity period is limited by `security.maximum-presign-expiry`.
 - **MinIO backend**: uses MinIO native presigning (PostPolicy for uploads, `getPresignedObjectUrl` for downloads). Local signature verification is only supported by the Local adapter; presenting a local-style signed URL to a non-Local backend throws `INVALID_PRESIGN`.
-- **Direct upload**: unsigned uploads are denied by default; they require both `web.direct-access=true` and a host-provided `FileStorageAccessPolicy` Bean that allows UPLOAD. Web downloads, previews, and reads do not require component credentials but remain limited by `web.max-concurrent-reads`; hosts should apply identity and rate policies at the gateway/WAF layer.
+- **Direct upload**: unsigned uploads are denied by default; they require both `web.direct-access=true` and a host-provided `FileStorageAccessPolicy` Bean that allows UPLOAD. Web downloads, previews, and reads do not require component credentials, but remain protected by read concurrency limits.
 - All Beans carry `@ConditionalOnMissingBean`, so the host can replace any default implementation (including `FileStorage` itself).
+
+### Host Key-Based Transfer Isolation
+
+After setting a positive `web.max-concurrent-transfers-per-key`, the host can register a `WebTransferRateLimitKeyResolver` Bean that returns a key from verified user, tenant, or API-client context:
+
+```java
+@Bean
+WebTransferRateLimitKeyResolver webTransferRateLimitKeyResolver() {
+    return request -> currentTenantId();
+}
+```
+
+The component does not derive a key from IP addresses, JWTs, cookies, forwarded headers, or API keys, and never logs or echoes it. If no resolver is registered, it returns `null`/blank, or it throws a runtime exception, the request falls back to global upload/read limits only. The per-key limit is combined with global limits; upload and read quotas for the same key are independent, and SDK `FileStorage.put/get` calls never consume Web permits.
 
 ## Stable File ID
 
@@ -198,7 +214,7 @@ Non-Local backends enable by default a two-level disk read cache validated again
 
 - Local primary files and validated remote cache hits prefer native Tomcat `sendfile` for plain, uncompressed requests without allocating JVM heap proportional to file size.
 - TLS, response compression, non-Tomcat containers, temporarily unavailable files, and rejected registrations automatically fall back to bounded streaming while preserving content, conditional-request, and Range semantics.
-- `web.max-concurrent-reads` covers streaming fallbacks, cached files, and Tomcat `sendfile`; the permit remains held until the response completes or fails, and saturated requests immediately return HTTP 429.
+- Both the global read limit and optional per-key read limit cover streaming fallbacks, cached files, and Tomcat `sendfile`; permits remain held until the response completes or fails, and saturated requests immediately return HTTP 429.
 - When upgrading a Local deployment, remove `dinghai.file-storage.cache.enabled=true`. The setting is removed and retaining it fails startup.
 
 ## Offline Migration

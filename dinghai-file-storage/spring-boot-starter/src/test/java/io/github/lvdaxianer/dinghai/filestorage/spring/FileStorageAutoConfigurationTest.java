@@ -320,6 +320,7 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(properties.getWeb().getReadBufferSize().toBytes()).isEqualTo(128L * 1024L);
                     assertThat(properties.getWeb().getMaxConcurrentReads()).isEqualTo(128);
                     assertThat(properties.getWeb().getMaxConcurrentUploads()).isEqualTo(16);
+                    assertThat(properties.getWeb().getMaxConcurrentTransfersPerKey()).isZero();
                     assertThat(properties.getCache().getBufferSize().toBytes()).isEqualTo(128L * 1024L);
                     assertThat(properties.getCache().getMaxConcurrentFills()).isEqualTo(4);
                     assertThat(properties.getCache().getQueueCapacity()).isEqualTo(32);
@@ -378,6 +379,14 @@ public class FileStorageAutoConfigurationTest {
     public void shouldFailFastForInvalidWebUploadConcurrency() {
         contextRunner.withPropertyValues(localProperties())
                 .withPropertyValues("dinghai.file-storage.web.max-concurrent-uploads=0")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    /** 每 key 并发上限不得为负数，零用于关闭该可选限制。 */
+    @Test
+    public void shouldFailFastForNegativeWebTransferConcurrencyPerKey() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.web.max-concurrent-transfers-per-key=-1")
                 .run(context -> assertThat(context).hasFailed());
     }
 

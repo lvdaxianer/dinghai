@@ -67,6 +67,8 @@ public class FileStorageWebController {
     private final StableFileAccessService stableAccess;
     /** 可选非本地 provider 读取缓存。 */
     private final ProviderFileReadCache readCache;
+    /** 宿主可选的传输限流 key 解析器。 */
+    private final WebTransferRateLimitKeyResolver keyResolver;
     private final int bufferSize;
     private final WebTransferLimiter transferLimiter;
 
@@ -132,16 +134,42 @@ public class FileStorageWebController {
                                     ProviderFileReadCache readCache,
                                     int bufferSize, int maxConcurrentReads,
                                     int maxConcurrentUploads) {
+        this(storage, authorizer, clock, stableAccess, readCache,
+                new WebTransferConfiguration(bufferSize, maxConcurrentReads, maxConcurrentUploads, 0, null));
+    }
+
+    /**
+     * 创建带完整 Web 传输配置的文件存储端点。
+     *
+     * @param storage 文件存储
+     * @param authorizer 直接访问授权器
+     * @param clock 当前时间源
+     * @param stableAccess 稳定文件读取服务
+     * @param readCache 非本地 provider 读取缓存
+     * @param transferConfiguration Web 传输资源与宿主 key 配置
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-12
+     */
+    FileStorageWebController(FileStorage storage, FileStorageDirectAccessAuthorizer authorizer, Clock clock,
+                             StableFileAccessService stableAccess, ProviderFileReadCache readCache,
+                             WebTransferConfiguration transferConfiguration) {
         this.storage = java.util.Objects.requireNonNull(storage, "storage");
         this.authorizer = java.util.Objects.requireNonNull(authorizer, "authorizer");
         this.clock = java.util.Objects.requireNonNull(clock, "clock");
+        transferConfiguration = java.util.Objects.requireNonNull(transferConfiguration,
+                "transferConfiguration");
         this.stableAccess = stableAccess;
         this.readCache = readCache;
-        if (bufferSize <= 0 || maxConcurrentReads <= 0 || maxConcurrentUploads <= 0) {
-            throw new IllegalArgumentException("web transfer resource limits must be positive");
+        if (transferConfiguration.bufferSize() <= 0 || transferConfiguration.maxConcurrentReads() <= 0
+                || transferConfiguration.maxConcurrentUploads() <= 0
+                || transferConfiguration.maxConcurrentTransfersPerKey() < 0) {
+            throw new IllegalArgumentException("web transfer global limits must be positive and per-key limit must not be negative");
         }
-        this.bufferSize = bufferSize;
-        this.transferLimiter = new WebTransferLimiter(maxConcurrentUploads, maxConcurrentReads);
+        this.bufferSize = transferConfiguration.bufferSize();
+        this.keyResolver = transferConfiguration.keyResolver();
+        this.transferLimiter = new WebTransferLimiter(transferConfiguration.maxConcurrentUploads(),
+                transferConfiguration.maxConcurrentReads(),
+                transferConfiguration.maxConcurrentTransfersPerKey());
     }
 
     /**
@@ -173,7 +201,7 @@ public class FileStorageWebController {
                                        @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false,
                                                defaultValue = "-1") long contentLength,
                                        InputStream input, Principal principal) {
-        try (WebTransferLimiter.Permit ignored = transferLimiter.acquireUpload()) {
+        try (WebTransferLimiter.Permit ignored = transferLimiter.acquireUpload(rateLimitKey())) {
         ObjectKey objectKey = objectKey(key);
         if (signature == null || signature.isBlank()) {
             requireDirectAccess(principal, objectKey, FileStorageAccessOperation.UPLOAD);
@@ -551,7 +579,7 @@ public class FileStorageWebController {
      */
     private ResponseEntity<StreamingResponseBody> stream(ObjectKey key, HttpHeaders headers,
                                                           HttpStatus status, long skip, long length) {
-        WebTransferLimiter.Permit permit = transferLimiter.acquireRead();
+        WebTransferLimiter.Permit permit = transferLimiter.acquireRead(rateLimitKey());
         Optional<Path> localFile = localFile(key);
         Optional<jakarta.servlet.http.HttpServletRequest> request = currentRequest();
         if (localFile.isPresent() && headers.getFirst(HttpHeaders.CONTENT_ENCODING) == null
@@ -805,6 +833,22 @@ public class FileStorageWebController {
             return Optional.of(attributes.getRequest());
         }
         return Optional.empty();
+    }
+
+    /**
+     * 解析宿主限流 key；未配置、空白或解析异常时只使用全局限流。
+     *
+     * @return 可选的非空白限流 key
+     */
+    private String rateLimitKey() {
+        if (keyResolver == null) {
+            return null;
+        }
+        try {
+            return currentRequest().map(keyResolver::resolve).filter(key -> !key.isBlank()).orElse(null);
+        } catch (RuntimeException exception) {
+            return null;
+        }
     }
 
     /** 通过缓存协作者写入对象并立即失效旧副本。 */
