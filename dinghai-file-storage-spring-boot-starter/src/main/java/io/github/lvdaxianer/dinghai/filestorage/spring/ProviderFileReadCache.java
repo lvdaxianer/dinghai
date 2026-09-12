@@ -40,11 +40,11 @@ import java.util.stream.Stream;
  */
 public final class ProviderFileReadCache implements AutoCloseable {
     /** 缓存复制缓冲区大小。 */
-    private static final int BUFFER_SIZE = 8192;
+    private static final int DEFAULT_BUFFER_SIZE = 128 * 1024;
     /** 缓存异步线程数。 */
-    private static final int THREAD_COUNT = 2;
+    private static final int DEFAULT_THREAD_COUNT = 4;
     /** 缓存异步队列容量。 */
-    private static final int QUEUE_CAPACITY = 32;
+    private static final int DEFAULT_QUEUE_CAPACITY = 32;
     /** 缓存 sidecar 文件后缀。 */
     private static final String SIDECAR_SUFFIX = ".properties";
     /** 始终使用的缓存版本。 */
@@ -54,6 +54,7 @@ public final class ProviderFileReadCache implements AutoCloseable {
     private final Path root;
     private final boolean enabled;
     private final long maxObjectSize;
+    private final int bufferSize;
     private final ThreadPoolExecutor executor;
     /** 正在异步填充的对象摘要。 */
     private final Set<String> filling = ConcurrentHashMap.newKeySet();
@@ -71,17 +72,28 @@ public final class ProviderFileReadCache implements AutoCloseable {
      */
     public ProviderFileReadCache(FileStorage provider, String storageAlias, Path root,
                                  boolean enabled, long maxObjectSize) {
+        this(provider, storageAlias, root, enabled, maxObjectSize, DEFAULT_BUFFER_SIZE,
+                DEFAULT_THREAD_COUNT, DEFAULT_QUEUE_CAPACITY);
+    }
+
+    public ProviderFileReadCache(FileStorage provider, String storageAlias, Path root,
+                                 boolean enabled, long maxObjectSize, int bufferSize,
+                                 int maxConcurrentFills, int queueCapacity) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.storageAlias = Objects.requireNonNull(storageAlias, "storageAlias");
         this.root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
         if (maxObjectSize < 0L) {
             throw new IllegalArgumentException("max object size must be non-negative");
         }
+        if (bufferSize <= 0 || maxConcurrentFills <= 0 || queueCapacity <= 0) {
+            throw new IllegalArgumentException("cache resource limits must be positive");
+        }
         this.enabled = enabled;
         this.maxObjectSize = maxObjectSize;
+        this.bufferSize = bufferSize;
         createRoot();
-        executor = new ThreadPoolExecutor(THREAD_COUNT, THREAD_COUNT, 0L, TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<>(QUEUE_CAPACITY), runnable -> {
+        executor = new ThreadPoolExecutor(maxConcurrentFills, maxConcurrentFills, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(queueCapacity), runnable -> {
                     Thread thread = new Thread(runnable, "file-storage-cache-");
                     thread.setDaemon(true);
                     return thread;
@@ -232,7 +244,7 @@ public final class ProviderFileReadCache implements AutoCloseable {
 
     /** 复制对象流。 */
     private void copy(InputStream input, OutputStream output) throws IOException {
-        byte[] buffer = new byte[BUFFER_SIZE];
+        byte[] buffer = new byte[bufferSize];
         int read;
         while ((read = input.read(buffer)) != -1) {
             output.write(buffer, 0, read);

@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.util.unit.DataSize;
 
 /**
  * 文件存储 Starter 的外部配置属性。
@@ -518,6 +519,10 @@ public class FileStorageProperties {
         private String pathPrefix = "/files";
         /** 是否允许没有预签名凭据的直接访问。 */
         private boolean directAccess;
+        /** 单个响应的读取缓冲区大小。 */
+        private DataSize readBufferSize = DataSize.ofKilobytes(128L);
+        /** 同时执行的最大响应读取数。 */
+        private int maxConcurrentReads = 128;
 
         /**
          * 判断是否注册 Web 端点。
@@ -584,6 +589,15 @@ public class FileStorageProperties {
         public void setDirectAccess(boolean directAccess) {
             this.directAccess = directAccess;
         }
+
+        /** 获取单个响应的读取缓冲区大小。 */
+        public DataSize getReadBufferSize() { return readBufferSize; }
+        /** 设置单个响应的读取缓冲区大小。 */
+        public void setReadBufferSize(DataSize readBufferSize) { this.readBufferSize = readBufferSize; }
+        /** 获取同时执行的最大响应读取数。 */
+        public int getMaxConcurrentReads() { return maxConcurrentReads; }
+        /** 设置同时执行的最大响应读取数。 */
+        public void setMaxConcurrentReads(int maxConcurrentReads) { this.maxConcurrentReads = maxConcurrentReads; }
     }
 
     /**
@@ -601,6 +615,12 @@ public class FileStorageProperties {
         private long maxObjectSize = 50L * 1024L * 1024L;
         /** 空闲缓存副本的保留时间。 */
         private Duration idleTtl = Duration.ofDays(7L);
+        /** 缓存填充复制缓冲区大小。 */
+        private DataSize bufferSize = DataSize.ofKilobytes(128L);
+        /** 同时执行的缓存填充数。 */
+        private int maxConcurrentFills = 4;
+        /** 缓存填充等待队列容量。 */
+        private int queueCapacity = 32;
 
         /** 获取是否启用缓存。 */
         public boolean isEnabled() { return enabled; }
@@ -618,6 +638,18 @@ public class FileStorageProperties {
         public Duration getIdleTtl() { return idleTtl; }
         /** 设置缓存空闲保留时间。 */
         public void setIdleTtl(Duration idleTtl) { this.idleTtl = idleTtl; }
+        /** 获取缓存填充复制缓冲区大小。 */
+        public DataSize getBufferSize() { return bufferSize; }
+        /** 设置缓存填充复制缓冲区大小。 */
+        public void setBufferSize(DataSize bufferSize) { this.bufferSize = bufferSize; }
+        /** 获取同时执行的缓存填充数。 */
+        public int getMaxConcurrentFills() { return maxConcurrentFills; }
+        /** 设置同时执行的缓存填充数。 */
+        public void setMaxConcurrentFills(int maxConcurrentFills) { this.maxConcurrentFills = maxConcurrentFills; }
+        /** 获取缓存填充等待队列容量。 */
+        public int getQueueCapacity() { return queueCapacity; }
+        /** 设置缓存填充等待队列容量。 */
+        public void setQueueCapacity(int queueCapacity) { this.queueCapacity = queueCapacity; }
     }
 
     /**

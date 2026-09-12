@@ -116,6 +116,22 @@ public class FileStorageWebControllerTest {
                 .andExpect(status().isForbidden());
     }
 
+    /** 启用宿主直接访问后，真实对象 key 读取地址应可用。 */
+    @Test
+    public void shouldReadThroughRealObjectKeyAddress() throws Exception {
+        FileStorageWebController controller = new FileStorageWebController(storage,
+                new FileStorageDirectAccessAuthorizer(true, (principal, key, operation) -> true),
+                Clock.fixed(NOW, ZoneOffset.UTC), stableAccess);
+        MockMvc directMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new FileStorageExceptionHandler()).build();
+
+        MvcResult started = directMvc.perform(get("/files/read/key/documents/readme.txt"))
+                .andExpect(request().asyncStarted()).andReturn();
+        directMvc.perform(asyncDispatch(started)).andExpect(status().isOk())
+                .andExpect(content().string("hello"))
+                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("inline")));
+    }
+
     /**
      * 附件下载和内联预览应使用各自端点与处置模式。
      *

@@ -103,6 +103,14 @@ public class FileStorageAutoConfigurationTest {
                 .run(context -> assertThat(context).doesNotHaveBean(ProviderFileReadCache.class));
     }
 
+    /** 读取和缓存资源限制必须拒绝非正数配置。 */
+    @Test
+    public void shouldRejectNonPositiveReadResourceLimits() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.web.read-buffer-size=0B")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
     /** 显式启用迁移后自动装配应提供迁移服务所需的 Jackson 编解码器。 */
     @Test
     public void shouldProvideObjectMapperForMigrationService() {
@@ -221,6 +229,11 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(properties.getWeb().isDirectAccess()).isFalse();
                     assertThat(properties.getWeb().getPathPrefix()).isEqualTo("/files");
                     assertThat(properties.getWeb().isEnabled()).isTrue();
+                    assertThat(properties.getWeb().getReadBufferSize().toBytes()).isEqualTo(128L * 1024L);
+                    assertThat(properties.getWeb().getMaxConcurrentReads()).isEqualTo(128);
+                    assertThat(properties.getCache().getBufferSize().toBytes()).isEqualTo(128L * 1024L);
+                    assertThat(properties.getCache().getMaxConcurrentFills()).isEqualTo(4);
+                    assertThat(properties.getCache().getQueueCapacity()).isEqualTo(32);
                     assertThat(properties.getUpload().getMaxSize())
                             .isEqualTo(UploadRequest.DEFAULT_MAX_SIZE_BYTES);
                 });
