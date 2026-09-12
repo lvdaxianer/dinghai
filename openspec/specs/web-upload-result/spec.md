@@ -1,3 +1,8 @@
+## Purpose
+
+定义 Web 上传成功后与 SDK 对齐的已确认对象元数据和浏览器预览地址契约，
+保证直接上传与预签名上传在不同存储 provider 下具有一致、可持久化的响应语义。
+
 ## Requirements
 
 ### Requirement: Web 上传返回统一对象结果
