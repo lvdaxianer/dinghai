@@ -95,6 +95,30 @@ provider 流异步落盘；每天
 `cache.root`，例如 `${DINGHAI_FILE_STORAGE_CACHE_ROOT}`。`cache.enabled` 可显式覆盖默认值：
 对 Local 设置为 `true` 可开启缓存，对非 Local 设置为 `false` 可关闭缓存。
 
+文件存储模块统一位于 `dinghai-file-storage/`：`core`、`local`、`minio` 和
+`spring-boot-starter` 保持原有 Maven artifactId 不变。仓库还提供仅用于开发验证的
+`dinghai-file-storage/benchmark` 模块，可对真实文件执行并发上传、读取和 SHA-256 校验。
+
+```bash
+# Local：并发上传 4 份、每份读取 2 轮
+mvn -pl dinghai-file-storage/benchmark -am -DskipTests install
+mvn -f dinghai-file-storage/benchmark/pom.xml exec:java \
+  -Dexec.mainClass=io.github.lvdaxianer.dinghai.filestorage.spring.FileStorageBenchmark \
+  -Dexec.args="--provider=local --file=$HOME/Downloads/982-合0820.FBX --concurrency=4 --read-rounds=2"
+
+# MinIO：运行时从环境变量读取 endpoint、access key、secret key 和 bucket
+export DINGHAI_FILE_STORAGE_MINIO_ENDPOINT=http://localhost:9000
+export DINGHAI_FILE_STORAGE_MINIO_ACCESS_KEY=CHANGE_ME
+export DINGHAI_FILE_STORAGE_MINIO_SECRET_KEY=CHANGE_ME
+export DINGHAI_FILE_STORAGE_MINIO_BUCKET=dinghai-benchmark
+mvn -f dinghai-file-storage/benchmark/pom.xml exec:java \
+  -Dexec.mainClass=io.github.lvdaxianer.dinghai.filestorage.spring.FileStorageBenchmark \
+  -Dexec.args="--provider=minio --file=$HOME/Downloads/doc.zip --concurrency=4 --read-rounds=2"
+```
+
+压测使用独立随机对象 key，完成后尽力删除对象；输出包含阶段耗时、吞吐量、平均/P95/P99
+延迟和错误数，不输出密钥。
+
 离线迁移只处理服务器目录包，不通过 HTTP 上传大文件。显式设置
 `dinghai.file-storage.migration.enabled=true` 后，配置 `export-root`、`import-root`、
 `completed-root`、`failed-root` 四个目录。导出产生 `manifest.ndjson` 和 `objects/`，内容以

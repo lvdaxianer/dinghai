@@ -97,6 +97,14 @@ longer than `cache.idle-ttl` are deleted. Production deployments should set a sa
 for example `${DINGHAI_FILE_STORAGE_CACHE_ROOT}`. Set `cache.enabled` explicitly to override the
 default: `true` enables caching for Local, while `false` disables it for non-Local providers.
 
+All file-storage modules are grouped under `dinghai-file-storage/`: `core`, `local`, `minio`, and
+`spring-boot-starter` retain their existing Maven artifactIds. The development-only
+`dinghai-file-storage/benchmark` module performs concurrent uploads, reads, and SHA-256 integrity
+checks against real files. It accepts `--provider`, `--file`, `--concurrency`, and `--read-rounds`.
+For MinIO, provide endpoint, access key, secret key, and bucket through the corresponding
+`DINGHAI_FILE_STORAGE_MINIO_*` environment variables. Each run uses isolated object keys and
+prints phase duration, throughput, average/P95/P99 latency, and errors without printing secrets.
+
 Offline migration processes server-directory packages and never uploads large files over HTTP.
 Set `dinghai.file-storage.migration.enabled=true` and configure `export-root`, `import-root`,
 `completed-root`, and `failed-root`. Export writes `manifest.ndjson` and `objects/` with SHA-256

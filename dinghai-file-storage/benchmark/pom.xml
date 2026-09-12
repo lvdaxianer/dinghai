@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.lvdaxianer</groupId>
+        <artifactId>dinghai-parent</artifactId>
+        <version>1.0.0</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>dinghai-file-storage-benchmark</artifactId>
+    <packaging>jar</packaging>
+    <name>dinghai-file-storage-benchmark</name>
+    <description>文件存储真实文件并发压测工具</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.github.lvdaxianer</groupId>
+            <artifactId>dinghai-file-storage-local</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.lvdaxianer</groupId>
+            <artifactId>dinghai-file-storage-minio</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.lvdaxianer</groupId>
+            <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

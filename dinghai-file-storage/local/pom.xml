@@ -7,17 +7,19 @@
         <groupId>io.github.lvdaxianer</groupId>
         <artifactId>dinghai-parent</artifactId>
         <version>1.0.0</version>
+        <relativePath>../../pom.xml</relativePath>
     </parent>
 
-    <artifactId>dinghai-file-storage-core</artifactId>
+    <artifactId>dinghai-file-storage-local</artifactId>
     <packaging>jar</packaging>
-    <name>dinghai-file-storage-core</name>
-    <description>文件存储后端中立契约与值模型</description>
+    <name>dinghai-file-storage-local</name>
+    <description>文件存储本地磁盘适配器</description>
 
     <dependencies>
         <dependency>
-            <groupId>com.google.crypto.tink</groupId>
-            <artifactId>tink</artifactId>
+            <groupId>io.github.lvdaxianer</groupId>
+            <artifactId>dinghai-file-storage-core</artifactId>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
