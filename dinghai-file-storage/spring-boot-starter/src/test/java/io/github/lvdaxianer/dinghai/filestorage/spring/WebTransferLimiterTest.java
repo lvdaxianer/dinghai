@@ -40,4 +40,21 @@ public class WebTransferLimiterTest {
         upload.close();
         read.close();
     }
+
+    @Test
+    public void shouldRejectBeforeCallerReadsRequestBody() {
+        WebTransferLimiter limiter = new WebTransferLimiter(1, 1);
+        WebTransferLimiter.Permit held = limiter.acquireUpload();
+        boolean[] bodyRead = {false};
+        try {
+            limiter.acquireUpload();
+            bodyRead[0] = true;
+            fail("expected rate limit");
+        } catch (FileStorageException exception) {
+            assertEquals(FileStorageErrorCode.RATE_LIMITED, exception.errorCode());
+            assertEquals(false, bodyRead[0]);
+        } finally {
+            held.close();
+        }
+    }
 }

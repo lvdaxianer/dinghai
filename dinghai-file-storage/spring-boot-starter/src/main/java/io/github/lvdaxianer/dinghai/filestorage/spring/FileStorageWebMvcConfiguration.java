@@ -1,7 +1,11 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.config.annotation.AsyncSupportConfigurer;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
@@ -36,5 +40,24 @@ public class FileStorageWebMvcConfiguration implements WebMvcConfigurer {
     @Override
     public void configureAsyncSupport(AsyncSupportConfigurer configurer) {
         configurer.setTaskExecutor(executor);
+    }
+
+    /**
+     * 注册异步读取完成后的许可释放拦截器。
+     *
+     * @param registry MVC 拦截器注册表
+     */
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(new HandlerInterceptor() {
+            @Override
+            public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
+                                        Object handler, Exception exception) {
+                Object permit = request.getAttribute(FileStorageWebController.READ_PERMIT_ATTRIBUTE);
+                if (permit instanceof WebTransferLimiter.Permit readPermit) {
+                    readPermit.close();
+                }
+            }
+        });
     }
 }

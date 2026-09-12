@@ -159,9 +159,9 @@ dinghai:
 
 | 端点 | 说明 |
 | --- | --- |
-| `PUT /upload/{*key}` | 本地预签名上传（HMAC）；无签名时走直接访问授权 |
-| `GET /download/{*key}` | 预签名下载，强制 `attachment` 响应模式 |
-| `GET /preview/{*key}` | 预签名预览，强制 `inline` 响应模式 |
+| `PUT /upload/{*key}` | 本地预签名上传（HMAC）；无签名时走直接上传授权，并受 `web.max-concurrent-uploads` 限制 |
+| `GET /download/{*key}` | 下载，强制 `attachment` 响应模式，受 `web.max-concurrent-reads` 限制 |
+| `GET /preview/{*key}` | 预览，强制 `inline` 响应模式，受 `web.max-concurrent-reads` 限制 |
 | `GET /read/key/{*key}` 及 `/read/key/preview/{*key}`、`/read/key/download/{*key}` | 按真实 object key 匿名直读，不要求组件读取凭证；受 `web.max-concurrent-reads` 限制 |
 | `GET /read/v1/{id}` 及 `/read/v1/preview/{id}`、`/read/v1/download/{id}` | 按稳定文件 ID 匿名读取，不做用户鉴权也不需要签名（见下节） |
 

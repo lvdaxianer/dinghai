@@ -159,9 +159,9 @@ With `web.enabled=true`, the following endpoints are registered (default prefix 
 
 | Endpoint | Description |
 | --- | --- |
-| `PUT /upload/{*key}` | Local presigned upload (HMAC); without a signature, direct-access authorization applies |
-| `GET /download/{*key}` | Presigned download; forces the `attachment` response mode |
-| `GET /preview/{*key}` | Presigned preview; forces the `inline` response mode |
+| `PUT /upload/{*key}` | Local presigned upload (HMAC); unsigned requests use direct-upload authorization and are limited by `web.max-concurrent-uploads` |
+| `GET /download/{*key}` | Download; forces `attachment` and is limited by `web.max-concurrent-reads` |
+| `GET /preview/{*key}` | Preview; forces `inline` and is limited by `web.max-concurrent-reads` |
 | `GET /read/key/{*key}` plus `/read/key/preview/{*key}` and `/read/key/download/{*key}` | Anonymous read by the real object key; no component read credential required, but limited by `web.max-concurrent-reads` |
 | `GET /read/v1/{id}` plus `/read/v1/preview/{id}` and `/read/v1/download/{id}` | Anonymous read by stable file ID — no user authentication and no signature required (see next section) |
 

@@ -49,6 +49,8 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 @RequestMapping("${dinghai.file-storage.web.path-prefix:/files}")
 public class FileStorageWebController {
 
+    static final String READ_PERMIT_ATTRIBUTE = FileStorageWebController.class.getName() + ".readPermit";
+
     /** 缓冲区大小。 */
     private static final int DEFAULT_BUFFER_SIZE = 128 * 1024;
     /** 默认文件路径前缀。 */
@@ -205,7 +207,6 @@ public class FileStorageWebController {
      * @param ifNoneMatch 条件 ETag
      * @param ifModifiedSince 条件修改时间
      * @param range 单区间字节范围
-     * @param principal 当前认证主体
      * @return 流式对象响应
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
@@ -220,10 +221,9 @@ public class FileStorageWebController {
                                                             @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE,
                                                                     required = false) String ifModifiedSince,
                                                             @RequestHeader(value = HttpHeaders.RANGE,
-                                                                    required = false) String range,
-                                                            Principal principal) {
+                                                                    required = false) String range) {
         return read(key, expires, cacheControl, signature, ifNoneMatch, ifModifiedSince, range,
-                principal, PresignDownloadRequest.ResponseDisposition.ATTACHMENT);
+                PresignDownloadRequest.ResponseDisposition.ATTACHMENT);
     }
 
     /**
@@ -236,7 +236,6 @@ public class FileStorageWebController {
      * @param ifNoneMatch 条件 ETag
      * @param ifModifiedSince 条件修改时间
      * @param range 单区间字节范围
-     * @param principal 当前认证主体
      * @return 流式对象响应
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
@@ -251,10 +250,9 @@ public class FileStorageWebController {
                                                            @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE,
                                                                    required = false) String ifModifiedSince,
                                                            @RequestHeader(value = HttpHeaders.RANGE,
-                                                                   required = false) String range,
-                                                           Principal principal) {
+                                                                   required = false) String range) {
         return read(key, expires, cacheControl, signature, ifNoneMatch, ifModifiedSince, range,
-                principal, PresignDownloadRequest.ResponseDisposition.INLINE);
+                PresignDownloadRequest.ResponseDisposition.INLINE);
     }
 
     /** 通过真实对象 key 读取对象，保留宿主直接访问或预签名校验。 */
@@ -265,10 +263,9 @@ public class FileStorageWebController {
                                                            @RequestParam(required = false) String signature,
                                                            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
                                                            @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE, required = false) String ifModifiedSince,
-                                                           @RequestHeader(value = HttpHeaders.RANGE, required = false) String range,
-                                                           Principal principal) {
+                                                           @RequestHeader(value = HttpHeaders.RANGE, required = false) String range) {
         return read(key, expires, cacheControl, signature, ifNoneMatch, ifModifiedSince, range,
-                principal, PresignDownloadRequest.ResponseDisposition.INLINE);
+                PresignDownloadRequest.ResponseDisposition.INLINE);
     }
 
     /** 通过真实对象 key 在线预览对象。 */
@@ -279,10 +276,9 @@ public class FileStorageWebController {
                                                               @RequestParam(required = false) String signature,
                                                               @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
                                                               @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE, required = false) String ifModifiedSince,
-                                                              @RequestHeader(value = HttpHeaders.RANGE, required = false) String range,
-                                                              Principal principal) {
+                                                              @RequestHeader(value = HttpHeaders.RANGE, required = false) String range) {
         return read(key, expires, cacheControl, signature, ifNoneMatch, ifModifiedSince, range,
-                principal, PresignDownloadRequest.ResponseDisposition.INLINE);
+                PresignDownloadRequest.ResponseDisposition.INLINE);
     }
 
     /** 通过真实对象 key 下载对象。 */
@@ -293,10 +289,9 @@ public class FileStorageWebController {
                                                                @RequestParam(required = false) String signature,
                                                                @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
                                                                @RequestHeader(value = HttpHeaders.IF_MODIFIED_SINCE, required = false) String ifModifiedSince,
-                                                               @RequestHeader(value = HttpHeaders.RANGE, required = false) String range,
-                                                               Principal principal) {
+                                                               @RequestHeader(value = HttpHeaders.RANGE, required = false) String range) {
         return read(key, expires, cacheControl, signature, ifNoneMatch, ifModifiedSince, range,
-                principal, PresignDownloadRequest.ResponseDisposition.ATTACHMENT);
+                PresignDownloadRequest.ResponseDisposition.ATTACHMENT);
     }
 
     /**
@@ -417,7 +412,6 @@ public class FileStorageWebController {
      * @param ifNoneMatch 条件 ETag
      * @param ifModifiedSince 条件修改时间
      * @param range 单区间字节范围
-     * @param principal 当前认证主体
      * @param disposition 响应处置模式
      * @return 流式对象响应
      * @author lvdaxianer@yeah.net
@@ -426,10 +420,9 @@ public class FileStorageWebController {
     private ResponseEntity<StreamingResponseBody> read(String key, Long expires, String cacheControl,
                                                          String signature, String ifNoneMatch,
                                                          String ifModifiedSince, String range,
-                                                         Principal principal,
                                                          PresignDownloadRequest.ResponseDisposition disposition) {
         ObjectKey objectKey = objectKey(key);
-        verifyReadAccess(objectKey, expires, cacheControl, signature, principal, disposition);
+        verifyReadAccess(objectKey, expires, cacheControl, signature, disposition);
         return readObject(objectKey, ifNoneMatch, ifModifiedSince, range, disposition);
     }
 
@@ -492,13 +485,11 @@ public class FileStorageWebController {
      * @param expires 到期 Unix 秒数
      * @param cacheControl 已签名缓存策略
      * @param signature 预签名
-     * @param principal 当前认证主体
      * @param disposition 端点强制处置模式
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
     private void verifyReadAccess(ObjectKey key, Long expires, String cacheControl, String signature,
-                                  Principal principal,
                                   PresignDownloadRequest.ResponseDisposition disposition) {
         if (signature == null || signature.isBlank()) {
             return;
@@ -565,7 +556,7 @@ public class FileStorageWebController {
         if (localFile.isPresent() && headers.getFirst(HttpHeaders.CONTENT_ENCODING) == null
                 && currentRequest().map(request ->
                 TomcatSendfileTransfer.register(request, localFile.get(), skip, length)).orElse(false)) {
-            permit.close();
+            currentRequest().ifPresent(request -> request.setAttribute(READ_PERMIT_ATTRIBUTE, permit));
             return new ResponseEntity<>(null, headers, status);
         }
         DownloadObject download;
@@ -822,19 +813,6 @@ public class FileStorageWebController {
             return;
         }
         readCache.put(request);
-    }
-
-    /**
-     * 返回响应处置对应的授权操作。
-     *
-     * @param disposition 响应处置模式
-     * @return 授权操作
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-11
-     */
-    private FileStorageAccessOperation operation(PresignDownloadRequest.ResponseDisposition disposition) {
-        return disposition == PresignDownloadRequest.ResponseDisposition.INLINE
-                ? FileStorageAccessOperation.PREVIEW : FileStorageAccessOperation.DOWNLOAD;
     }
 
     /**
