@@ -198,7 +198,7 @@ Non-Local backends enable by default a two-level disk read cache validated again
 
 - Local primary files and validated remote cache hits prefer native Tomcat `sendfile` for plain, uncompressed requests without allocating JVM heap proportional to file size.
 - TLS, response compression, non-Tomcat containers, temporarily unavailable files, and rejected registrations automatically fall back to bounded streaming while preserving content, conditional-request, and Range semantics.
-- `web.max-concurrent-reads` limits only streaming fallbacks and covers the full asynchronous copy lifecycle. Tomcat `sendfile` does not acquire this permit; container connections and executors provide its concurrency boundary.
+- `web.max-concurrent-reads` covers streaming fallbacks, cached files, and Tomcat `sendfile`; the permit remains held until the response completes or fails, and saturated requests immediately return HTTP 429.
 - When upgrading a Local deployment, remove `dinghai.file-storage.cache.enabled=true`. The setting is removed and retaining it fails startup.
 
 ## Offline Migration
@@ -207,7 +207,7 @@ Offline migration only handles server-directory packages; large files are not up
 
 ## Error Codes
 
-Unified error codes are defined in `FileStorageErrorCode`: `INVALID_REQUEST`, `OBJECT_NOT_FOUND`, `INVALID_OBJECT_KEY`, `OBJECT_TOO_LARGE`, `CONTENT_TYPE_NOT_ALLOWED`, `AUTHENTICATION_FAILED`, `STORAGE_UNAVAILABLE`, `INVALID_PRESIGN`, `INVALID_CONFIGURATION`, `INTERNAL_ERROR`.
+Unified error codes are defined in `FileStorageErrorCode`: `INVALID_REQUEST`, `OBJECT_NOT_FOUND`, `INVALID_OBJECT_KEY`, `OBJECT_TOO_LARGE`, `CONTENT_TYPE_NOT_ALLOWED`, `AUTHENTICATION_FAILED`, `STORAGE_UNAVAILABLE`, `INVALID_PRESIGN`, `INVALID_CONFIGURATION`, `RATE_LIMITED`, `INTERNAL_ERROR`.
 
 Web-layer HTTP mapping: `OBJECT_NOT_FOUND` → 404, `OBJECT_TOO_LARGE` → 413, `INVALID_PRESIGN` / `AUTHENTICATION_FAILED` → 403, `STORAGE_UNAVAILABLE` → 503, everything else → 400; the response body is `{code, message}`.
 

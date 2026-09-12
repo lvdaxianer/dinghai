@@ -553,10 +553,11 @@ public class FileStorageWebController {
                                                           HttpStatus status, long skip, long length) {
         WebTransferLimiter.Permit permit = transferLimiter.acquireRead();
         Optional<Path> localFile = localFile(key);
+        Optional<jakarta.servlet.http.HttpServletRequest> request = currentRequest();
         if (localFile.isPresent() && headers.getFirst(HttpHeaders.CONTENT_ENCODING) == null
-                && currentRequest().map(request ->
-                TomcatSendfileTransfer.register(request, localFile.get(), skip, length)).orElse(false)) {
-            currentRequest().ifPresent(request -> request.setAttribute(READ_PERMIT_ATTRIBUTE, permit));
+                && request.map(servletRequest ->
+                TomcatSendfileTransfer.register(servletRequest, localFile.get(), skip, length)).orElse(false)) {
+            request.ifPresent(servletRequest -> servletRequest.setAttribute(READ_PERMIT_ATTRIBUTE, permit));
             return new ResponseEntity<>(null, headers, status);
         }
         DownloadObject download;

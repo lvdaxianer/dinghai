@@ -53,7 +53,7 @@ Starter SHALL 默认以 `web.enabled=true`、`web.path-prefix=/files`、`web.dir
 
 ### Requirement: 零拷贝传输并发边界
 
-流式回退 MUST 使用 `web.max-concurrent-reads` permit 并覆盖异步复制任务全生命周期。原生 Tomcat `sendfile` 因无应用层完成回调 MUST 使用容器连接和执行器配置作为独立并发边界，不得声称受该 permit 控制。
+流式回退和原生 Tomcat `sendfile` MUST 使用 `web.max-concurrent-reads` permit，并覆盖从传输开始到响应完成或失败的完整生命周期。
 
 #### Scenario: 缓存命中返回 304
 - **WHEN** 客户端以当前对象的 ETag 发送 `If-None-Match` 请求
