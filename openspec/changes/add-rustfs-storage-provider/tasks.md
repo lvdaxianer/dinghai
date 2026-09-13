@@ -8,5 +8,5 @@
 
 ## 3. Documentation and Compatibility Verification
 
-- [ ] 3.1 Update Chinese and English module/configuration documentation and the environment-variable template with credential placeholders only.
+- [x] 3.1 Update Chinese and English module/configuration documentation and the environment-variable template with credential placeholders only.
 - [ ] 3.2 Run the full reactor suite and an ephemeral RustFS integration lifecycle test against the supplied service, then remove all temporary remote objects and local secret material.

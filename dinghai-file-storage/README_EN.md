@@ -2,7 +2,7 @@
 
 English | [中文](README.md)
 
-A unified file storage adapter layer: business code depends only on the `FileStorage` contract and can switch between local disk and MinIO backends. Local supports object keys such as `1/1/1/1.png` and CJK directory names, and avoids loading whole files into memory through temporary files and streaming I/O.
+A unified file storage adapter layer: business code depends only on the `FileStorage` contract and can switch between local disk, MinIO, and RustFS backends. Local supports object keys such as `1/1/1/1.png` and CJK directory names, and avoids loading whole files into memory through temporary files and streaming I/O.
 
 Requirements: Java 21+, Spring Boot 3.x.
 
@@ -13,6 +13,7 @@ Requirements: Java 21+, Spring Boot 3.x.
 | `dinghai-file-storage-core` | Backend-neutral `FileStorage` contract, object model, presign model, and stable error codes |
 | `dinghai-file-storage-local` | Local disk adapter with support for CJK and multi-level object keys, HMAC presigning, and streaming I/O |
 | `dinghai-file-storage-minio` | Fixed-bucket MinIO adapter with native presign capability |
+| `dinghai-file-storage-rustfs` | Fixed-bucket RustFS S3-compatible adapter with native presign capability |
 | `dinghai-file-storage-spring-boot-starter` | Auto-wires file storage by provider and provides local web presign endpoints |
 
 The `benchmark` module is for development verification only and is not published (see "Benchmark" at the end).
@@ -54,9 +55,9 @@ The configuration prefix is `dinghai.file-storage`. All validation is implemente
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `provider` | `local` / `minio` | none (required) | Storage backend, one of the two. Missing or illegal values fail startup directly; **no automatic detection or fallback of any kind** |
+| `provider` | `local` / `minio` / `rustfs` | none (required) | Storage backend, one of the three. Missing or illegal values fail startup directly; **no automatic detection or fallback of any kind** |
 | `bucket` | `String` | none (required) | Logical bucket name shared by all backends. Must not contain `.`, `..`, `/`, `\`, or control characters; under Local it maps to a single-level directory `root/<bucket>/` |
-| `storage-alias` | `String` | none (required) | Logical storage alias that does not change with the physical backend; it participates in stable file ID computation and cache file name digests. Keep the alias unchanged when migrating from Local to MinIO so that already-issued stable IDs remain valid |
+| `storage-alias` | `String` | none (required) | Logical storage alias that does not change with the physical backend; it participates in stable file ID computation and cache file name digests. Keep the alias unchanged when migrating from Local to MinIO or RustFS so that already-issued stable IDs remain valid |
 
 ### local (Local Backend)
 
@@ -77,11 +78,24 @@ The configuration prefix is `dinghai.file-storage`. All validation is implemente
 
 The MinIO adapter **does not create or modify buckets automatically**; create them yourself beforehand.
 
+### rustfs (RustFS Backend)
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `rustfs.endpoint` | `String` | none (required when provider=rustfs) | RustFS S3 API endpoint, for example `http://localhost:9100` |
+| `rustfs.access-key` | `String` | none (required) | Access key, injected by the deployment environment |
+| `rustfs.secret-key` | `String` | none (required) | Secret access key, injected by the deployment environment |
+| `rustfs.connect-timeout` | `Duration` | `10s` | Connect timeout (OkHttp client); must be positive |
+| `rustfs.read-timeout` | `Duration` | `10s` | Read timeout; must be positive |
+| `rustfs.write-timeout` | `Duration` | `10s` | Write timeout; must be positive |
+
+RustFS uses its S3-compatible API. Its bucket should remain private and must be pre-created by operations. The adapter **does not create buckets or change bucket policies**; upload and download presigns are issued natively by RustFS.
+
 ### security (Security)
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `security.signing-key` | `String` | none (required only when provider=local) | HMAC-SHA-256 key for local presigned URLs, used directly as UTF-8 bytes; missing value fails startup. Not used by the MinIO backend (which uses native presigning) |
+| `security.signing-key` | `String` | none (required only when provider=local) | HMAC-SHA-256 key for local presigned URLs, used directly as UTF-8 bytes; missing value fails startup. Not used by the MinIO or RustFS backends, which use native presigning |
 | `security.stable-id-key` | `String` | none (**required for all backends**) | Key material for stable file IDs; at least 32 bytes after UTF-8 encoding, derived via SHA-512 into a 64-byte AES-SIV key. Missing or too-short values fail startup. Rotating this key invalidates all previously issued stable IDs |
 | `security.maximum-presign-expiry` | `Duration` | `1h` | Maximum validity period of local presigned URLs; enforced at both signing and verification time; must be positive |
 
@@ -102,7 +116,7 @@ The MinIO adapter **does not create or modify buckets automatically**; create th
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `cache.enabled` | `boolean` | see description | Enabled by default for MinIO and disabled by explicit `false`; Local does not use a second-level cache, and explicit `true` fails startup (remove the old setting) |
+| `cache.enabled` | `boolean` | see description | Enabled by default for MinIO and RustFS; set it to `false` to disable. Local does not use a second-level cache, and explicit `true` fails startup (remove the old setting) |
 | `cache.root` | `Path` | `${java.io.tmpdir}/dinghai-file-storage-cache` | Cache root directory; null or creation failure fails startup. **Production deployments should explicitly configure a persistent directory** — the default location sits under the system temp directory and may be cleaned up by the OS |
 | `cache.max-object-size` | `long` (bytes) | `50MB` | Objects larger than this are not asynchronously persisted to disk; read requests pass through to the remote directly |
 | `cache.idle-ttl` | `Duration` | `7d` | How long an idle replica is retained, judged by the last-access time recorded in each replica's sidecar file |
@@ -188,12 +202,12 @@ A successful `PUT /upload/{*key}` response keeps the SDK `FileStorage.put` `Obje
 
 The response status is `201 Created`, and `Location` equals `previewUrl`. `key`, length, type, ETag, modification time, and cache control all come from the provider-confirmed persisted result, not client-declared values. `previewUrl` is a root-relative address under the configured `web.path-prefix`; it uses the real object key, preserves `/` hierarchy, and percent-encodes path characters. Browsers can use it with the component's anonymous real-key preview route. It is not a Local disk path or a raw MinIO/OSS URL, and it does not contain a deployment host; a reverse proxy or application boundary can prepend its public origin when needed.
 
-Preview/download supports `Content-Type`, ETag, Last-Modified, Cache-Control, Expires, 304 (If-None-Match / If-Modified-Since), and single-range Range 206/416. Local primary files and validated MinIO hot-cache files prefer native `sendfile` on plain embedded Tomcat: with the default enabled, confirmed common images, audio/video, archives, PDFs, and fonts may retain that path even when the request accepts gzip; text, SVG, unknown, and invalid MIME types remain bounded streaming. TLS, other containers, or a rejected container registration automatically fall back without changing caller-visible semantics.
+Preview/download supports `Content-Type`, ETag, Last-Modified, Cache-Control, Expires, 304 (If-None-Match / If-Modified-Since), and single-range Range 206/416. Local primary files and validated remote hot-cache files prefer native `sendfile` on plain embedded Tomcat: with the default enabled, confirmed common images, audio/video, archives, PDFs, and fonts may retain that path even when the request accepts gzip; text, SVG, unknown, and invalid MIME types remain bounded streaming. TLS, other containers, or a rejected container registration automatically fall back without changing caller-visible semantics.
 
 ## Presigning and Access Authorization
 
 - **Local backend**: the component implements its own HMAC-SHA-256 presigning. Signed URLs carry query parameters such as `expires` (Unix seconds) and `signature` (Base64URL); upload signatures can additionally bind `contentType`, `maxSize`, and `cacheControl`, while download signatures bind the `inline` or `attachment` response mode. The validity period is limited by `security.maximum-presign-expiry`.
-- **MinIO backend**: uses MinIO native presigning (PostPolicy for uploads, `getPresignedObjectUrl` for downloads). Local signature verification is only supported by the Local adapter; presenting a local-style signed URL to a non-Local backend throws `INVALID_PRESIGN`.
+- **MinIO / RustFS backends**: use each S3-compatible service's native presigning (PostPolicy for uploads, `getPresignedObjectUrl` for downloads). Local signature verification is only supported by the Local adapter; presenting a local-style signed URL to a non-Local backend throws `INVALID_PRESIGN`.
 - **Direct upload**: unsigned uploads are denied by default; they require both `web.direct-access=true` and a host-provided `FileStorageAccessPolicy` Bean that allows UPLOAD. Web downloads, previews, and reads do not require component credentials, but remain protected by read concurrency limits.
 - All Beans carry `@ConditionalOnMissingBean`, so the host can replace any default implementation (including `FileStorage` itself).
 
@@ -214,13 +228,13 @@ The component does not derive a key from IP addresses, JWTs, cookies, forwarded 
 
 A stable ID is the persistent read address of a private object (the `/files/read/v1/{id}` family). The ID is produced by deterministic authenticated encryption of the length-prefixed `storage-alias + object key` using AES-SIV (Tink), output as a Base64URL string with a `v1.` prefix. Therefore:
 
-- The ID of the same object stays unchanged after migration across Local / MinIO (provided `storage-alias` is unchanged);
+- The ID of the same object stays unchanged after migration across Local / MinIO / RustFS (provided `storage-alias` is unchanged);
 - Rotating `security.stable-id-key` invalidates all previously issued IDs;
 - This route **does not perform component-internal user authentication** — the embedding application is responsible for access control in front of the browser.
 
 ## Read Cache Behavior
 
-Non-Local backends enable by default a two-level disk read cache validated against remote `stat`; Local creates neither a second-level cache nor a cleaner:
+MinIO and RustFS enable by default a two-level disk read cache validated against remote `stat`; Local creates neither a second-level cache nor a cleaner:
 
 1. Every read first `stat`s the remote metadata; a local replica only hits when its ETag / length / modification time all match the remote, and on hit the last-access time is refreshed;
 2. On a miss, when the object does not exceed `cache.max-object-size`, the current request streams directly from the remote while a second stream asynchronously persists to disk (temporary file + atomic move to publish);
