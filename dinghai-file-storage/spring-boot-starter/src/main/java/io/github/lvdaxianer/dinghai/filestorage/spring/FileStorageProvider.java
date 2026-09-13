@@ -10,5 +10,7 @@ public enum FileStorageProvider {
     /** 本地磁盘后端。 */
     LOCAL,
     /** MinIO 对象存储后端。 */
-    MINIO
+    MINIO,
+    /** RustFS 对象存储后端。 */
+    RUSTFS
 }
