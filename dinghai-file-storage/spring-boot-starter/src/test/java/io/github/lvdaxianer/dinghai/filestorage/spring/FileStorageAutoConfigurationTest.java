@@ -553,6 +553,7 @@ public class FileStorageAutoConfigurationTest {
         return new String[]{
                 "dinghai.file-storage.provider=rustfs",
                 "dinghai.file-storage.bucket=test-bucket",
+                "dinghai.file-storage.rustfs.endpoint=",
                 "dinghai.file-storage.rustfs.access-key=test-access-key",
                 "dinghai.file-storage.rustfs.secret-key=test-secret-key",
                 "dinghai.file-storage.storage-alias=documents",
