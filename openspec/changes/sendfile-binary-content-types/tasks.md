@@ -12,7 +12,7 @@
 
 ## 2. Documentation and Verification
 
-- [ ] 2.1 Update Chinese and English README configuration and zero-copy
+- [x] 2.1 Update Chinese and English README configuration and zero-copy
   sections, including the default, benefit, and custom-compression escape hatch.
 - [ ] 2.2 Run focused tests, the complete `dinghai-file-storage` Maven test
   suite, strict OpenSpec validation, plan-implementation audit, and full
