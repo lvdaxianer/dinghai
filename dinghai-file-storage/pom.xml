@@ -19,6 +19,7 @@
         <module>core</module>
         <module>local</module>
         <module>minio</module>
+        <module>rustfs</module>
         <module>spring-boot-starter</module>
         <module>benchmark</module>
     </modules>
