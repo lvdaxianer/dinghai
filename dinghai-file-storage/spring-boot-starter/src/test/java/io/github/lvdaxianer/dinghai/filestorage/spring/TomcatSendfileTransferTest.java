@@ -25,7 +25,7 @@ public class TomcatSendfileTransferTest {
         Files.writeString(file, "hello", StandardCharsets.UTF_8);
         MockHttpServletRequest request = tomcatRequest();
 
-        assertTrue(TomcatSendfileTransfer.register(request, file, 0L, 5L));
+        assertTrue(TomcatSendfileTransfer.register(request, file, 0L, 5L, "application/octet-stream"));
         assertEquals(file.toAbsolutePath().toString(),
                 request.getAttribute(TomcatSendfileTransfer.FILENAME));
         assertEquals(0L, request.getAttribute(TomcatSendfileTransfer.START));
@@ -38,7 +38,7 @@ public class TomcatSendfileTransferTest {
         Files.writeString(file, "hello", StandardCharsets.UTF_8);
         MockHttpServletRequest request = tomcatRequest();
 
-        assertTrue(TomcatSendfileTransfer.register(request, file, 1L, 3L));
+        assertTrue(TomcatSendfileTransfer.register(request, file, 1L, 3L, "application/octet-stream"));
         assertEquals(1L, request.getAttribute(TomcatSendfileTransfer.START));
         assertEquals(4L, request.getAttribute(TomcatSendfileTransfer.END));
     }
@@ -53,9 +53,9 @@ public class TomcatSendfileTransferTest {
         compressed.addHeader("Accept-Encoding", "gzip");
         MockHttpServletRequest unsupported = new MockHttpServletRequest();
 
-        assertFalse(TomcatSendfileTransfer.register(secure, file, 0L, 5L));
-        assertFalse(TomcatSendfileTransfer.register(compressed, file, 0L, 5L));
-        assertFalse(TomcatSendfileTransfer.register(unsupported, file, 0L, 5L));
+        assertFalse(TomcatSendfileTransfer.register(secure, file, 0L, 5L, "application/octet-stream"));
+        assertFalse(TomcatSendfileTransfer.register(compressed, file, 0L, 5L, "text/plain"));
+        assertFalse(TomcatSendfileTransfer.register(unsupported, file, 0L, 5L, "application/octet-stream"));
     }
 
     /** 范围结束位置溢出时必须回退，不能注册越界的 sendfile 请求属性。 */
@@ -65,7 +65,7 @@ public class TomcatSendfileTransferTest {
         Files.writeString(file, "hello", StandardCharsets.UTF_8);
         MockHttpServletRequest request = tomcatRequest();
 
-        assertFalse(TomcatSendfileTransfer.register(request, file, Long.MAX_VALUE, 1L));
+        assertFalse(TomcatSendfileTransfer.register(request, file, Long.MAX_VALUE, 1L, "application/octet-stream"));
         assertNull(request.getAttribute(TomcatSendfileTransfer.FILENAME));
     }
 
@@ -76,7 +76,7 @@ public class TomcatSendfileTransferTest {
         Files.writeString(file, "hello", StandardCharsets.UTF_8);
         MockHttpServletRequest request = tomcatRequest();
 
-        assertFalse(TomcatSendfileTransfer.register(request, file, 4L, 2L));
+        assertFalse(TomcatSendfileTransfer.register(request, file, 4L, 2L, "application/octet-stream"));
         assertNull(request.getAttribute(TomcatSendfileTransfer.FILENAME));
     }
 

@@ -186,7 +186,7 @@ dinghai:
 
 响应状态为 `201 Created`，`Location` 等于 `previewUrl`。`key`、长度、类型、ETag、修改时间和缓存策略都取自 provider 持久化后的确认结果，而不是客户端声明值。`previewUrl` 是配置 `web.path-prefix` 下的根相对地址，使用真实 object key（保留 `/` 层级并对路径字符编码）；浏览器可直接访问组件的匿名真实 key 预览端点。它不是本地磁盘路径、MinIO/OSS 原始 URL，也不包含部署主机名，反向代理或应用边界可按需补充公开域名。
 
-预览/下载支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304（If-None-Match / If-Modified-Since）和单区间 Range 206/416。Local 主文件和 MinIO 已校验的热缓存文件在明文、未压缩的嵌入 Tomcat 中优先注册原生 `sendfile`；TLS、压缩、其他容器或容器不支持时自动回退到有界流式复制，调用方无需切换接口。
+预览/下载支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304（If-None-Match / If-Modified-Since）和单区间 Range 206/416。Local 主文件和 MinIO 已校验的热缓存文件在明文的嵌入 Tomcat 中优先注册原生 `sendfile`；仅当请求声明接受压缩（`Accept-Encoding` 非 `identity`）且响应 `Content-Type` 属于可压缩文本类型时才回退到有界流式复制——图片（SVG 除外）、视频、音频、压缩包、PDF、字体、`application/octet-stream` 等不可压缩二进制类型即使携带 `Accept-Encoding: gzip` 也照常走零拷贝。TLS、其他容器、容器不支持或未声明/无法识别的内容类型自动回退，调用方无需切换接口。
 
 ## 预签名与访问授权
 
@@ -229,8 +229,8 @@ WebTransferRateLimitKeyResolver webTransferRateLimitKeyResolver() {
 ## 零拷贝与并发
 
 - core 提供可选的 `LocalFileSource` 接口（`Optional<Path> localFile(ObjectKey)`）：Local 适配器和远程读取缓存在命中已校验副本时实现它，向 Web 层暴露经过根目录校验的本地文件路径；不实现该接口的 provider 只走流式路径。
-- Local 主文件和远程热缓存命中时，Tomcat 明文且未压缩请求优先使用原生 `sendfile`，不按文件大小分配 JVM 堆内存。
-- TLS、响应压缩、非 Tomcat 容器、文件暂不可用或容器拒绝注册时自动降级为有界流式复制，响应内容、条件请求和 Range 语义保持不变。
+- Local 主文件和远程热缓存命中时，Tomcat 明文请求优先使用原生 `sendfile`，不按文件大小分配 JVM 堆内存；`Accept-Encoding: gzip` 只在响应为可压缩文本类型（`text/*`、JSON、XML、SVG 等）时阻止零拷贝，不可压缩二进制类型不受影响。
+- TLS、可压缩文本类型的压缩请求、非 Tomcat 容器、文件暂不可用或容器拒绝注册时自动降级为有界流式复制，响应内容、条件请求和 Range 语义保持不变。
 - 全局读取上限和可选的每 key 读取上限均覆盖流式回退、缓存文件和 Tomcat `sendfile`，读取许可保持到响应完成或失败；并发达到上限时立即返回 HTTP 429。
 - Local 升级时必须删除 `dinghai.file-storage.cache.enabled=true`；该配置已移除，继续保留会使应用启动失败。
 

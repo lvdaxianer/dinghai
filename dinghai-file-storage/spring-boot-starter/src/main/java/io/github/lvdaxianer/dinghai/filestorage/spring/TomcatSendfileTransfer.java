@@ -19,9 +19,21 @@ final class TomcatSendfileTransfer {
 
     private TomcatSendfileTransfer() { }
 
-    static boolean register(HttpServletRequest request, Path file, long start, long length) {
+    /**
+     * 注册 sendfile；响应内容类型为不可压缩二进制时，压缩接受头不再强制回退。
+     *
+     * @param request 当前请求
+     * @param file 本地文件
+     * @param start 起始字节
+     * @param length 传输长度
+     * @param contentType provider 确认的响应内容类型
+     * @return 注册成功返回 true
+     */
+    static boolean register(HttpServletRequest request, Path file, long start, long length,
+                            String contentType) {
         if (!Boolean.TRUE.equals(request.getAttribute(SUPPORTED)) || request.isSecure()
-                || acceptsCompression(request) || start < 0L || length < 0L
+                || (acceptsCompression(request) && !SendfileContentTypes.isIncompressible(contentType))
+                || start < 0L || length < 0L
                 || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             return false;
         }
