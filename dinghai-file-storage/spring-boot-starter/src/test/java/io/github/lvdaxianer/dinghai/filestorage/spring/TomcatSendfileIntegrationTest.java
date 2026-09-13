@@ -24,13 +24,17 @@ import org.junit.Test;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.web.ServerProperties;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * 验证内嵌 Tomcat 可以接收控制器注册的 sendfile 属性并传输本地文件。
@@ -93,6 +97,56 @@ public class TomcatSendfileIntegrationTest {
         assertEquals(5L, rangeAttributes.end());
     }
 
+    /** 启用容器压缩后，标准二进制对象仍应走 sendfile 且不得声明错误的内容编码。 */
+    @Test
+    public void shouldUseSendfileForBinaryObjectWhenCompressionIsEnabled() throws Exception {
+        Path root = Files.createTempDirectory("dinghai-sendfile-binary-");
+        context = start(root, true, true);
+        byte[] content = "native-binary-response".getBytes(StandardCharsets.UTF_8);
+        String identifier = putAndIdentifier("reports/payload.bin", content, "application/octet-stream");
+
+        SENDFILE.set(null);
+        HttpResponse<byte[]> response = requestBytes(identifier, "gzip");
+
+        assertEquals(200, response.statusCode());
+        assertTrue(context.getBean(ServerProperties.class).getCompression().getEnabled());
+        assertArrayEquals(content, response.body());
+        assertTrue(response.headers().firstValue("Content-Encoding").isEmpty());
+        assertNotNull(SENDFILE.get());
+    }
+
+    /** 可压缩文本必须保留流式响应，不能因新优化而注册 sendfile。 */
+    @Test
+    public void shouldStreamTextObjectWhenCompressionIsEnabled() throws Exception {
+        Path root = Files.createTempDirectory("dinghai-sendfile-text-");
+        context = start(root, true, true);
+        byte[] content = "compressible text response".repeat(32).getBytes(StandardCharsets.UTF_8);
+        String identifier = putAndIdentifier("reports/payload.txt", content, "text/plain");
+
+        SENDFILE.set(null);
+        HttpResponse<byte[]> response = requestBytes(identifier, "gzip");
+
+        assertEquals(200, response.statusCode());
+        assertArrayEquals(content, response.body());
+        assertNull(SENDFILE.get());
+    }
+
+    /** 宿主关闭优化后，二进制请求应回退至流式路径。 */
+    @Test
+    public void shouldStreamBinaryObjectWhenBinarySendfileOptimizationIsDisabled() throws Exception {
+        Path root = Files.createTempDirectory("dinghai-sendfile-disabled-");
+        context = start(root, true, false);
+        byte[] content = "binary compression fallback".repeat(32).getBytes(StandardCharsets.UTF_8);
+        String identifier = putAndIdentifier("reports/payload.bin", content, "application/octet-stream");
+
+        SENDFILE.set(null);
+        HttpResponse<byte[]> response = requestBytes(identifier, "gzip");
+
+        assertEquals(200, response.statusCode());
+        assertArrayEquals(content, response.body());
+        assertNull(SENDFILE.get());
+    }
+
     /**
      * 启动配置为明文且未压缩响应的内嵌 Tomcat。
      *
@@ -102,15 +156,48 @@ public class TomcatSendfileIntegrationTest {
      * @date 2026-09-12
      */
     private ConfigurableApplicationContext start(Path root) {
+        return start(root, false, true);
+    }
+
+    /**
+     * 按指定容器压缩和二进制 sendfile 开关启动测试应用。
+     *
+     * @param root Local 主存储目录
+     * @param compressionEnabled 是否启用 Tomcat 压缩配置
+     * @param binarySendfileOptimizationEnabled 是否启用二进制 sendfile 优化
+     * @return 已启动应用上下文
+     */
+    private ConfigurableApplicationContext start(Path root, boolean compressionEnabled,
+                                                  boolean binarySendfileOptimizationEnabled) {
         return new SpringApplicationBuilder(EmbeddedTomcatApplication.class)
                 .web(WebApplicationType.SERVLET)
-                .properties("server.port=0", "server.compression.enabled=false",
+                .properties("server.port=0", "server.compression.enabled=" + compressionEnabled,
+                        "server.compression.min-response-size=1B",
+                        "server.compression.mime-types=text/plain,application/octet-stream",
                         "dinghai.file-storage.provider=local", "dinghai.file-storage.bucket=documents",
                         "dinghai.file-storage.local.root=" + root,
                         "dinghai.file-storage.security.signing-key=embedded-sendfile-signing-key",
                         "dinghai.file-storage.storage-alias=documents",
-                        "dinghai.file-storage.security.stable-id-key=embedded-stable-file-id-test-key-material")
+                        "dinghai.file-storage.security.stable-id-key=embedded-stable-file-id-test-key-material",
+                        "dinghai.file-storage.web.sendfile-binary-content-types-enabled="
+                                + binarySendfileOptimizationEnabled)
                 .run();
+    }
+
+    /**
+     * 写入测试对象并返回稳定读取标识。
+     *
+     * @param key 对象 key
+     * @param content 对象字节
+     * @param contentType provider 确认的 MIME 类型
+     * @return 去除版本前缀的稳定读取标识
+     */
+    private String putAndIdentifier(String key, byte[] content, String contentType) {
+        ObjectKey objectKey = ObjectKey.of(key);
+        context.getBean(FileStorage.class).put(new UploadRequest(objectKey, new ByteArrayInputStream(content),
+                content.length, contentType));
+        return context.getBean(StableFileAccessService.class).identifier(objectKey)
+                .substring(STABLE_ID_VERSION_PREFIX_LENGTH);
     }
 
     /**
@@ -131,6 +218,22 @@ public class TomcatSendfileIntegrationTest {
             builder.header("Range", range);
         }
         return HttpClient.newHttpClient().send(builder.GET().build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /**
+     * 发起携带 Accept-Encoding 的稳定读取请求并保留原始响应字节。
+     *
+     * @param identifier 稳定文件 ID
+     * @param acceptEncoding 接受的内容编码
+     * @return HTTP 二进制响应
+     * @throws Exception 网络请求失败时抛出
+     */
+    private HttpResponse<byte[]> requestBytes(String identifier, String acceptEncoding) throws Exception {
+        int port = ((WebServerApplicationContext) context).getWebServer().getPort();
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port
+                        + "/files/read/v1/" + identifier))
+                .timeout(Duration.ofSeconds(10)).header("Accept-Encoding", acceptEncoding).GET().build();
+        return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofByteArray());
     }
 
     /** 内嵌 Tomcat 验证专用的最小 Spring Boot 应用。 */

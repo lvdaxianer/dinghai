@@ -6,7 +6,7 @@
 - [x] 1.2 Add the default-enabled web configuration switch and wire it into the
   Tomcat sendfile gate; add focused transfer and controller tests for enabled,
   disabled, text, binary, and raw metadata forwarding behavior.
-- [ ] 1.3 Add compression-enabled embedded-Tomcat integration tests proving
+- [x] 1.3 Add compression-enabled embedded-Tomcat integration tests proving
   binary delivery, text streaming/compression compatibility, and switch-off
   fallback without conflicting response encoding or byte corruption.
 
