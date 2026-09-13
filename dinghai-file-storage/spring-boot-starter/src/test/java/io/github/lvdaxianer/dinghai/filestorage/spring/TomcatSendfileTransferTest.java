@@ -58,6 +58,20 @@ public class TomcatSendfileTransferTest {
         assertFalse(TomcatSendfileTransfer.register(unsupported, file, 0L, 5L));
     }
 
+    /** 标准二进制类型默认允许绕过常规压缩回退，而文本和关闭开关仍应回退。 */
+    @Test
+    public void shouldAllowEligibleBinaryTypeOnlyWhenOptimizationIsEnabled() throws Exception {
+        Path file = temporaryFolder.newFile("content.bin").toPath();
+        Files.writeString(file, "hello", StandardCharsets.UTF_8);
+        MockHttpServletRequest binary = compressedTomcatRequest();
+        MockHttpServletRequest text = compressedTomcatRequest();
+        MockHttpServletRequest disabled = compressedTomcatRequest();
+
+        assertTrue(TomcatSendfileTransfer.register(binary, file, 0L, 5L, "image/png", true));
+        assertFalse(TomcatSendfileTransfer.register(text, file, 0L, 5L, "text/plain", true));
+        assertFalse(TomcatSendfileTransfer.register(disabled, file, 0L, 5L, "image/png", false));
+    }
+
     /** 范围结束位置溢出时必须回退，不能注册越界的 sendfile 请求属性。 */
     @Test
     public void shouldRejectOverflowingFileRange() throws Exception {
@@ -83,6 +97,12 @@ public class TomcatSendfileTransferTest {
     private MockHttpServletRequest tomcatRequest() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE);
+        return request;
+    }
+
+    private MockHttpServletRequest compressedTomcatRequest() {
+        MockHttpServletRequest request = tomcatRequest();
+        request.addHeader("Accept-Encoding", "gzip");
         return request;
     }
 }

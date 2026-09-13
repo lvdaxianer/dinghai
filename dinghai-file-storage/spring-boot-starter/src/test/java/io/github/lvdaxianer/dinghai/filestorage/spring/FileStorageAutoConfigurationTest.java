@@ -321,12 +321,22 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(properties.getWeb().getMaxConcurrentReads()).isEqualTo(128);
                     assertThat(properties.getWeb().getMaxConcurrentUploads()).isEqualTo(16);
                     assertThat(properties.getWeb().getMaxConcurrentTransfersPerKey()).isZero();
+                    assertThat(properties.getWeb().isSendfileBinaryContentTypesEnabled()).isTrue();
                     assertThat(properties.getCache().getBufferSize().toBytes()).isEqualTo(128L * 1024L);
                     assertThat(properties.getCache().getMaxConcurrentFills()).isEqualTo(4);
                     assertThat(properties.getCache().getQueueCapacity()).isEqualTo(32);
                     assertThat(properties.getUpload().getMaxSize())
                             .isEqualTo(UploadRequest.DEFAULT_MAX_SIZE_BYTES);
                 });
+    }
+
+    /** 二进制 sendfile 优化允许由宿主自定义压缩策略关闭。 */
+    @Test
+    public void shouldBindBinarySendfileOptimizationSwitch() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.web.sendfile-binary-content-types-enabled=false")
+                .run(context -> assertThat(context.getBean(FileStorageProperties.class).getWeb()
+                        .isSendfileBinaryContentTypesEnabled()).isFalse());
     }
 
     /**

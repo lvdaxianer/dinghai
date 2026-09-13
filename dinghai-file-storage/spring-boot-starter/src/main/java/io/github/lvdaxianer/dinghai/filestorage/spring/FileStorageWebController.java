@@ -75,6 +75,7 @@ public class FileStorageWebController {
     /** 已规范化的 Web 路径前缀。 */
     private final String pathPrefix;
     private final int bufferSize;
+    private final boolean sendfileBinaryContentTypesEnabled;
     private final WebTransferLimiter transferLimiter;
 
     /**
@@ -173,6 +174,7 @@ public class FileStorageWebController {
         this.bufferSize = transferConfiguration.bufferSize();
         this.keyResolver = transferConfiguration.keyResolver();
         this.pathPrefix = normalizedPathPrefix(transferConfiguration.pathPrefix());
+        this.sendfileBinaryContentTypesEnabled = transferConfiguration.sendfileBinaryContentTypesEnabled();
         this.transferLimiter = new WebTransferLimiter(transferConfiguration.maxConcurrentUploads(),
                 transferConfiguration.maxConcurrentReads(),
                 transferConfiguration.maxConcurrentTransfersPerKey());
@@ -548,7 +550,7 @@ public class FileStorageWebController {
         Optional<HttpRange> parsedRange = parseRange(range);
         if (parsedRange.isEmpty()) {
             headers.setContentLength(metadata.contentLength());
-            return stream(key, headers, HttpStatus.OK, 0L, metadata.contentLength());
+            return stream(key, headers, HttpStatus.OK, 0L, metadata.contentLength(), metadata.contentType());
         }
         long start;
         long end;
@@ -567,7 +569,7 @@ public class FileStorageWebController {
         headers.set(HttpHeaders.CONTENT_RANGE, "bytes " + start + "-" + end + "/"
                 + metadata.contentLength());
         headers.setContentLength(length);
-        return stream(key, headers, HttpStatus.PARTIAL_CONTENT, start, length);
+        return stream(key, headers, HttpStatus.PARTIAL_CONTENT, start, length, metadata.contentType());
     }
 
     /**
@@ -583,13 +585,15 @@ public class FileStorageWebController {
      * @date 2026-09-11
      */
     private ResponseEntity<StreamingResponseBody> stream(ObjectKey key, HttpHeaders headers,
-                                                          HttpStatus status, long skip, long length) {
+                                                          HttpStatus status, long skip, long length,
+                                                          String contentType) {
         WebTransferLimiter.Permit permit = transferLimiter.acquireRead(rateLimitKey());
         Optional<Path> localFile = localFile(key);
         Optional<jakarta.servlet.http.HttpServletRequest> request = currentRequest();
         if (localFile.isPresent() && headers.getFirst(HttpHeaders.CONTENT_ENCODING) == null
                 && request.map(servletRequest ->
-                TomcatSendfileTransfer.register(servletRequest, localFile.get(), skip, length)).orElse(false)) {
+                TomcatSendfileTransfer.register(servletRequest, localFile.get(), skip, length, contentType,
+                        sendfileBinaryContentTypesEnabled)).orElse(false)) {
             request.ifPresent(servletRequest -> servletRequest.setAttribute(READ_PERMIT_ATTRIBUTE, permit));
             return new ResponseEntity<>(null, headers, status);
         }

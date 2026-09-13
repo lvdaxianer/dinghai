@@ -3,7 +3,7 @@
 - [x] 1.1 Add strict raw MIME eligibility classification with unit tests for
   exact types, wildcards, SVG exclusion, parameters, casing, invalid forms, and
   unknown types.
-- [ ] 1.2 Add the default-enabled web configuration switch and wire it into the
+- [x] 1.2 Add the default-enabled web configuration switch and wire it into the
   Tomcat sendfile gate; add focused transfer and controller tests for enabled,
   disabled, text, binary, and raw metadata forwarding behavior.
 - [ ] 1.3 Add compression-enabled embedded-Tomcat integration tests proving

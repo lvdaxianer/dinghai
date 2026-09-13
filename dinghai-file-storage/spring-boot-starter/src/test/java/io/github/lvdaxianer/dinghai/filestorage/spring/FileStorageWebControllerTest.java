@@ -370,6 +370,52 @@ public class FileStorageWebControllerTest {
                 .andExpect(status().isOk()).andExpect(request().asyncStarted());
     }
 
+    /** provider 确认的 PNG 类型在 gzip 请求下应使用默认开启的 sendfile 优化。 */
+    @Test
+    public void shouldRegisterTomcatSendfileForBinaryMetadataWhenRequestAcceptsCompression() throws Exception {
+        ObjectKey key = ObjectKey.of("documents/preview.png");
+        write(key, "image", "image/png", new CacheControl("public, max-age=60"));
+        String payload = stableAccess.identifier(key).substring("v1.".length());
+
+        MvcResult result = mockMvc.perform(get("/files/read/v1/" + payload)
+                        .header("Accept-Encoding", "gzip")
+                        .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
+                .andExpect(status().isOk()).andExpect(request().asyncNotStarted()).andReturn();
+
+        assertTrue(result.getRequest().getAttribute(TomcatSendfileTransfer.FILENAME) != null);
+    }
+
+    /** 宿主关闭二进制 sendfile 优化后，gzip 请求必须回退有界流式路径。 */
+    @Test
+    public void shouldFallBackToStreamingWhenBinarySendfileOptimizationIsDisabled() throws Exception {
+        ObjectKey key = ObjectKey.of("documents/preview.png");
+        write(key, "image", "image/png", new CacheControl("public, max-age=60"));
+        FileStorageWebController controller = new FileStorageWebController(storage,
+                new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC),
+                stableAccess, null, new WebTransferConfiguration(128 * 1024, 128, 16, 0, null,
+                "/files", false));
+        MockMvc disabledMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new FileStorageExceptionHandler()).build();
+        String payload = stableAccess.identifier(key).substring("v1.".length());
+
+        disabledMvc.perform(get("/files/read/v1/" + payload).header("Accept-Encoding", "gzip")
+                        .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
+                .andExpect(status().isOk()).andExpect(request().asyncStarted());
+    }
+
+    /** 非法 provider MIME 不能因响应头降级为二进制类型而错误启用 sendfile。 */
+    @Test
+    public void shouldStreamWhenRawProviderMetadataIsInvalidEvenIfResponseHeaderFallsBack() throws Exception {
+        ObjectKey key = ObjectKey.of("documents/preview.png");
+        write(key, "image", "not-a-media-type", new CacheControl("public, max-age=60"));
+        String payload = stableAccess.identifier(key).substring("v1.".length());
+
+        mockMvc.perform(get("/files/read/v1/" + payload).header("Accept-Encoding", "gzip")
+                        .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
+                .andExpect(status().isOk()).andExpect(request().asyncStarted())
+                .andExpect(header().string("Content-Type", "application/octet-stream"));
+    }
+
     /** 已校验的远程缓存热读应注册 Tomcat sendfile，而不是重新打开远程对象流。 */
     @Test
     public void shouldRegisterTomcatSendfileForVerifiedRemoteCacheHit() throws Exception {

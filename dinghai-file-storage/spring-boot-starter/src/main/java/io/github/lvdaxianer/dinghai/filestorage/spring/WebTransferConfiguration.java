@@ -20,6 +20,8 @@ final class WebTransferConfiguration {
     private final WebTransferRateLimitKeyResolver keyResolver;
     /** Web 端点路径前缀。 */
     private final String pathPrefix;
+    /** 是否允许标准二进制类型绕过常规压缩回退。 */
+    private final boolean sendfileBinaryContentTypesEnabled;
 
     /**
      * 创建 Web 传输配置。
@@ -36,7 +38,7 @@ final class WebTransferConfiguration {
                              int maxConcurrentTransfersPerKey,
                              WebTransferRateLimitKeyResolver keyResolver) {
         this(bufferSize, maxConcurrentReads, maxConcurrentUploads, maxConcurrentTransfersPerKey,
-                keyResolver, "/files");
+                keyResolver, "/files", true);
     }
 
     /**
@@ -54,12 +56,34 @@ final class WebTransferConfiguration {
     WebTransferConfiguration(int bufferSize, int maxConcurrentReads, int maxConcurrentUploads,
                              int maxConcurrentTransfersPerKey,
                              WebTransferRateLimitKeyResolver keyResolver, String pathPrefix) {
+        this(bufferSize, maxConcurrentReads, maxConcurrentUploads, maxConcurrentTransfersPerKey,
+                keyResolver, pathPrefix, true);
+    }
+
+    /**
+     * 创建带路径和二进制 sendfile 开关的 Web 传输配置。
+     *
+     * @param bufferSize 单个响应流的复制缓冲区大小
+     * @param maxConcurrentReads 全局最大读取并发数
+     * @param maxConcurrentUploads 全局最大上传并发数
+     * @param maxConcurrentTransfersPerKey 单个宿主 key 的最大传输并发数
+     * @param keyResolver 宿主可选的传输限流 key 解析器
+     * @param pathPrefix Web 端点路径前缀
+     * @param sendfileBinaryContentTypesEnabled 标准二进制 sendfile 优化开关
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-13
+     */
+    WebTransferConfiguration(int bufferSize, int maxConcurrentReads, int maxConcurrentUploads,
+                             int maxConcurrentTransfersPerKey,
+                             WebTransferRateLimitKeyResolver keyResolver, String pathPrefix,
+                             boolean sendfileBinaryContentTypesEnabled) {
         this.bufferSize = bufferSize;
         this.maxConcurrentReads = maxConcurrentReads;
         this.maxConcurrentUploads = maxConcurrentUploads;
         this.maxConcurrentTransfersPerKey = maxConcurrentTransfersPerKey;
         this.keyResolver = keyResolver;
         this.pathPrefix = pathPrefix;
+        this.sendfileBinaryContentTypesEnabled = sendfileBinaryContentTypesEnabled;
     }
 
     /**
@@ -126,5 +150,16 @@ final class WebTransferConfiguration {
      */
     String pathPrefix() {
         return pathPrefix;
+    }
+
+    /**
+     * 返回标准二进制 sendfile 优化开关。
+     *
+     * @return 启用时返回 true
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-13
+     */
+    boolean sendfileBinaryContentTypesEnabled() {
+        return sendfileBinaryContentTypesEnabled;
     }
 }

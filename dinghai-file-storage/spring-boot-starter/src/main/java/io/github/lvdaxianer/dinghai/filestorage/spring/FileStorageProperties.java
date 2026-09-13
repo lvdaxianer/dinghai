@@ -519,6 +519,8 @@ public class FileStorageProperties {
         private String pathPrefix = "/files";
         /** 是否允许没有预签名凭据的直接访问。 */
         private boolean directAccess;
+        /** 是否允许标准二进制类型在接受压缩时使用 sendfile。 */
+        private boolean sendfileBinaryContentTypesEnabled = true;
         /** 单个响应的读取缓冲区大小。 */
         private DataSize readBufferSize = DataSize.ofKilobytes(128L);
         /** 同时执行的最大响应读取数。 */
@@ -592,6 +594,16 @@ public class FileStorageProperties {
          */
         public void setDirectAccess(boolean directAccess) {
             this.directAccess = directAccess;
+        }
+
+        /** 获取标准二进制 sendfile 优化开关。 */
+        public boolean isSendfileBinaryContentTypesEnabled() {
+            return sendfileBinaryContentTypesEnabled;
+        }
+
+        /** 设置标准二进制 sendfile 优化开关。 */
+        public void setSendfileBinaryContentTypesEnabled(boolean sendfileBinaryContentTypesEnabled) {
+            this.sendfileBinaryContentTypesEnabled = sendfileBinaryContentTypesEnabled;
         }
 
         /** 获取单个响应的读取缓冲区大小。 */

@@ -20,8 +20,25 @@ final class TomcatSendfileTransfer {
     private TomcatSendfileTransfer() { }
 
     static boolean register(HttpServletRequest request, Path file, long start, long length) {
+        return register(request, file, start, length, null, true);
+    }
+
+    /**
+     * 为满足条件的本地文件注册 Tomcat sendfile 属性。
+     *
+     * @param request 当前 Servlet 请求
+     * @param file 本地普通文件
+     * @param start 传输起始字节
+     * @param length 传输长度
+     * @param contentType provider 确认的原始 MIME 类型
+     * @param binaryContentTypesEnabled 标准二进制 sendfile 优化开关
+     * @return 注册成功时返回 true
+     */
+    static boolean register(HttpServletRequest request, Path file, long start, long length,
+                            String contentType, boolean binaryContentTypesEnabled) {
         if (!Boolean.TRUE.equals(request.getAttribute(SUPPORTED)) || request.isSecure()
-                || acceptsCompression(request) || start < 0L || length < 0L
+                || requiresStreamingForCompression(request, contentType, binaryContentTypesEnabled)
+                || start < 0L || length < 0L
                 || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             return false;
         }
@@ -40,6 +57,12 @@ final class TomcatSendfileTransfer {
         request.setAttribute(START, start);
         request.setAttribute(END, end);
         return true;
+    }
+
+    private static boolean requiresStreamingForCompression(HttpServletRequest request, String contentType,
+                                                           boolean binaryContentTypesEnabled) {
+        return acceptsCompression(request) && (!binaryContentTypesEnabled
+                || !SendfileContentTypes.isEligible(contentType));
     }
 
     private static boolean acceptsCompression(HttpServletRequest request) {
