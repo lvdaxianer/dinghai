@@ -5,6 +5,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
+import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -90,6 +91,23 @@ public class FileStorageAutoConfigurationTest {
                 });
     }
 
+    /**
+     * rustfs provider 应仅注册 RustFS 存储主 Bean。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-13
+     */
+    @Test
+    public void shouldRegisterOnlyRustfsFileStorageForRustfsProvider() {
+        contextRunner.withPropertyValues(rustfsProperties())
+                .run(context -> {
+                    assertThat(context).hasSingleBean(FileStorage.class);
+                    assertThat(context).hasSingleBean(RustfsFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(LocalFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
+                });
+    }
+
     /** MinIO provider 也应注册后端中立的受控读取端点和专用执行器。 */
     @Test
     public void shouldRegisterWebReadEndpointForMinioProvider() {
@@ -116,6 +134,16 @@ public class FileStorageAutoConfigurationTest {
     public void shouldEnableDiskCacheByDefaultForNonLocalProvider() {
         contextRunner.withPropertyValues(minioProperties())
                 .run(context -> assertThat(context).hasSingleBean(ProviderFileReadCache.class));
+    }
+
+    /** RustFS 作为远端 provider 默认启用二级磁盘缓存及其清理器。 */
+    @Test
+    public void shouldEnableDiskCacheByDefaultForRustfsProvider() {
+        contextRunner.withPropertyValues(rustfsProperties())
+                .run(context -> {
+                    assertThat(context).hasSingleBean(ProviderFileReadCache.class);
+                    assertThat(context).hasSingleBean(ProviderFileReadCacheCleaner.class);
+                });
     }
 
     /** 本地 provider 显式开启已移除的二级缓存配置必须启动失败。 */
@@ -146,6 +174,17 @@ public class FileStorageAutoConfigurationTest {
         contextRunner.withPropertyValues(minioProperties())
                 .withPropertyValues("dinghai.file-storage.cache.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(ProviderFileReadCache.class));
+    }
+
+    /** RustFS 显式关闭缓存后不得创建二级缓存或清理器。 */
+    @Test
+    public void shouldDisableDiskCacheForRustfsProviderWhenExplicitlyDisabled() {
+        contextRunner.withPropertyValues(rustfsProperties())
+                .withPropertyValues("dinghai.file-storage.cache.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(ProviderFileReadCache.class);
+                    assertThat(context).doesNotHaveBean(ProviderFileReadCacheCleaner.class);
+                });
     }
 
     /** 读取和缓存资源限制必须拒绝非正数配置。 */
@@ -223,6 +262,18 @@ public class FileStorageAutoConfigurationTest {
                         "dinghai.file-storage.provider=local",
                         "dinghai.file-storage.bucket=documents",
                         "dinghai.file-storage.security.signing-key=test-signing-key")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    /**
+     * 被选中的 RustFS provider 缺少 endpoint 时必须失败。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-13
+     */
+    @Test
+    public void shouldFailFastWhenSelectedRustfsProviderIsIncomplete() {
+        contextRunner.withPropertyValues(rustfsPropertiesWithoutEndpoint())
                 .run(context -> assertThat(context).hasFailed());
     }
 
@@ -466,6 +517,51 @@ public class FileStorageAutoConfigurationTest {
      */
     private String[] minioPropertiesWithoutPublicBucket() {
         return minioProperties("dinghai.file-storage.minio.bucket=test-bucket");
+    }
+
+    /**
+     * 返回 rustfs provider 所需的完整属性。
+     *
+     * @return RustFS provider 属性
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-13
+     */
+    private String[] rustfsProperties() {
+        return new String[]{
+                "dinghai.file-storage.provider=rustfs",
+                "dinghai.file-storage.bucket=test-bucket",
+                "dinghai.file-storage.rustfs.endpoint=http://localhost:9100",
+                "dinghai.file-storage.rustfs.access-key=test-access-key",
+                "dinghai.file-storage.rustfs.secret-key=test-secret-key",
+                "dinghai.file-storage.storage-alias=documents",
+                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
+                "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
+                "dinghai.file-storage.migration.import-root=" + migrationRoot("import"),
+                "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
+                "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
+        };
+    }
+
+    /**
+     * 返回缺少 RustFS endpoint 的属性。
+     *
+     * @return 不完整 RustFS provider 属性
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-13
+     */
+    private String[] rustfsPropertiesWithoutEndpoint() {
+        return new String[]{
+                "dinghai.file-storage.provider=rustfs",
+                "dinghai.file-storage.bucket=test-bucket",
+                "dinghai.file-storage.rustfs.access-key=test-access-key",
+                "dinghai.file-storage.rustfs.secret-key=test-secret-key",
+                "dinghai.file-storage.storage-alias=documents",
+                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
+                "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
+                "dinghai.file-storage.migration.import-root=" + migrationRoot("import"),
+                "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
+                "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
+        };
     }
 
     /**

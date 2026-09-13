@@ -4,8 +4,7 @@
 
 ## 2. Starter Integration
 
-- [ ] 2.1 Add the `RUSTFS` provider, isolated `rustfs.*` properties, validation, and auto-configuration selection while preserving Local and MinIO behavior.
-- [ ] 2.2 Extend remote-cache conditions and starter tests so RustFS has the same non-Local cache behavior and configuration failures as MinIO.
+- [x] 2.1 Add the `RUSTFS` provider, isolated `rustfs.*` properties, validation, auto-configuration selection, remote-cache conditions, and tests while preserving Local and MinIO behavior.
 
 ## 3. Documentation and Compatibility Verification
 

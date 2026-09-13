@@ -7,6 +7,8 @@ import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioStorageConfiguration;
+import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
+import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsStorageConfiguration;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -14,6 +16,7 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -44,7 +47,7 @@ public class FileStorageAutoConfiguration {
     private static final int WEB_EXECUTOR_SHUTDOWN_SECONDS = 30;
 
     /**
-     * 创建唯一的本地或 MinIO 文件存储 Bean。
+     * 创建唯一的本地、MinIO 或 RustFS 文件存储 Bean。
      *
      * @param properties 已绑定的文件存储属性
      * @return 已配置的文件存储实现
@@ -63,6 +66,9 @@ public class FileStorageAutoConfiguration {
         }
         if (properties.getProvider() == FileStorageProvider.MINIO) {
             return minioStorage(properties, bucket);
+        }
+        if (properties.getProvider() == FileStorageProvider.RUSTFS) {
+            return rustfsStorage(properties, bucket);
         }
         throw invalidConfiguration("file storage provider is required or invalid", null);
     }
@@ -115,7 +121,8 @@ public class FileStorageAutoConfiguration {
      */
     @Bean(destroyMethod = "close")
     @ConditionalOnMissingBean
-    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "minio")
+    @ConditionalOnExpression("'${dinghai.file-storage.provider:}' == 'minio' "
+            + "or '${dinghai.file-storage.provider:}' == 'rustfs'")
     @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true",
             matchIfMissing = true)
     public ProviderFileReadCache providerFileReadCache(FileStorage storage,
@@ -133,7 +140,8 @@ public class FileStorageAutoConfiguration {
     /** 创建非本地 provider 缓存的午夜清理任务。 */
     @Bean
     @ConditionalOnMissingBean
-    @ConditionalOnProperty(name = "dinghai.file-storage.provider", havingValue = "minio")
+    @ConditionalOnExpression("'${dinghai.file-storage.provider:}' == 'minio' "
+            + "or '${dinghai.file-storage.provider:}' == 'rustfs'")
     @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true",
             matchIfMissing = true)
     public ProviderFileReadCacheCleaner providerFileReadCacheCleaner(ProviderFileReadCache cache,
@@ -319,6 +327,26 @@ public class FileStorageAutoConfiguration {
                     minio.getConnectTimeout(), minio.getReadTimeout(), minio.getWriteTimeout()));
         } catch (IllegalArgumentException exception) {
             throw invalidConfiguration("minio configuration is incomplete", exception);
+        }
+    }
+
+    /**
+     * 创建固定 bucket 的 RustFS 适配器。
+     *
+     * @param properties 已绑定的文件存储属性
+     * @param bucket 已校验公共 bucket
+     * @return RustFS 适配器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-13
+     */
+    private FileStorage rustfsStorage(FileStorageProperties properties, String bucket) {
+        FileStorageProperties.Rustfs rustfs = properties.getRustfs();
+        try {
+            return new RustfsFileStorageAdapter(new RustfsStorageConfiguration(rustfs.getEndpoint(),
+                    bucket, rustfs.getAccessKey(), rustfs.getSecretKey(),
+                    rustfs.getConnectTimeout(), rustfs.getReadTimeout(), rustfs.getWriteTimeout()));
+        } catch (IllegalArgumentException exception) {
+            throw invalidConfiguration("rustfs configuration is incomplete", exception);
         }
     }
 

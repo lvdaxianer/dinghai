@@ -28,6 +28,8 @@ public class FileStorageProperties {
     private final Local local = new Local();
     /** MinIO 后端配置。 */
     private final Minio minio = new Minio();
+    /** RustFS 后端配置。 */
+    private final Rustfs rustfs = new Rustfs();
     /** 上传策略配置。 */
     private final Upload upload = new Upload();
     /** 本地签名配置。 */
@@ -125,6 +127,17 @@ public class FileStorageProperties {
      */
     public Minio getMinio() {
         return minio;
+    }
+
+    /**
+     * 获取 RustFS 后端配置。
+     *
+     * @return RustFS 后端配置
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-13
+     */
+    public Rustfs getRustfs() {
+        return rustfs;
     }
 
     /**
@@ -366,6 +379,15 @@ public class FileStorageProperties {
         public void setWriteTimeout(Duration writeTimeout) {
             this.writeTimeout = writeTimeout;
         }
+    }
+
+    /**
+     * RustFS 后端属性，字段与 S3 兼容的 MinIO 客户端连接项保持一致。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-13
+     */
+    public static class Rustfs extends Minio {
     }
 
     /**
