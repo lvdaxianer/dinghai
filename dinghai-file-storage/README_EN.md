@@ -92,6 +92,7 @@ The MinIO adapter **does not create or modify buckets automatically**; create th
 | `web.enabled` | `boolean` | `true` | Whether to register the file web endpoints, the async executor, and the MVC configuration |
 | `web.path-prefix` | `String` | `/files` | Path prefix of the file endpoints; also used as the prefix of local presigned URLs. Must be non-empty, start with `/`, and contain no `?`, `#`, `\r`, or `\n`. Note: the migration management endpoints are fixed at `/files/migration/*` and **do not follow this prefix** |
 | `web.direct-access` | `boolean` | `false` | Whether to allow Web uploads without presign credentials. Even when enabled, the host must provide a `FileStorageAccessPolicy` Bean and it must return allow; Web reads do not require component credentials but remain concurrency-limited |
+| `web.sendfile-binary-content-types-enabled` | `boolean` | `true` | Whether confirmed standard binary MIME types may keep Tomcat `sendfile` when gzip or another compression capability is negotiated. Text, SVG, unknown, and invalid MIME types always stream; set `false` when the host applies custom compression to binary content |
 | `web.read-buffer-size` | `DataSize` | `128KB` | Copy buffer size per response stream; this is a per-copy buffer, not whole-file memory. Must be positive and not exceed `Integer.MAX_VALUE` |
 | `web.max-concurrent-reads` | `int` | `128` | Maximum concurrent Web response reads; when exhausted, the request returns HTTP 429 instead of queueing. Covers streaming, cached-file, and zero-copy transfers |
 | `web.max-concurrent-uploads` | `int` | `16` | Maximum concurrent Web uploads; when exhausted, the request returns HTTP 429 before reading its body. SDK uploads are not affected |
@@ -143,6 +144,7 @@ dinghai:
       enabled: true
       path-prefix: /files
       direct-access: false
+      sendfile-binary-content-types-enabled: true
       read-buffer-size: 128KB
       max-concurrent-reads: 128
       max-concurrent-uploads: 16
@@ -186,7 +188,7 @@ A successful `PUT /upload/{*key}` response keeps the SDK `FileStorage.put` `Obje
 
 The response status is `201 Created`, and `Location` equals `previewUrl`. `key`, length, type, ETag, modification time, and cache control all come from the provider-confirmed persisted result, not client-declared values. `previewUrl` is a root-relative address under the configured `web.path-prefix`; it uses the real object key, preserves `/` hierarchy, and percent-encodes path characters. Browsers can use it with the component's anonymous real-key preview route. It is not a Local disk path or a raw MinIO/OSS URL, and it does not contain a deployment host; a reverse proxy or application boundary can prepend its public origin when needed.
 
-Preview/download supports `Content-Type`, ETag, Last-Modified, Cache-Control, Expires, 304 (If-None-Match / If-Modified-Since), and single-range Range 206/416. Local primary files and validated MinIO hot-cache files prefer native `sendfile` on plain embedded Tomcat; a compression-capable `Accept-Encoding` request header now forces bounded streaming only when the response `Content-Type` is a compressible text type — incompressible binary types (images except SVG, video, audio, archives, PDF, fonts, `application/octet-stream`) still use zero-copy even with `Accept-Encoding: gzip`. TLS, other containers, a rejected container registration, or an absent/unrecognized content type automatically fall back to bounded streaming with the same caller-visible semantics.
+Preview/download supports `Content-Type`, ETag, Last-Modified, Cache-Control, Expires, 304 (If-None-Match / If-Modified-Since), and single-range Range 206/416. Local primary files and validated MinIO hot-cache files prefer native `sendfile` on plain embedded Tomcat: with the default enabled, confirmed common images, audio/video, archives, PDFs, and fonts may retain that path even when the request accepts gzip; text, SVG, unknown, and invalid MIME types remain bounded streaming. TLS, other containers, or a rejected container registration automatically fall back without changing caller-visible semantics.
 
 ## Presigning and Access Authorization
 
@@ -229,8 +231,9 @@ Non-Local backends enable by default a two-level disk read cache validated again
 ## Zero-Copy and Concurrency
 
 - core exposes an optional `LocalFileSource` interface (`Optional<Path> localFile(ObjectKey)`): the Local adapter and the remote read cache (on a validated cache hit) implement it to hand the Web layer a root-validated local file path; providers without this capability stay on the streaming path.
-- Local primary files and validated remote cache hits prefer native Tomcat `sendfile` for plain requests without allocating JVM heap proportional to file size; `Accept-Encoding: gzip` blocks zero-copy only for compressible text types (`text/*`, JSON, XML, SVG, etc.) and leaves incompressible binary types unaffected.
-- TLS, compressed requests for compressible text types, non-Tomcat containers, temporarily unavailable files, and rejected registrations automatically fall back to bounded streaming while preserving content, conditional-request, and Range semantics.
+- Local primary files and validated remote cache hits prefer native Tomcat `sendfile` for plain requests without allocating JVM heap proportional to file size. With the default `web.sendfile-binary-content-types-enabled=true`, confirmed standard binary MIME types can retain this path under gzip and other compression negotiation.
+- Text, SVG, unknown, and invalid MIME types always fall back to bounded streaming under compression negotiation. Set the switch to `false` to restore conservative streaming for every compression-capable request when the host intentionally applies custom compression to binary content.
+- TLS, non-Tomcat containers, temporarily unavailable files, and rejected registrations automatically fall back to bounded streaming while preserving content, conditional-request, and Range semantics.
 - Both the global read limit and optional per-key read limit cover streaming fallbacks, cached files, and Tomcat `sendfile`; permits remain held until the response completes or fails, and saturated requests immediately return HTTP 429.
 - When upgrading a Local deployment, remove `dinghai.file-storage.cache.enabled=true`. The setting is removed and retaining it fails startup.
 

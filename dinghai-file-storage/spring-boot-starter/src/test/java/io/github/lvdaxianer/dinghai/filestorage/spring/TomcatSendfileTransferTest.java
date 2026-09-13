@@ -25,7 +25,7 @@ public class TomcatSendfileTransferTest {
         Files.writeString(file, "hello", StandardCharsets.UTF_8);
         MockHttpServletRequest request = tomcatRequest();
 
-        assertTrue(TomcatSendfileTransfer.register(request, file, 0L, 5L, "application/octet-stream"));
+        assertTrue(TomcatSendfileTransfer.register(request, file, 0L, 5L));
         assertEquals(file.toAbsolutePath().toString(),
                 request.getAttribute(TomcatSendfileTransfer.FILENAME));
         assertEquals(0L, request.getAttribute(TomcatSendfileTransfer.START));
@@ -38,7 +38,7 @@ public class TomcatSendfileTransferTest {
         Files.writeString(file, "hello", StandardCharsets.UTF_8);
         MockHttpServletRequest request = tomcatRequest();
 
-        assertTrue(TomcatSendfileTransfer.register(request, file, 1L, 3L, "application/octet-stream"));
+        assertTrue(TomcatSendfileTransfer.register(request, file, 1L, 3L));
         assertEquals(1L, request.getAttribute(TomcatSendfileTransfer.START));
         assertEquals(4L, request.getAttribute(TomcatSendfileTransfer.END));
     }
@@ -53,9 +53,23 @@ public class TomcatSendfileTransferTest {
         compressed.addHeader("Accept-Encoding", "gzip");
         MockHttpServletRequest unsupported = new MockHttpServletRequest();
 
-        assertFalse(TomcatSendfileTransfer.register(secure, file, 0L, 5L, "application/octet-stream"));
-        assertFalse(TomcatSendfileTransfer.register(compressed, file, 0L, 5L, "text/plain"));
-        assertFalse(TomcatSendfileTransfer.register(unsupported, file, 0L, 5L, "application/octet-stream"));
+        assertFalse(TomcatSendfileTransfer.register(secure, file, 0L, 5L));
+        assertFalse(TomcatSendfileTransfer.register(compressed, file, 0L, 5L));
+        assertFalse(TomcatSendfileTransfer.register(unsupported, file, 0L, 5L));
+    }
+
+    /** 标准二进制类型默认允许绕过常规压缩回退，而文本和关闭开关仍应回退。 */
+    @Test
+    public void shouldAllowEligibleBinaryTypeOnlyWhenOptimizationIsEnabled() throws Exception {
+        Path file = temporaryFolder.newFile("content.bin").toPath();
+        Files.writeString(file, "hello", StandardCharsets.UTF_8);
+        MockHttpServletRequest binary = compressedTomcatRequest();
+        MockHttpServletRequest text = compressedTomcatRequest();
+        MockHttpServletRequest disabled = compressedTomcatRequest();
+
+        assertTrue(TomcatSendfileTransfer.register(binary, file, 0L, 5L, "image/png", true));
+        assertFalse(TomcatSendfileTransfer.register(text, file, 0L, 5L, "text/plain", true));
+        assertFalse(TomcatSendfileTransfer.register(disabled, file, 0L, 5L, "image/png", false));
     }
 
     /** 范围结束位置溢出时必须回退，不能注册越界的 sendfile 请求属性。 */
@@ -65,7 +79,7 @@ public class TomcatSendfileTransferTest {
         Files.writeString(file, "hello", StandardCharsets.UTF_8);
         MockHttpServletRequest request = tomcatRequest();
 
-        assertFalse(TomcatSendfileTransfer.register(request, file, Long.MAX_VALUE, 1L, "application/octet-stream"));
+        assertFalse(TomcatSendfileTransfer.register(request, file, Long.MAX_VALUE, 1L));
         assertNull(request.getAttribute(TomcatSendfileTransfer.FILENAME));
     }
 
@@ -76,13 +90,19 @@ public class TomcatSendfileTransferTest {
         Files.writeString(file, "hello", StandardCharsets.UTF_8);
         MockHttpServletRequest request = tomcatRequest();
 
-        assertFalse(TomcatSendfileTransfer.register(request, file, 4L, 2L, "application/octet-stream"));
+        assertFalse(TomcatSendfileTransfer.register(request, file, 4L, 2L));
         assertNull(request.getAttribute(TomcatSendfileTransfer.FILENAME));
     }
 
     private MockHttpServletRequest tomcatRequest() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE);
+        return request;
+    }
+
+    private MockHttpServletRequest compressedTomcatRequest() {
+        MockHttpServletRequest request = tomcatRequest();
+        request.addHeader("Accept-Encoding", "gzip");
         return request;
     }
 }

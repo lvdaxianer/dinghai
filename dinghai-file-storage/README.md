@@ -92,6 +92,7 @@ MinIO 适配器**不会自动创建或修改 bucket**，需事先自行建好。
 | `web.enabled` | `boolean` | `true` | 是否注册文件 Web 端点、异步执行器和 MVC 配置 |
 | `web.path-prefix` | `String` | `/files` | 文件端点路径前缀，同时作为本地预签名 URL 的前缀。必须非空、以 `/` 开头、不含 `?`、`#`、`\r`、`\n`。注意：迁移管理端点固定为 `/files/migration/*`，**不随该前缀变化** |
 | `web.direct-access` | `boolean` | `false` | 是否允许无预签名凭据的 Web 上传。即使开启，仍需宿主提供 `FileStorageAccessPolicy` Bean 且其返回允许；Web 读取不要求组件凭证，但受读取并发上限保护 |
+| `web.sendfile-binary-content-types-enabled` | `boolean` | `true` | gzip 等压缩协商存在时，是否允许已确认的标准二进制 MIME 类型继续使用 Tomcat `sendfile`。文本、SVG、未知或非法 MIME 始终流式传输；宿主对二进制内容配置了自定义压缩时设为 `false` |
 | `web.read-buffer-size` | `DataSize` | `128KB` | 单个响应流的复制缓冲区大小，是单次复制缓冲而非整文件内存；必须为正且不超过 `Integer.MAX_VALUE` |
 | `web.max-concurrent-reads` | `int` | `128` | 同时执行的 Web 响应读取上限；耗尽时返回 HTTP 429，不排队等待。覆盖流式、缓存文件和零拷贝传输 |
 | `web.max-concurrent-uploads` | `int` | `16` | 同时执行的 Web 上传上限；耗尽时返回 HTTP 429，不读取被拒绝请求体。SDK 上传不受此限制 |
@@ -143,6 +144,7 @@ dinghai:
       enabled: true
       path-prefix: /files
       direct-access: false
+      sendfile-binary-content-types-enabled: true
       read-buffer-size: 128KB
       max-concurrent-reads: 128
       max-concurrent-uploads: 16
@@ -186,7 +188,7 @@ dinghai:
 
 响应状态为 `201 Created`，`Location` 等于 `previewUrl`。`key`、长度、类型、ETag、修改时间和缓存策略都取自 provider 持久化后的确认结果，而不是客户端声明值。`previewUrl` 是配置 `web.path-prefix` 下的根相对地址，使用真实 object key（保留 `/` 层级并对路径字符编码）；浏览器可直接访问组件的匿名真实 key 预览端点。它不是本地磁盘路径、MinIO/OSS 原始 URL，也不包含部署主机名，反向代理或应用边界可按需补充公开域名。
 
-预览/下载支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304（If-None-Match / If-Modified-Since）和单区间 Range 206/416。Local 主文件和 MinIO 已校验的热缓存文件在明文的嵌入 Tomcat 中优先注册原生 `sendfile`；仅当请求声明接受压缩（`Accept-Encoding` 非 `identity`）且响应 `Content-Type` 属于可压缩文本类型时才回退到有界流式复制——图片（SVG 除外）、视频、音频、压缩包、PDF、字体、`application/octet-stream` 等不可压缩二进制类型即使携带 `Accept-Encoding: gzip` 也照常走零拷贝。TLS、其他容器、容器不支持或未声明/无法识别的内容类型自动回退，调用方无需切换接口。
+预览/下载支持 `Content-Type`、ETag、Last-Modified、Cache-Control、Expires、304（If-None-Match / If-Modified-Since）和单区间 Range 206/416。Local 主文件和 MinIO 已校验的热缓存文件在明文嵌入 Tomcat 中优先注册原生 `sendfile`：默认开启时，常见图片、音视频、压缩包、PDF 和字体等已确认标准二进制 MIME 即使请求接受 gzip 也可保留该路径；文本、SVG、未知或非法 MIME 继续使用有界流式复制。TLS、其他容器或容器不支持时自动回退，调用方无需切换接口。
 
 ## 预签名与访问授权
 
@@ -229,8 +231,9 @@ WebTransferRateLimitKeyResolver webTransferRateLimitKeyResolver() {
 ## 零拷贝与并发
 
 - core 提供可选的 `LocalFileSource` 接口（`Optional<Path> localFile(ObjectKey)`）：Local 适配器和远程读取缓存在命中已校验副本时实现它，向 Web 层暴露经过根目录校验的本地文件路径；不实现该接口的 provider 只走流式路径。
-- Local 主文件和远程热缓存命中时，Tomcat 明文请求优先使用原生 `sendfile`，不按文件大小分配 JVM 堆内存；`Accept-Encoding: gzip` 只在响应为可压缩文本类型（`text/*`、JSON、XML、SVG 等）时阻止零拷贝，不可压缩二进制类型不受影响。
-- TLS、可压缩文本类型的压缩请求、非 Tomcat 容器、文件暂不可用或容器拒绝注册时自动降级为有界流式复制，响应内容、条件请求和 Range 语义保持不变。
+- Local 主文件和远程热缓存命中时，Tomcat 明文请求优先使用原生 `sendfile`，不按文件大小分配 JVM 堆内存。默认 `web.sendfile-binary-content-types-enabled=true` 时，已确认的标准二进制 MIME 类型可在 gzip 等压缩协商下继续走该路径。
+- 文本、SVG、未知或非法 MIME 类型在压缩协商下始终降级为有界流式复制；将该开关设为 `false` 可让全部压缩协商请求恢复保守的流式路径，适用于宿主对二进制内容启用了自定义压缩的场景。
+- TLS、非 Tomcat 容器、文件暂不可用或容器拒绝注册时自动降级为有界流式复制，响应内容、条件请求和 Range 语义保持不变。
 - 全局读取上限和可选的每 key 读取上限均覆盖流式回退、缓存文件和 Tomcat `sendfile`，读取许可保持到响应完成或失败；并发达到上限时立即返回 HTTP 429。
 - Local 升级时必须删除 `dinghai.file-storage.cache.enabled=true`；该配置已移除，继续保留会使应用启动失败。
 

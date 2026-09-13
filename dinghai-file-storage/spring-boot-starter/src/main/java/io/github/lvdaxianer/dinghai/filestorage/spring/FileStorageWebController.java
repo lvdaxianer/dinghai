@@ -75,6 +75,7 @@ public class FileStorageWebController {
     /** 已规范化的 Web 路径前缀。 */
     private final String pathPrefix;
     private final int bufferSize;
+    private final boolean sendfileBinaryContentTypesEnabled;
     private final WebTransferLimiter transferLimiter;
 
     /**
@@ -173,6 +174,7 @@ public class FileStorageWebController {
         this.bufferSize = transferConfiguration.bufferSize();
         this.keyResolver = transferConfiguration.keyResolver();
         this.pathPrefix = normalizedPathPrefix(transferConfiguration.pathPrefix());
+        this.sendfileBinaryContentTypesEnabled = transferConfiguration.sendfileBinaryContentTypesEnabled();
         this.transferLimiter = new WebTransferLimiter(transferConfiguration.maxConcurrentUploads(),
                 transferConfiguration.maxConcurrentReads(),
                 transferConfiguration.maxConcurrentTransfersPerKey());
@@ -548,8 +550,7 @@ public class FileStorageWebController {
         Optional<HttpRange> parsedRange = parseRange(range);
         if (parsedRange.isEmpty()) {
             headers.setContentLength(metadata.contentLength());
-            return stream(key, headers, HttpStatus.OK, 0L, metadata.contentLength(),
-                    metadata.contentType());
+            return stream(key, headers, HttpStatus.OK, 0L, metadata.contentLength(), metadata.contentType());
         }
         long start;
         long end;
@@ -568,8 +569,7 @@ public class FileStorageWebController {
         headers.set(HttpHeaders.CONTENT_RANGE, "bytes " + start + "-" + end + "/"
                 + metadata.contentLength());
         headers.setContentLength(length);
-        return stream(key, headers, HttpStatus.PARTIAL_CONTENT, start, length,
-                metadata.contentType());
+        return stream(key, headers, HttpStatus.PARTIAL_CONTENT, start, length, metadata.contentType());
     }
 
     /**
@@ -580,10 +580,9 @@ public class FileStorageWebController {
      * @param status HTTP 状态
      * @param skip 跳过字节数
      * @param length 写出字节数
-     * @param contentType provider 确认的响应内容类型
      * @return 流式响应
      * @author lvdaxianer@yeah.net
-     * @date 2026-09-13
+     * @date 2026-09-11
      */
     private ResponseEntity<StreamingResponseBody> stream(ObjectKey key, HttpHeaders headers,
                                                           HttpStatus status, long skip, long length,
@@ -593,8 +592,8 @@ public class FileStorageWebController {
         Optional<jakarta.servlet.http.HttpServletRequest> request = currentRequest();
         if (localFile.isPresent() && headers.getFirst(HttpHeaders.CONTENT_ENCODING) == null
                 && request.map(servletRequest ->
-                TomcatSendfileTransfer.register(servletRequest, localFile.get(), skip, length,
-                        contentType)).orElse(false)) {
+                TomcatSendfileTransfer.register(servletRequest, localFile.get(), skip, length, contentType,
+                        sendfileBinaryContentTypesEnabled)).orElse(false)) {
             request.ifPresent(servletRequest -> servletRequest.setAttribute(READ_PERMIT_ATTRIBUTE, permit));
             return new ResponseEntity<>(null, headers, status);
         }

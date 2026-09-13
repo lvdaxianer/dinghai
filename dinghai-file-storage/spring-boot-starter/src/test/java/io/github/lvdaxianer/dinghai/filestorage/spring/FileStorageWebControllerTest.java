@@ -370,85 +370,50 @@ public class FileStorageWebControllerTest {
                 .andExpect(status().isOk()).andExpect(request().asyncStarted());
     }
 
-    /** 不可压缩二进制类型携带 gzip 接受头时仍应注册 Tomcat sendfile。 */
+    /** provider 确认的 PNG 类型在 gzip 请求下应使用默认开启的 sendfile 优化。 */
     @Test
-    public void shouldRegisterTomcatSendfileForBinaryTypesWithGzipAcceptEncoding() throws Exception {
-        write(ObjectKey.of("media/photo.png"), "png", "image/png", CacheControl.privateNoCache());
-        write(ObjectKey.of("media/data.bin"), "bin", "application/octet-stream",
-                CacheControl.privateNoCache());
-        write(ObjectKey.of("documents/manual.pdf"), "pdf", "application/pdf",
-                CacheControl.privateNoCache());
-        for (String key : new String[] {"media/photo.png", "media/data.bin", "documents/manual.pdf"}) {
-            PresignedDownload preview = storage.presignDownload(downloadRequest(
-                    key, PresignDownloadRequest.ResponseDisposition.INLINE));
+    public void shouldRegisterTomcatSendfileForBinaryMetadataWhenRequestAcceptsCompression() throws Exception {
+        ObjectKey key = ObjectKey.of("documents/preview.png");
+        write(key, "image", "image/png", new CacheControl("public, max-age=60"));
+        String payload = stableAccess.identifier(key).substring("v1.".length());
 
-            MvcResult result = mockMvc.perform(get(preview.url())
-                            .header("Accept-Encoding", "gzip")
-                            .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
-                    .andExpect(status().isOk()).andExpect(request().asyncNotStarted()).andReturn();
-
-            assertTrue(result.getRequest().getAttribute(TomcatSendfileTransfer.FILENAME) != null);
-        }
-    }
-
-    /** image/svg+xml 属于可压缩文本，携带 gzip 接受头时必须回退流式传输。 */
-    @Test
-    public void shouldFallBackToStreamingForSvgWithGzipAcceptEncoding() throws Exception {
-        write(ObjectKey.of("icons/logo.svg"), "<svg/>", "image/svg+xml",
-                CacheControl.privateNoCache());
-        PresignedDownload preview = storage.presignDownload(downloadRequest(
-                "icons/logo.svg", PresignDownloadRequest.ResponseDisposition.INLINE));
-
-        mockMvc.perform(get(preview.url()).header("Accept-Encoding", "gzip")
-                        .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
-                .andExpect(status().isOk()).andExpect(request().asyncStarted());
-    }
-
-    /** 未识别的内容类型携带 gzip 接受头时必须保守回退流式传输。 */
-    @Test
-    public void shouldFallBackToStreamingForUnrecognizedContentTypeWithGzip() throws Exception {
-        write(ObjectKey.of("documents/custom.dat"), "custom", "application/x-unlisted-type",
-                CacheControl.privateNoCache());
-        PresignedDownload preview = storage.presignDownload(downloadRequest(
-                "documents/custom.dat", PresignDownloadRequest.ResponseDisposition.INLINE));
-
-        mockMvc.perform(get(preview.url()).header("Accept-Encoding", "gzip")
-                        .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
-                .andExpect(status().isOk()).andExpect(request().asyncStarted());
-    }
-
-    /** Accept-Encoding 为 identity 时文本类型仍应注册 sendfile，行为与缺失头一致。 */
-    @Test
-    public void shouldRegisterTomcatSendfileForTextTypeWithIdentityAcceptEncoding() throws Exception {
-        PresignedDownload preview = storage.presignDownload(downloadRequest(
-                "documents/readme.txt", PresignDownloadRequest.ResponseDisposition.INLINE));
-
-        MvcResult result = mockMvc.perform(get(preview.url())
-                        .header("Accept-Encoding", "identity")
+        MvcResult result = mockMvc.perform(get("/files/read/v1/" + payload)
+                        .header("Accept-Encoding", "gzip")
                         .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
                 .andExpect(status().isOk()).andExpect(request().asyncNotStarted()).andReturn();
 
         assertTrue(result.getRequest().getAttribute(TomcatSendfileTransfer.FILENAME) != null);
     }
 
-    /** 无本地文件来源的远程 provider 无论内容类型如何都必须走流式传输。 */
+    /** 宿主关闭二进制 sendfile 优化后，gzip 请求必须回退有界流式路径。 */
     @Test
-    public void shouldStreamRemoteProviderRegardlessOfContentType() throws Exception {
-        InMemoryFileStorage provider = new InMemoryFileStorage("remote");
-        FileStorageWebController controller = new FileStorageWebController(provider,
+    public void shouldFallBackToStreamingWhenBinarySendfileOptimizationIsDisabled() throws Exception {
+        ObjectKey key = ObjectKey.of("documents/preview.png");
+        write(key, "image", "image/png", new CacheControl("public, max-age=60"));
+        FileStorageWebController controller = new FileStorageWebController(storage,
                 new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC),
-                stableAccess);
-        MockMvc providerMvc = MockMvcBuilders.standaloneSetup(controller)
+                stableAccess, null, new WebTransferConfiguration(128 * 1024, 128, 16, 0, null,
+                "/files", false));
+        MockMvc disabledMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
-        String payload = stableAccess.identifier(ObjectKey.of("reports/remote.txt"))
-                .substring("v1.".length());
+        String payload = stableAccess.identifier(key).substring("v1.".length());
 
-        MvcResult result = providerMvc.perform(get("/files/read/v1/" + payload)
-                        .header("Accept-Encoding", "gzip")
+        disabledMvc.perform(get("/files/read/v1/" + payload).header("Accept-Encoding", "gzip")
                         .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
-                .andExpect(status().isOk()).andExpect(request().asyncStarted()).andReturn();
+                .andExpect(status().isOk()).andExpect(request().asyncStarted());
+    }
 
-        assertTrue(result.getRequest().getAttribute(TomcatSendfileTransfer.FILENAME) == null);
+    /** 非法 provider MIME 不能因响应头降级为二进制类型而错误启用 sendfile。 */
+    @Test
+    public void shouldStreamWhenRawProviderMetadataIsInvalidEvenIfResponseHeaderFallsBack() throws Exception {
+        ObjectKey key = ObjectKey.of("documents/preview.png");
+        write(key, "image", "not-a-media-type", new CacheControl("public, max-age=60"));
+        String payload = stableAccess.identifier(key).substring("v1.".length());
+
+        mockMvc.perform(get("/files/read/v1/" + payload).header("Accept-Encoding", "gzip")
+                        .requestAttr(TomcatSendfileTransfer.SUPPORTED, Boolean.TRUE))
+                .andExpect(status().isOk()).andExpect(request().asyncStarted())
+                .andExpect(header().string("Content-Type", "application/octet-stream"));
     }
 
     /** 已校验的远程缓存热读应注册 Tomcat sendfile，而不是重新打开远程对象流。 */

@@ -4,67 +4,62 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * 判定响应内容类型是否属于压缩中间件不会处理的不可压缩二进制类型。
+ * 判定标准响应 MIME 类型是否可绕过常规压缩而使用 sendfile。
  *
  * @author lvdaxianer@yeah.net
  * @date 2026-09-13
  */
 final class SendfileContentTypes {
-
-    /** 不可压缩的精确内容类型（压缩包、PDF、字体、WebAssembly、通用二进制）。 */
-    private static final Set<String> INCOMPRESSIBLE = Set.of(
-            "application/octet-stream",
-            "application/pdf",
-            "application/zip",
-            "application/gzip",
-            "application/x-gzip",
-            "application/x-tar",
-            "application/x-7z-compressed",
-            "application/x-rar-compressed",
-            "application/vnd.rar",
-            "application/x-bzip2",
-            "application/x-xz",
-            "application/zstd",
-            "application/x-brotli",
-            "application/epub+zip",
-            "application/wasm",
-            "application/font-woff",
-            "application/x-font-ttf",
-            "application/x-font-opentype",
-            "application/vnd.ms-fontobject");
-
-    /** 可整体判定为不可压缩的顶层类型。 */
-    private static final Set<String> INCOMPRESSIBLE_TOP_LEVEL = Set.of(
-            "video", "audio", "font");
-
-    /** 显式排除的可压缩例外（SVG 为 XML 文本，压缩收益高）。 */
-    private static final Set<String> COMPRESSIBLE_EXCEPTIONS = Set.of(
-            "image/svg+xml");
+    private static final Set<String> EXACT_BINARY_TYPES = Set.of(
+            "application/octet-stream", "application/pdf", "application/zip",
+            "application/gzip", "application/x-tar", "application/x-7z-compressed",
+            "application/x-rar-compressed", "application/x-bzip2", "application/x-xz",
+            "application/zstd", "application/vnd.rar", "application/epub+zip",
+            "application/font-woff", "application/x-font-ttf", "application/x-font-opentype");
 
     private SendfileContentTypes() { }
 
     /**
-     * 判断内容类型是否不可压缩；空值或无法识别的类型一律返回 false（保守回退）。
+     * 根据原始 MIME 类型判定是否属于标准二进制 sendfile 白名单。
      *
-     * @param contentType 响应内容类型（可携带参数，如 charset）
-     * @return 不可压缩二进制类型返回 true
+     * @param contentType provider 确认的原始 MIME 类型
+     * @return 合法且在白名单中时返回 true
      */
-    static boolean isIncompressible(String contentType) {
-        if (contentType == null) {
-            return false;
+    static boolean isEligible(String contentType) {
+        String mediaType = mediaType(contentType);
+        if (mediaType == null) return false;
+        if (EXACT_BINARY_TYPES.contains(mediaType)) return true;
+
+        int separator = mediaType.indexOf('/');
+        String type = mediaType.substring(0, separator);
+        return ("image".equals(type) && !"image/svg+xml".equals(mediaType))
+                || "video".equals(type) || "audio".equals(type) || "font".equals(type);
+    }
+
+    private static String mediaType(String contentType) {
+        if (contentType == null) return null;
+        int parameterStart = contentType.indexOf(';');
+        String value = (parameterStart >= 0 ? contentType.substring(0, parameterStart) : contentType).trim();
+        int separator = value.indexOf('/');
+        if (separator <= 0 || separator != value.lastIndexOf('/') || separator == value.length() - 1) {
+            return null;
         }
-        final int parameterIndex = contentType.indexOf(';');
-        final String base = (parameterIndex >= 0 ? contentType.substring(0, parameterIndex) : contentType)
-                .trim().toLowerCase(Locale.ROOT);
-        final int slashIndex = base.indexOf('/');
-        if (slashIndex <= 0 || slashIndex == base.length() - 1) {
-            return false;
+        String type = value.substring(0, separator);
+        String subtype = value.substring(separator + 1);
+        if (!isToken(type) || !isToken(subtype)) return null;
+        return value.toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean isToken(String value) {
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            if (!(character >= 'a' && character <= 'z')
+                    && !(character >= 'A' && character <= 'Z')
+                    && !(character >= '0' && character <= '9')
+                    && "!#$%&'*+-.^_`|~".indexOf(character) < 0) {
+                return false;
+            }
         }
-        if (COMPRESSIBLE_EXCEPTIONS.contains(base)) {
-            return false;
-        }
-        return INCOMPRESSIBLE.contains(base)
-                || INCOMPRESSIBLE_TOP_LEVEL.contains(base.substring(0, slashIndex))
-                || "image".equals(base.substring(0, slashIndex));
+        return !value.isEmpty();
     }
 }
