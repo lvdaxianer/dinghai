@@ -1,16 +1,16 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.aliyun.oss.OSS;
+import com.aliyun.sdk.service.oss2.OSSClient;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioStorageConfiguration;
-import io.github.lvdaxianer.dinghai.filestorage.oss.OssClientFactory;
-import io.github.lvdaxianer.dinghai.filestorage.oss.OssFileStorageAdapter;
-import io.github.lvdaxianer.dinghai.filestorage.oss.OssStorageConfiguration;
+import io.github.lvdaxianer.dinghai.filestorage.aliyunoss.AliyunOssClientFactory;
+import io.github.lvdaxianer.dinghai.filestorage.aliyunoss.AliyunOssFileStorageAdapter;
+import io.github.lvdaxianer.dinghai.filestorage.aliyunoss.AliyunOssStorageConfiguration;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsStorageConfiguration;
 import java.nio.charset.StandardCharsets;
@@ -62,10 +62,10 @@ public class FileStorageAutoConfiguration {
     @Primary
     @ConditionalOnMissingBean(FileStorage.class)
     public FileStorage fileStorage(FileStorageProperties properties, Environment environment,
-                                   Optional<OSS> ossClient) {
+                                   Optional<OSSClient> aliyunOssClient) {
         validateWebPathPrefix(properties.getWeb().getPathPrefix());
         String bucket = validateBucket(properties.getBucket());
-        return selectedFileStorage(properties, environment, bucket, ossClient);
+        return selectedFileStorage(properties, environment, bucket, aliyunOssClient);
     }
 
     /**
@@ -80,13 +80,13 @@ public class FileStorageAutoConfiguration {
      * @date 2026-09-14
      */
     private FileStorage selectedFileStorage(FileStorageProperties properties, Environment environment,
-                                            String bucket, Optional<OSS> ossClient) {
+                                            String bucket, Optional<OSSClient> aliyunOssClient) {
         // Local 需要额外校验缓存与主数据根目录不会重叠。
         if (properties.getProvider() == FileStorageProvider.LOCAL) {
             validateLocalCacheConfiguration(properties, environment, bucket);
             return localStorage(properties, bucket);
         }
-        return remoteFileStorage(properties, bucket, ossClient);
+        return remoteFileStorage(properties, bucket, aliyunOssClient);
     }
 
     /**
@@ -100,7 +100,7 @@ public class FileStorageAutoConfiguration {
      * @date 2026-09-14
      */
     private FileStorage remoteFileStorage(FileStorageProperties properties, String bucket,
-                                          Optional<OSS> ossClient) {
+                                          Optional<OSSClient> aliyunOssClient) {
         // MinIO 使用其 S3 兼容客户端。
         if (properties.getProvider() == FileStorageProvider.MINIO) {
             return minioStorage(properties, bucket);
@@ -110,9 +110,9 @@ public class FileStorageAutoConfiguration {
             return rustfsStorage(properties, bucket);
         }
         // OSS 只能使用由 Spring 管理生命周期的原生 SDK client。
-        if (properties.getProvider() == FileStorageProvider.OSS) {
-            return ossStorage(properties, bucket, ossClient.orElseThrow(
-                    () -> invalidConfiguration("oss client is required", null)));
+        if (properties.getProvider() == FileStorageProvider.ALIYUN_OSS) {
+            return aliyunOssStorage(properties, bucket, aliyunOssClient.orElseThrow(
+                    () -> invalidConfiguration("aliyun oss client is required", null)));
         }
         throw invalidConfiguration("file storage provider is required or invalid", null);
     }
@@ -125,14 +125,14 @@ public class FileStorageAutoConfiguration {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-14
      */
-    @Bean(destroyMethod = "shutdown")
-    @ConditionalOnMissingBean(OSS.class)
-    @ConditionalOnExpression("'${dinghai.file-storage.provider:}' == 'oss'")
-    public OSS ossClient(FileStorageProperties properties) {
+    @Bean(destroyMethod = "close")
+    @ConditionalOnMissingBean(OSSClient.class)
+    @ConditionalOnExpression("'${dinghai.file-storage.provider:}' == 'aliyun-oss'")
+    public OSSClient aliyunOssClient(FileStorageProperties properties) {
         try {
-            return OssClientFactory.create(ossConfiguration(properties));
+            return AliyunOssClientFactory.create(aliyunOssConfiguration(properties));
         } catch (IllegalArgumentException exception) {
-            throw invalidConfiguration("oss configuration is incomplete", exception);
+            throw invalidConfiguration("aliyun oss configuration is incomplete", exception);
         }
     }
 
@@ -186,7 +186,7 @@ public class FileStorageAutoConfiguration {
     @ConditionalOnMissingBean
     @ConditionalOnExpression("'${dinghai.file-storage.provider:}' == 'minio' "
             + "or '${dinghai.file-storage.provider:}' == 'rustfs' "
-            + "or '${dinghai.file-storage.provider:}' == 'oss'")
+            + "or '${dinghai.file-storage.provider:}' == 'aliyun-oss'")
     @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true",
             matchIfMissing = true)
     public ProviderFileReadCache providerFileReadCache(FileStorage storage,
@@ -206,7 +206,7 @@ public class FileStorageAutoConfiguration {
     @ConditionalOnMissingBean
     @ConditionalOnExpression("'${dinghai.file-storage.provider:}' == 'minio' "
             + "or '${dinghai.file-storage.provider:}' == 'rustfs' "
-            + "or '${dinghai.file-storage.provider:}' == 'oss'")
+            + "or '${dinghai.file-storage.provider:}' == 'aliyun-oss'")
     @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true",
             matchIfMissing = true)
     public ProviderFileReadCacheCleaner providerFileReadCacheCleaner(ProviderFileReadCache cache,
@@ -425,13 +425,13 @@ public class FileStorageAutoConfiguration {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-14
      */
-    private FileStorage ossStorage(FileStorageProperties properties, String bucket, OSS client) {
+    private FileStorage aliyunOssStorage(FileStorageProperties properties, String bucket,
+                                         OSSClient client) {
         try {
-            OssStorageConfiguration configuration = ossConfiguration(properties);
-            return new OssFileStorageAdapter(client, bucket, configuration.endpoint(),
-                    configuration.accessKey());
+            AliyunOssStorageConfiguration configuration = aliyunOssConfiguration(properties);
+            return new AliyunOssFileStorageAdapter(client, bucket);
         } catch (IllegalArgumentException exception) {
-            throw invalidConfiguration("oss configuration is incomplete", exception);
+            throw invalidConfiguration("aliyun oss configuration is incomplete", exception);
         }
     }
 
@@ -443,10 +443,11 @@ public class FileStorageAutoConfiguration {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-14
      */
-    private OssStorageConfiguration ossConfiguration(FileStorageProperties properties) {
-        FileStorageProperties.Oss oss = properties.getOss();
-        return new OssStorageConfiguration(oss.getEndpoint(), properties.getBucket(), oss.getAccessKey(),
-                oss.getSecretKey(), oss.getConnectTimeout(), oss.getReadTimeout(), oss.getWriteTimeout());
+    private AliyunOssStorageConfiguration aliyunOssConfiguration(FileStorageProperties properties) {
+        FileStorageProperties.AliyunOss aliyunOss = properties.getAliyunOss();
+        return new AliyunOssStorageConfiguration(aliyunOss.getRegion(), properties.getBucket(),
+                aliyunOss.getConnectTimeout(), aliyunOss.getReadTimeout(),
+                aliyunOss.getWriteTimeout());
     }
 
     /**

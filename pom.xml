@@ -51,7 +51,7 @@
         <junit.version>4.13.2</junit.version>
         <mockito.version>4.11.0</mockito.version>
         <minio.version>8.5.17</minio.version>
-        <aliyun-oss.version>3.17.4</aliyun-oss.version>
+        <aliyun-oss-v2.version>0.5.1</aliyun-oss-v2.version>
         <tink.version>1.13.0</tink.version>
 
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
@@ -93,9 +93,9 @@
                 <version>${minio.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.aliyun.oss</groupId>
-                <artifactId>aliyun-sdk-oss</artifactId>
-                <version>${aliyun-oss.version}</version>
+                <groupId>com.aliyun</groupId>
+                <artifactId>alibabacloud-oss-v2</artifactId>
+                <version>${aliyun-oss-v2.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.google.crypto.tink</groupId>

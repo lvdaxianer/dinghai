@@ -106,6 +106,7 @@ public class FileStorageWebControllerTest {
         mockMvc.perform(put(upload.url()).contentType(MediaType.TEXT_PLAIN).content("new content"))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", "/files/read/key/preview/uploads/new.txt"))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.key.value").value("uploads/new.txt"))
                 .andExpect(jsonPath("$.contentLength").value(11))
                 .andExpect(jsonPath("$.contentType").value("text/plain"))
