@@ -12,5 +12,7 @@ public enum FileStorageProvider {
     /** MinIO 对象存储后端。 */
     MINIO,
     /** RustFS 对象存储后端。 */
-    RUSTFS
+    RUSTFS,
+    /** 阿里云 OSS 对象存储后端。 */
+    OSS
 }

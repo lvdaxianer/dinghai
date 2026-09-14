@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 中文
 
-统一文件存储适配层，业务代码只依赖 `FileStorage` 契约即可切换本地磁盘、MinIO 与 RustFS 后端。Local 支持 `1/1/1/1.png`、中文目录等对象 key，并通过临时文件和流式读写避免把文件整体载入内存。
+统一文件存储适配层，业务代码只依赖 `FileStorage` 契约即可切换本地磁盘、MinIO、RustFS 与阿里云 OSS 后端。Local 支持 `1/1/1/1.png`、中文目录等对象 key，并通过临时文件和流式读写避免把文件整体载入内存。
 
 要求：Java 21+，Spring Boot 3.x。
 
@@ -14,6 +14,7 @@
 | `dinghai-file-storage-local` | 本地磁盘适配器，支持中文及多级对象 key、HMAC 预签名和流式读写 |
 | `dinghai-file-storage-minio` | 固定 bucket 的 MinIO 适配器与原生预签名能力 |
 | `dinghai-file-storage-rustfs` | 固定 bucket 的 RustFS S3 兼容适配器与原生预签名能力 |
+| `dinghai-file-storage-oss` | 固定 bucket 的阿里云 OSS 原生 SDK 适配器与原生预签名能力 |
 | `dinghai-file-storage-spring-boot-starter` | 按 provider 自动装配文件存储，并提供本地 Web 预签名端点 |
 
 `benchmark` 模块仅用于开发验证，不发布（见文末「基准测试」）。
@@ -55,9 +56,9 @@ dinghai:
 
 | 配置键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `provider` | `local` / `minio` / `rustfs` | 无（必填） | 存储后端，三选一。缺失或非法直接启动失败，**不做任何自动探测或回退** |
+| `provider` | `local` / `minio` / `rustfs` / `oss` | 无（必填） | 存储后端，四选一。缺失或非法直接启动失败，**不做任何自动探测或回退** |
 | `bucket` | `String` | 无（必填） | 所有后端共用的逻辑桶名。不允许 `.`、`..`、`/`、`\` 和控制字符；Local 下映射为 `root/<bucket>/` 单层目录 |
-| `storage-alias` | `String` | 无（必填） | 不随物理后端变动的逻辑存储别名，参与稳定文件 ID 计算和缓存文件名摘要。从 Local 迁移到 MinIO 或 RustFS 时保持别名不变，已签发的稳定 ID 才能继续有效 |
+| `storage-alias` | `String` | 无（必填） | 不随物理后端变动的逻辑存储别名，参与稳定文件 ID 计算和缓存文件名摘要。从 Local 迁移到 MinIO、RustFS 或 OSS 时保持别名不变，已签发的稳定 ID 才能继续有效 |
 
 ### local（Local 后端）
 
@@ -91,11 +92,24 @@ MinIO 适配器**不会自动创建或修改 bucket**，需事先自行建好。
 
 RustFS 使用 S3 兼容 API；其 bucket 应保持私有并由运维预先创建。适配器**不会自动创建或修改 bucket 策略**，上传、下载预签名由 RustFS 原生签发。
 
+### oss（阿里云 OSS 后端）
+
+| 配置键 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `oss.endpoint` | `String` | 无（provider=oss 时必填） | 完整 OSS 服务 endpoint，例如 `https://oss-cn-hangzhou.aliyuncs.com` |
+| `oss.access-key` | `String` | 无（必填） | 固定 AccessKey，应由部署环境注入 |
+| `oss.secret-key` | `String` | 无（必填） | 固定 AccessKeySecret，应由部署环境注入 |
+| `oss.connect-timeout` | `Duration` | `10s` | SDK 连接超时，必须为正 |
+| `oss.read-timeout` | `Duration` | `10s` | SDK 套接字读取超时，必须为正 |
+| `oss.write-timeout` | `Duration` | `10s` | SDK 整体请求超时，必须为正 |
+
+OSS 使用原生 Java SDK；bucket 应保持私有并由运维预先创建。适配器**不会创建 bucket，也不会修改 ACL、CORS 或 bucket policy**；上传使用原生 POST policy，下载使用原生 GET 预签名。本次仅支持固定 AccessKey/AccessKeySecret，**不支持 STS 临时凭证**。
+
 ### security（安全）
 
 | 配置键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `security.signing-key` | `String` | 无（仅 provider=local 时必填） | 本地预签名 URL 的 HMAC-SHA-256 密钥，按 UTF-8 字节直接使用，缺失时启动失败。MinIO 与 RustFS 后端不使用（走原生预签名） |
+| `security.signing-key` | `String` | 无（仅 provider=local 时必填） | 本地预签名 URL 的 HMAC-SHA-256 密钥，按 UTF-8 字节直接使用，缺失时启动失败。MinIO、RustFS 与 OSS 后端不使用（走原生预签名） |
 | `security.stable-id-key` | `String` | 无（**所有后端必填**） | 稳定文件 ID 的密钥材料，UTF-8 编码后至少 32 字节；经 SHA-512 派生为 64 字节 AES-SIV 密钥。缺失或过短时启动失败。轮换该密钥会使全部旧稳定 ID 失效 |
 | `security.maximum-presign-expiry` | `Duration` | `1h` | 本地预签名 URL 的最大有效期，签发与校验都强制执行，必须为正 |
 
@@ -116,7 +130,7 @@ RustFS 使用 S3 兼容 API；其 bucket 应保持私有并由运维预先创建
 
 | 配置键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `cache.enabled` | `boolean` | 见说明 | MinIO 与 RustFS 后端缺省开启，显式 `false` 关闭；Local 后端不使用二级缓存，显式 `true` 会在启动时失败（请删除旧配置） |
+| `cache.enabled` | `boolean` | 见说明 | MinIO、RustFS 与 OSS 后端缺省开启，显式 `false` 关闭；Local 后端不使用二级缓存，显式 `true` 会在启动时失败（请删除旧配置） |
 | `cache.root` | `Path` | `${java.io.tmpdir}/dinghai-file-storage-cache` | 缓存根目录，为 null 或创建失败时启动失败。**生产环境应显式配置持久目录**，默认位置在系统临时目录下，可能被操作系统清理 |
 | `cache.max-object-size` | `long`（字节） | `50MB` | 超过该大小的对象不做异步落盘，读请求直接直通远端 |
 | `cache.idle-ttl` | `Duration` | `7d` | 空闲副本保留时长，按每个副本 sidecar 文件记录的最近访问时间判定 |
@@ -208,6 +222,7 @@ dinghai:
 
 - **Local 后端**：组件自实现的 HMAC-SHA-256 预签名。签名 URL 携带 `expires`（Unix 秒）、`signature`（Base64URL）等查询参数，上传签名还可绑定 `contentType`、`maxSize`、`cacheControl`；下载签名绑定 `inline` 或 `attachment` 响应模式。有效期受 `security.maximum-presign-expiry` 限制。
 - **MinIO / RustFS 后端**：使用各自 S3 兼容服务原生预签名（PostPolicy 上传、`getPresignedObjectUrl` 下载）。本地签名校验仅 Local 适配器支持，对非 Local 后端走本地签名 URL 会抛 `INVALID_PRESIGN`。
+- **OSS 后端**：使用阿里云 OSS 原生预签名（POST policy 上传、GET 预签名下载）；仅支持固定 AccessKey/AccessKeySecret，不支持 STS 临时凭证。本地签名校验仅 Local 适配器支持，对 OSS 走本地签名 URL 会抛 `INVALID_PRESIGN`。
 - **直接上传**：无签名上传默认拒绝；必须同时满足 `web.direct-access=true` 且宿主提供 `FileStorageAccessPolicy` Bean 并对 UPLOAD 返回允许。Web 下载、预览和读取不要求组件凭证，但受读取并发限制保护。
 - 所有 Bean 均带 `@ConditionalOnMissingBean`，宿主可替换默认实现（包括 `FileStorage` 本身）。
 
@@ -228,13 +243,13 @@ WebTransferRateLimitKeyResolver webTransferRateLimitKeyResolver() {
 
 稳定 ID 是私有对象的持久读取地址（`/files/read/v1/{id}` 系列）。ID 由 AES-SIV（Tink）对长度前缀的 `storage-alias + object key` 做确定性认证加密得到，输出 `v1.` 前缀的 Base64URL 字符串。因此：
 
-- 同一对象跨 Local / MinIO / RustFS 迁移后 ID 不变（前提：`storage-alias` 不变）；
+- 同一对象跨 Local / MinIO / RustFS / OSS 迁移后 ID 不变（前提：`storage-alias` 不变）；
 - 轮换 `security.stable-id-key` 会使全部旧 ID 失效；
 - 该路由**不执行组件内用户鉴权**，嵌入方负责浏览器前的权限控制。
 
 ## 读取缓存行为
 
-MinIO 与 RustFS 默认启用经远端 `stat` 校验的二级磁盘读取缓存；Local 不创建二级缓存或清理器：
+MinIO、RustFS 与 OSS 默认启用经远端 `stat` 校验的二级磁盘读取缓存；Local 不创建二级缓存或清理器：
 
 1. 每次读先 `stat` 远端元数据；本地副本的 ETag / 长度 / 修改时间与远端一致才命中，命中后刷新最近访问时间；
 2. 未命中且对象不超过 `cache.max-object-size` 时，当前请求直接流式读取远端，另开第二条流异步落盘（临时文件 + 原子移动发布）；

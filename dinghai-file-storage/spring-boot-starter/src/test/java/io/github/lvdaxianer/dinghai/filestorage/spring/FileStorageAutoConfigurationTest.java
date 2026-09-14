@@ -1,10 +1,12 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
+import com.aliyun.oss.OSS;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
+import io.github.lvdaxianer.dinghai.filestorage.oss.OssFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
@@ -108,6 +110,25 @@ public class FileStorageAutoConfigurationTest {
                 });
     }
 
+    /**
+     * oss provider 应仅注册 OSS 存储主 Bean 和受 Spring 管理的 SDK client。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    @Test
+    public void shouldRegisterOnlyOssFileStorageForOssProvider() {
+        contextRunner.withPropertyValues(ossProperties())
+                .run(context -> {
+                    assertThat(context).hasSingleBean(FileStorage.class);
+                    assertThat(context).hasSingleBean(OssFileStorageAdapter.class);
+                    assertThat(context).hasSingleBean(OSS.class);
+                    assertThat(context).doesNotHaveBean(LocalFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(RustfsFileStorageAdapter.class);
+                });
+    }
+
     /** MinIO provider 也应注册后端中立的受控读取端点和专用执行器。 */
     @Test
     public void shouldRegisterWebReadEndpointForMinioProvider() {
@@ -140,6 +161,21 @@ public class FileStorageAutoConfigurationTest {
     @Test
     public void shouldEnableDiskCacheByDefaultForRustfsProvider() {
         contextRunner.withPropertyValues(rustfsProperties())
+                .run(context -> {
+                    assertThat(context).hasSingleBean(ProviderFileReadCache.class);
+                    assertThat(context).hasSingleBean(ProviderFileReadCacheCleaner.class);
+                });
+    }
+
+    /**
+     * OSS 作为远端 provider 默认启用二级磁盘缓存及其清理器。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    @Test
+    public void shouldEnableDiskCacheByDefaultForOssProvider() {
+        contextRunner.withPropertyValues(ossProperties())
                 .run(context -> {
                     assertThat(context).hasSingleBean(ProviderFileReadCache.class);
                     assertThat(context).hasSingleBean(ProviderFileReadCacheCleaner.class);
@@ -180,6 +216,22 @@ public class FileStorageAutoConfigurationTest {
     @Test
     public void shouldDisableDiskCacheForRustfsProviderWhenExplicitlyDisabled() {
         contextRunner.withPropertyValues(rustfsProperties())
+                .withPropertyValues("dinghai.file-storage.cache.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(ProviderFileReadCache.class);
+                    assertThat(context).doesNotHaveBean(ProviderFileReadCacheCleaner.class);
+                });
+    }
+
+    /**
+     * OSS 显式关闭缓存后不得创建二级缓存或清理器。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    @Test
+    public void shouldDisableDiskCacheForOssProviderWhenExplicitlyDisabled() {
+        contextRunner.withPropertyValues(ossProperties())
                 .withPropertyValues("dinghai.file-storage.cache.enabled=false")
                 .run(context -> {
                     assertThat(context).doesNotHaveBean(ProviderFileReadCache.class);
@@ -275,6 +327,22 @@ public class FileStorageAutoConfigurationTest {
     public void shouldFailFastWhenSelectedRustfsProviderIsIncomplete() {
         contextRunner.withPropertyValues(rustfsPropertiesWithoutEndpoint())
                 .run(context -> assertThat(context).hasFailed());
+    }
+
+    /**
+     * 被选中的 OSS provider 缺少 endpoint 时必须以安全配置错误失败。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    @Test
+    public void shouldFailFastWhenSelectedOssProviderIsIncomplete() {
+        contextRunner.withPropertyValues(ossPropertiesWithoutEndpoint())
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining("oss configuration");
+                    assertThat(context.getStartupFailure().getMessage()).doesNotContain("test-secret-key");
+                });
     }
 
     /**
@@ -556,6 +624,52 @@ public class FileStorageAutoConfigurationTest {
                 "dinghai.file-storage.rustfs.endpoint=",
                 "dinghai.file-storage.rustfs.access-key=test-access-key",
                 "dinghai.file-storage.rustfs.secret-key=test-secret-key",
+                "dinghai.file-storage.storage-alias=documents",
+                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
+                "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
+                "dinghai.file-storage.migration.import-root=" + migrationRoot("import"),
+                "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
+                "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
+        };
+    }
+
+    /**
+     * 返回 OSS provider 所需的完整属性。
+     *
+     * @return OSS provider 属性
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    private String[] ossProperties() {
+        return new String[]{
+                "dinghai.file-storage.provider=oss",
+                "dinghai.file-storage.bucket=test-bucket",
+                "dinghai.file-storage.oss.endpoint=https://oss-cn-hangzhou.aliyuncs.com",
+                "dinghai.file-storage.oss.access-key=test-access-key",
+                "dinghai.file-storage.oss.secret-key=test-secret-key",
+                "dinghai.file-storage.storage-alias=documents",
+                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
+                "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
+                "dinghai.file-storage.migration.import-root=" + migrationRoot("import"),
+                "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
+                "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
+        };
+    }
+
+    /**
+     * 返回缺少 OSS endpoint 的属性。
+     *
+     * @return 不完整 OSS provider 属性
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    private String[] ossPropertiesWithoutEndpoint() {
+        return new String[]{
+                "dinghai.file-storage.provider=oss",
+                "dinghai.file-storage.bucket=test-bucket",
+                "dinghai.file-storage.oss.endpoint=",
+                "dinghai.file-storage.oss.access-key=test-access-key",
+                "dinghai.file-storage.oss.secret-key=test-secret-key",
                 "dinghai.file-storage.storage-alias=documents",
                 "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
                 "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),

@@ -30,6 +30,8 @@ public class FileStorageProperties {
     private final Minio minio = new Minio();
     /** RustFS 后端配置。 */
     private final Rustfs rustfs = new Rustfs();
+    /** 阿里云 OSS 后端配置。 */
+    private final Oss oss = new Oss();
     /** 上传策略配置。 */
     private final Upload upload = new Upload();
     /** 本地签名配置。 */
@@ -138,6 +140,17 @@ public class FileStorageProperties {
      */
     public Rustfs getRustfs() {
         return rustfs;
+    }
+
+    /**
+     * 获取阿里云 OSS 后端配置。
+     *
+     * @return 阿里云 OSS 后端配置
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    public Oss getOss() {
+        return oss;
     }
 
     /**
@@ -388,6 +401,15 @@ public class FileStorageProperties {
      * @date 2026-09-13
      */
     public static class Rustfs extends Minio {
+    }
+
+    /**
+     * 阿里云 OSS 后端属性，字段对应固定 AccessKey/AccessKeySecret 连接配置。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    public static class Oss extends Minio {
     }
 
     /**
