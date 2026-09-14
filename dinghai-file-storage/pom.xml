@@ -20,6 +20,7 @@
         <module>local</module>
         <module>minio</module>
         <module>rustfs</module>
+        <module>oss</module>
         <module>spring-boot-starter</module>
         <module>benchmark</module>
     </modules>
