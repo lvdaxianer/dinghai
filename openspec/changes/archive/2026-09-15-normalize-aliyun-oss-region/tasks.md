@@ -5,4 +5,4 @@
 
 ## 2. Delivery
 
-- [ ] 2.1 Sync the approved provider specification, commit the fix with OpenSpec traceability, merge it into `main`, archive the change, and verify a clean integration worktree.
+- [x] 2.1 Sync the approved provider specification, commit the fix with OpenSpec traceability, merge it into `main`, archive the change, and verify a clean integration worktree.
