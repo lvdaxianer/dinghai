@@ -12,6 +12,8 @@ import java.time.Duration;
  */
 public final class AliyunOssClientFactory {
 
+    /** 阿里云 OSS 控制台地域前缀。 */
+    private static final String CONSOLE_REGION_PREFIX = "oss-";
     /** AccessKey 环境变量名称。 */
     public static final String ACCESS_KEY_ID_ENVIRONMENT = "OSS_ACCESS_KEY_ID";
     /** AccessKeySecret 环境变量名称。 */
@@ -30,12 +32,25 @@ public final class AliyunOssClientFactory {
      * @return 具有明确网络超时的 OSS SDK 客户端
      */
     public static OSSClient create(AliyunOssStorageConfiguration configuration) {
-        return OSSClient.newBuilder().region(configuration.region())
+        return OSSClient.newBuilder().region(sdkRegion(configuration.region()))
                 .credentialsProvider(new StaticCredentialsProvider(requiredEnvironment(
                         ACCESS_KEY_ID_ENVIRONMENT), requiredEnvironment(ACCESS_KEY_SECRET_ENVIRONMENT)))
                 .connectTimeout(configuration.connectTimeout())
                 .readWriteTimeout(ioTimeout(configuration.readTimeout(), configuration.writeTimeout()))
                 .build();
+    }
+
+    /**
+     * 将阿里云控制台地域 ID 转换为 OSS V2 SDK 所需的地域格式。
+     *
+     * @param region OSS 配置地域 ID
+     * @return OSS V2 SDK 使用的地域 ID
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    static String sdkRegion(String region) {
+        return region.startsWith(CONSOLE_REGION_PREFIX)
+                ? region.substring(CONSOLE_REGION_PREFIX.length()) : region;
     }
 
     /**
