@@ -5,6 +5,7 @@ import com.aliyun.sdk.service.oss2.PresignOptions;
 import com.aliyun.sdk.service.oss2.exceptions.ServiceException;
 import com.aliyun.sdk.service.oss2.models.GetObjectRequest;
 import com.aliyun.sdk.service.oss2.models.HeadObjectResult;
+import com.aliyun.sdk.service.oss2.models.ListObjectsV2Request;
 import com.aliyun.sdk.service.oss2.models.PresignResult;
 import com.aliyun.sdk.service.oss2.models.PutObjectRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
@@ -25,6 +26,7 @@ import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
@@ -39,6 +41,23 @@ import static org.mockito.Mockito.when;
  * @date 2026-09-14
  */
 public class AliyunOssFileStorageAdapterTest {
+
+    /** 阿里云 OSS 控制台地域 ID。 */
+    private static final String CONSOLE_REGION = "oss-cn-beijing";
+    /** OSS V2 SDK 地域 ID。 */
+    private static final String SDK_REGION = "cn-beijing";
+
+    /** 验证控制台地域 ID 转换为 OSS V2 SDK 所需格式。 */
+    @Test
+    public void normalizesAliyunConsoleRegionForOssV2Sdk() {
+        assertEquals(SDK_REGION, AliyunOssClientFactory.sdkRegion(CONSOLE_REGION));
+    }
+
+    /** 验证已是 SDK 格式的地域 ID 保持不变。 */
+    @Test
+    public void preservesOssV2SdkRegion() {
+        assertEquals(SDK_REGION, AliyunOssClientFactory.sdkRegion(SDK_REGION));
+    }
 
     /** 验证 V2 PUT 预签名返回必要请求头且不返回 POST 表单字段。 */
     @Test
@@ -98,6 +117,31 @@ public class AliyunOssFileStorageAdapterTest {
         assertEquals("uploads", request.getValue().bucket());
         assertEquals(key.value(), request.getValue().key());
         assertEquals(3L, request.getValue().body().getLength().longValue());
+    }
+
+    /**
+     * 验证首个列表请求不向 OSS V2 builder 传递空 continuation token。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void omitsContinuationTokenFromFirstV2ListRequest() {
+        OSSClient client = mock(OSSClient.class);
+        IllegalStateException expected = new IllegalStateException("captured list request");
+        when(client.listObjectsV2(any())).thenThrow(expected);
+
+        try (var objects = adapter(client).list()) {
+            objects.findFirst();
+            fail("expected captured list request");
+        } catch (IllegalStateException actual) {
+            assertEquals(expected, actual);
+        }
+
+        ArgumentCaptor<ListObjectsV2Request> request = ArgumentCaptor.forClass(ListObjectsV2Request.class);
+        verify(client).listObjectsV2(request.capture());
+        assertEquals("uploads", request.getValue().bucket());
+        assertNull(request.getValue().continuationToken());
     }
 
     /** 验证服务端对象缺失映射为统一空结果。 */

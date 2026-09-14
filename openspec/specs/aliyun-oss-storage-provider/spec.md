@@ -12,7 +12,8 @@
 组件 SHALL 在独立的 `dinghai-file-storage-aliyun-oss` 模块中使用
 `com.aliyun:alibabacloud-oss-v2:0.5.1`，对公共
 `dinghai.file-storage.bucket` 指定的固定 bucket 实现既有 `FileStorage` 契约。适配器 MUST
-支持流式 put、get、stat、惰性 list、幂等 delete、原生 PUT 预签名上传和原生 GET 预签名下载，
+支持流式 put、get、stat、惰性 list、幂等 delete、原生 PUT 预签名上传和原生 GET 预签名下载，首次
+V2 对象列举请求 MUST 不传递 continuation token，
 且不得自动创建 bucket 或改变 bucket 策略。项目层模块、包和类型名称 MUST 明确包含
 `aliyun-oss` / `aliyunoss`，不得使用泛化的项目 provider 标识 `oss`。
 
@@ -20,6 +21,11 @@
 
 - **WHEN** 调用方使用预先存在的私有 OSS bucket 写入、查询、读取、枚举和删除对象
 - **THEN** 所有 SDK 请求 SHALL 针对配置的公共 bucket 执行，并返回不含 OSS SDK 类型的统一对象和元数据
+
+#### Scenario: 首次列举对象
+
+- **WHEN** 调用方首次列举固定 bucket 中的对象
+- **THEN** 适配器 SHALL 使用不含 continuation token 的 V2 请求，避免向 SDK builder 传递空值
 
 #### Scenario: 删除缺失 OSS 对象
 
@@ -33,7 +39,7 @@
 
 ### Requirement: OSS 配置与稳定错误边界
 
-OSS 连接配置 SHALL 仅包含 region、固定 bucket 及连接、读取、写入超时。AccessKey MUST 仅从
+OSS 连接配置 SHALL 接受阿里云控制台地域 ID（例如 `oss-cn-beijing`），并在创建 OSS V2 SDK client 的边界将其规范化为 SDK 所需的地域标识（例如 `cn-beijing`）。配置 SHALL 仅包含 region、固定 bucket 及连接、读取、写入超时。AccessKey MUST 仅从
 `OSS_ACCESS_KEY_ID` 环境变量读取，AccessKeySecret MUST 仅从 `OSS_ACCESS_KEY_SECRET` 环境变量读取；
 region、bucket、凭据和每个超时 MUST 在构造配置时校验为非空或正值。OSS SDK 的认证、权限、对象缺失、
 超时、服务端和其他错误 MUST 映射为 `FileStorageErrorCode`，且异常消息不得回显 region、AccessKey、

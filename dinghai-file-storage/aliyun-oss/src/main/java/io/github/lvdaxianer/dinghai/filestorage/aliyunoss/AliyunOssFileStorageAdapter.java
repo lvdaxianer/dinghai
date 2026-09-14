@@ -251,12 +251,29 @@ public final class AliyunOssFileStorageAdapter implements FileStorage {
 
         /** 加载下一页并防止不可推进的 continuation token 死循环。 */
         private void loadPage() {
-            ListObjectsV2Result page = client.listObjectsV2(ListObjectsV2Request.newBuilder().bucket(bucket)
-                    .maxKeys(LIST_PAGE_SIZE).continuationToken(token).build());
+            ListObjectsV2Result page = client.listObjectsV2(listRequest());
             current = page.contents().iterator();
             String nextToken = page.nextContinuationToken();
             finished = !Boolean.TRUE.equals(page.isTruncated()) || nextToken == null || nextToken.equals(token);
             token = nextToken;
+        }
+
+        /**
+         * 构建下一页请求，首个请求不携带 continuation token。
+         *
+         * @return 已设置固定 bucket 与页大小的列表请求
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        private ListObjectsV2Request listRequest() {
+            ListObjectsV2Request.Builder builder = ListObjectsV2Request.newBuilder().bucket(bucket)
+                    .maxKeys(LIST_PAGE_SIZE);
+            if (token != null) {
+                // 后续页必须携带 OSS 返回的 continuation token。
+                return builder.continuationToken(token).build();
+            }
+            // 首次列举请求不向 SDK builder 传入空 token。
+            return builder.build();
         }
     }
 }
