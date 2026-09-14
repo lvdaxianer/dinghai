@@ -2,7 +2,7 @@
 
 ## Purpose
 
-统一文件存储适配层为本地磁盘、MinIO 和 RustFS 提供后端无关的对象契约、持久化安全边界与 Spring Boot provider 路由。
+统一文件存储适配层为本地磁盘、MinIO、RustFS 和 OSS 提供后端无关的对象契约、持久化安全边界与 Spring Boot provider 路由。
 
 ## Requirements
 
@@ -85,7 +85,7 @@ bucket、凭据或超时配置时 MUST 在启动时失败。SDK 的认证、服�
 - **THEN** 操作返回可分类的存储失败，组件不会自动创建 bucket
 
 ### Requirement: 可扩展的后端选择
-Spring Boot Starter SHALL 根据 `dinghai.file-storage.provider` 在 `local`、`minio` 与 `rustfs` 中选择且仅选择一个主 `FileStorage` Bean。每个 provider MUST 配置公共 bucket；未知 provider、公共 bucket
+Spring Boot Starter SHALL 根据 `dinghai.file-storage.provider` 在 `local`、`minio`、`rustfs` 与 `oss` 中选择且仅选择一个主 `FileStorage` Bean。每个 provider MUST 配置公共 bucket；未知 provider、公共 bucket
 不安全或所选 provider 的配置不完整时 MUST fail fast；组件 MUST NOT 在远程 provider 失败时自动写入本地磁盘。
 
 #### Scenario: 选择本地后端
@@ -96,15 +96,23 @@ Spring Boot Starter SHALL 根据 `dinghai.file-storage.provider` 在 `local`、`
 - **WHEN** provider 为 `rustfs`、RustFS endpoint、凭据、超时和公共 bucket 有效
 - **THEN** 容器中注册 RustFS `FileStorage` 主 Bean，且 Local 和 MinIO 适配器不参与装配
 
+#### Scenario: 选择 OSS 后端
+- **WHEN** provider 为 `oss`、完整 OSS endpoint、凭据、超时和公共 bucket 有效
+- **THEN** 容器中注册 OSS `FileStorage` 主 Bean，且其他 provider 的适配器不参与装配
+
 #### Scenario: 拒绝未配置 provider
 - **WHEN** provider 值未知、公共 bucket 缺失/不安全，或所选 provider 的必需属性缺失
 - **THEN** 应用在启动期间以明确配置错误失败，而不是使用隐式开发默认值
 
 ### Requirement: Remote provider read cache
-The Spring Boot starter SHALL enable the bounded disk read cache by default for every non-Local provider, currently MinIO and RustFS, unless `dinghai.file-storage.cache.enabled=false`. It SHALL reject a Local configuration that explicitly enables the second-level cache and SHALL require a cache root for every enabled remote-provider cache.
+The Spring Boot starter SHALL enable the bounded disk read cache by default for every non-Local provider, currently MinIO, RustFS, and OSS, unless `dinghai.file-storage.cache.enabled=false`. It SHALL reject a Local configuration that explicitly enables the second-level cache and SHALL require a cache root for every enabled remote-provider cache.
 
 #### Scenario: RustFS uses the default cache
 - **WHEN** `provider: rustfs` is configured and `cache.enabled` is omitted
+- **THEN** the starter SHALL create the same remote read-cache layer used by MinIO
+
+#### Scenario: OSS uses the default cache
+- **WHEN** `provider: oss` is configured and `cache.enabled` is omitted
 - **THEN** the starter SHALL create the same remote read-cache layer used by MinIO
 
 #### Scenario: Local cache is explicitly enabled
