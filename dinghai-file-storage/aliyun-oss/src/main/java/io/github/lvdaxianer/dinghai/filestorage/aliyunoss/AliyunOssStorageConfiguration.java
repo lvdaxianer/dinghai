@@ -1,4 +1,4 @@
-package io.github.lvdaxianer.dinghai.filestorage.oss;
+package io.github.lvdaxianer.dinghai.filestorage.aliyunoss;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -9,8 +9,8 @@ import java.util.Objects;
  * @author lvdaxianer@yeah.net
  * @date 2026-09-14
  */
-public record OssStorageConfiguration(String endpoint, String bucket, String accessKey,
-                                      String secretKey, Duration connectTimeout,
+public record AliyunOssStorageConfiguration(String region, String bucket,
+                                      Duration connectTimeout,
                                       Duration readTimeout, Duration writeTimeout) {
     /** 默认网络超时。 */
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
@@ -18,11 +18,9 @@ public record OssStorageConfiguration(String endpoint, String bucket, String acc
     /**
      * 创建并校验 OSS 连接配置。
      */
-    public OssStorageConfiguration {
-        endpoint = requireText(endpoint, "endpoint");
+    public AliyunOssStorageConfiguration {
+        region = requireText(region, "region");
         bucket = requireText(bucket, "bucket");
-        accessKey = requireText(accessKey, "accessKey");
-        secretKey = requireText(secretKey, "secretKey");
         connectTimeout = requirePositive(connectTimeout, "connectTimeout");
         readTimeout = requirePositive(readTimeout, "readTimeout");
         writeTimeout = requirePositive(writeTimeout, "writeTimeout");
@@ -31,14 +29,11 @@ public record OssStorageConfiguration(String endpoint, String bucket, String acc
     /**
      * 使用默认网络超时创建配置。
      *
-     * @param endpoint OSS 服务 endpoint
+     * @param region OSS 地域 ID
      * @param bucket 已预先创建的 bucket
-     * @param accessKey 固定 AccessKey
-     * @param secretKey 固定 AccessKeySecret
      */
-    public OssStorageConfiguration(String endpoint, String bucket, String accessKey,
-                                   String secretKey) {
-        this(endpoint, bucket, accessKey, secretKey, DEFAULT_TIMEOUT, DEFAULT_TIMEOUT,
+    public AliyunOssStorageConfiguration(String region, String bucket) {
+        this(region, bucket, DEFAULT_TIMEOUT, DEFAULT_TIMEOUT,
                 DEFAULT_TIMEOUT);
     }
 

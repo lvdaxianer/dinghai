@@ -197,7 +197,7 @@ public class FileStorageWebController {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    @PutMapping("/upload/{*key}")
+    @PutMapping(value = "/upload/{*key}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<WebUploadResult> upload(@PathVariable String key,
                                        @RequestParam(required = false) Long expires,
                                        @RequestParam(required = false) String contentType,

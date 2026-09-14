@@ -10,9 +10,9 @@
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
-    <artifactId>dinghai-file-storage-oss</artifactId>
+    <artifactId>dinghai-file-storage-aliyun-oss</artifactId>
     <packaging>jar</packaging>
-    <name>dinghai-file-storage-oss</name>
+    <name>dinghai-file-storage-aliyun-oss</name>
     <description>文件存储阿里云 OSS 适配器</description>
 
     <dependencies>
@@ -22,8 +22,8 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>com.aliyun.oss</groupId>
-            <artifactId>aliyun-sdk-oss</artifactId>
+            <groupId>com.aliyun</groupId>
+            <artifactId>alibabacloud-oss-v2</artifactId>
         </dependency>
         <dependency>
             <groupId>junit</groupId>

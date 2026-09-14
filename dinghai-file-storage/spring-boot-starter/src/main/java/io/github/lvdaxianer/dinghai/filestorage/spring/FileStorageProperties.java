@@ -31,7 +31,7 @@ public class FileStorageProperties {
     /** RustFS 后端配置。 */
     private final Rustfs rustfs = new Rustfs();
     /** 阿里云 OSS 后端配置。 */
-    private final Oss oss = new Oss();
+    private final AliyunOss aliyunOss = new AliyunOss();
     /** 上传策略配置。 */
     private final Upload upload = new Upload();
     /** 本地签名配置。 */
@@ -149,8 +149,8 @@ public class FileStorageProperties {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-14
      */
-    public Oss getOss() {
-        return oss;
+    public AliyunOss getAliyunOss() {
+        return aliyunOss;
     }
 
     /**
@@ -404,12 +404,108 @@ public class FileStorageProperties {
     }
 
     /**
-     * 阿里云 OSS 后端属性，字段对应固定 AccessKey/AccessKeySecret 连接配置。
+     * 阿里云 OSS 后端属性，凭证仅由部署环境变量提供。
      *
      * @author lvdaxianer@yeah.net
      * @date 2026-09-14
      */
-    public static class Oss extends Minio {
+    public static class AliyunOss {
+        /** OSS 地域 ID。 */
+        private String region;
+        /** 连接超时。 */
+        private Duration connectTimeout = Duration.ofSeconds(10L);
+        /** 读取超时。 */
+        private Duration readTimeout = Duration.ofSeconds(10L);
+        /** 写入超时。 */
+        private Duration writeTimeout = Duration.ofSeconds(10L);
+
+        /**
+         * 获取 OSS 地域 ID。
+         *
+         * @return OSS 地域 ID
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-14
+         */
+        public String getRegion() {
+            return region;
+        }
+
+        /**
+         * 设置 OSS 地域 ID。
+         *
+         * @param region OSS 地域 ID
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-14
+         */
+        public void setRegion(String region) {
+            this.region = region;
+        }
+
+        /**
+         * 获取连接超时。
+         *
+         * @return 连接超时
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-14
+         */
+        public Duration getConnectTimeout() {
+            return connectTimeout;
+        }
+
+        /**
+         * 设置连接超时。
+         *
+         * @param connectTimeout 连接超时
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-14
+         */
+        public void setConnectTimeout(Duration connectTimeout) {
+            this.connectTimeout = connectTimeout;
+        }
+
+        /**
+         * 获取读取超时。
+         *
+         * @return 读取超时
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-14
+         */
+        public Duration getReadTimeout() {
+            return readTimeout;
+        }
+
+        /**
+         * 设置读取超时。
+         *
+         * @param readTimeout 读取超时
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-14
+         */
+        public void setReadTimeout(Duration readTimeout) {
+            this.readTimeout = readTimeout;
+        }
+
+        /**
+         * 获取写入超时。
+         *
+         * @return 写入超时
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-14
+         */
+        public Duration getWriteTimeout() {
+            return writeTimeout;
+        }
+
+        /**
+         * 设置写入超时。
+         *
+         * @param writeTimeout 写入超时
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-14
+         */
+        public void setWriteTimeout(Duration writeTimeout) {
+            this.writeTimeout = writeTimeout;
+        }
     }
 
     /**

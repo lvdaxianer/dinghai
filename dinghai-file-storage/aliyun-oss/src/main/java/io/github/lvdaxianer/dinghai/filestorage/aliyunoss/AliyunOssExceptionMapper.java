@@ -1,6 +1,6 @@
-package io.github.lvdaxianer.dinghai.filestorage.oss;
+package io.github.lvdaxianer.dinghai.filestorage.aliyunoss;
 
-import com.aliyun.oss.OSSException;
+import com.aliyun.sdk.service.oss2.exceptions.ServiceException;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import java.util.Set;
@@ -11,7 +11,7 @@ import java.util.Set;
  * @author lvdaxianer@yeah.net
  * @date 2026-09-14
  */
-final class OssExceptionMapper {
+final class AliyunOssExceptionMapper {
     /** 向调用方公开的稳定失败消息。 */
     private static final String OPERATION_FAILED_MESSAGE = "OSS operation failed";
     private static final Set<String> AUTHENTICATION_CODES = Set.of(
@@ -22,7 +22,7 @@ final class OssExceptionMapper {
     /**
      * 禁止实例化工具类。
      */
-    private OssExceptionMapper() {
+    private AliyunOssExceptionMapper() {
     }
 
     /**
@@ -31,8 +31,9 @@ final class OssExceptionMapper {
      * @param exception OSS 服务端异常
      * @return 对象缺失时返回 true
      */
-    static boolean isMissing(OSSException exception) {
-        return MISSING_CODES.contains(exception.getErrorCode());
+    static boolean isMissing(Exception exception) {
+        ServiceException serviceException = ServiceException.asCause(exception);
+        return serviceException != null && MISSING_CODES.contains(serviceException.errorCode());
     }
 
     /**
@@ -57,8 +58,8 @@ final class OssExceptionMapper {
      */
     private static FileStorageErrorCode errorCode(Exception exception) {
         // 认证或签名失败需要调用方修正凭据，其他失败按远端不可用处理。
-        if (exception instanceof OSSException response
-                && AUTHENTICATION_CODES.contains(response.getErrorCode())) {
+        ServiceException serviceException = ServiceException.asCause(exception);
+        if (serviceException != null && AUTHENTICATION_CODES.contains(serviceException.errorCode())) {
             return FileStorageErrorCode.AUTHENTICATION_FAILED;
         }
         return FileStorageErrorCode.STORAGE_UNAVAILABLE;
