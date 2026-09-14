@@ -1,12 +1,16 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.aliyun.oss.OSS;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioStorageConfiguration;
+import io.github.lvdaxianer.dinghai.filestorage.oss.OssClientFactory;
+import io.github.lvdaxianer.dinghai.filestorage.oss.OssFileStorageAdapter;
+import io.github.lvdaxianer.dinghai.filestorage.oss.OssStorageConfiguration;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsStorageConfiguration;
 import java.nio.charset.StandardCharsets;
@@ -47,7 +51,7 @@ public class FileStorageAutoConfiguration {
     private static final int WEB_EXECUTOR_SHUTDOWN_SECONDS = 30;
 
     /**
-     * 创建唯一的本地、MinIO 或 RustFS 文件存储 Bean。
+     * 创建唯一的本地、MinIO、RustFS 或 OSS 文件存储 Bean。
      *
      * @param properties 已绑定的文件存储属性
      * @return 已配置的文件存储实现
@@ -57,20 +61,79 @@ public class FileStorageAutoConfiguration {
     @Bean
     @Primary
     @ConditionalOnMissingBean(FileStorage.class)
-    public FileStorage fileStorage(FileStorageProperties properties, Environment environment) {
+    public FileStorage fileStorage(FileStorageProperties properties, Environment environment,
+                                   Optional<OSS> ossClient) {
         validateWebPathPrefix(properties.getWeb().getPathPrefix());
         String bucket = validateBucket(properties.getBucket());
+        return selectedFileStorage(properties, environment, bucket, ossClient);
+    }
+
+    /**
+     * 根据已选 provider 创建唯一的文件存储适配器。
+     *
+     * @param properties 已绑定的文件存储属性
+     * @param environment Spring 运行环境
+     * @param bucket 已校验公共 bucket
+     * @param ossClient 可选的受管 OSS SDK client
+     * @return 唯一选中的文件存储实现
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    private FileStorage selectedFileStorage(FileStorageProperties properties, Environment environment,
+                                            String bucket, Optional<OSS> ossClient) {
+        // Local 需要额外校验缓存与主数据根目录不会重叠。
         if (properties.getProvider() == FileStorageProvider.LOCAL) {
             validateLocalCacheConfiguration(properties, environment, bucket);
             return localStorage(properties, bucket);
         }
+        return remoteFileStorage(properties, bucket, ossClient);
+    }
+
+    /**
+     * 根据远端 provider 创建唯一的对象存储适配器。
+     *
+     * @param properties 已绑定的文件存储属性
+     * @param bucket 已校验公共 bucket
+     * @param ossClient 可选的受管 OSS SDK client
+     * @return 唯一选中的远端文件存储实现
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    private FileStorage remoteFileStorage(FileStorageProperties properties, String bucket,
+                                          Optional<OSS> ossClient) {
+        // MinIO 使用其 S3 兼容客户端。
         if (properties.getProvider() == FileStorageProvider.MINIO) {
             return minioStorage(properties, bucket);
         }
+        // RustFS 复用独立的 S3 兼容适配器。
         if (properties.getProvider() == FileStorageProvider.RUSTFS) {
             return rustfsStorage(properties, bucket);
         }
+        // OSS 只能使用由 Spring 管理生命周期的原生 SDK client。
+        if (properties.getProvider() == FileStorageProvider.OSS) {
+            return ossStorage(properties, bucket, ossClient.orElseThrow(
+                    () -> invalidConfiguration("oss client is required", null)));
+        }
         throw invalidConfiguration("file storage provider is required or invalid", null);
+    }
+
+    /**
+     * 创建仅在 OSS provider 被选中时存在的受管 OSS SDK client。
+     *
+     * @param properties 已绑定的文件存储属性
+     * @return 由 Spring 在容器关闭时 shutdown 的 OSS SDK client
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    @Bean(destroyMethod = "shutdown")
+    @ConditionalOnMissingBean(OSS.class)
+    @ConditionalOnExpression("'${dinghai.file-storage.provider:}' == 'oss'")
+    public OSS ossClient(FileStorageProperties properties) {
+        try {
+            return OssClientFactory.create(ossConfiguration(properties));
+        } catch (IllegalArgumentException exception) {
+            throw invalidConfiguration("oss configuration is incomplete", exception);
+        }
     }
 
     /**
@@ -122,7 +185,8 @@ public class FileStorageAutoConfiguration {
     @Bean(destroyMethod = "close")
     @ConditionalOnMissingBean
     @ConditionalOnExpression("'${dinghai.file-storage.provider:}' == 'minio' "
-            + "or '${dinghai.file-storage.provider:}' == 'rustfs'")
+            + "or '${dinghai.file-storage.provider:}' == 'rustfs' "
+            + "or '${dinghai.file-storage.provider:}' == 'oss'")
     @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true",
             matchIfMissing = true)
     public ProviderFileReadCache providerFileReadCache(FileStorage storage,
@@ -141,7 +205,8 @@ public class FileStorageAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnExpression("'${dinghai.file-storage.provider:}' == 'minio' "
-            + "or '${dinghai.file-storage.provider:}' == 'rustfs'")
+            + "or '${dinghai.file-storage.provider:}' == 'rustfs' "
+            + "or '${dinghai.file-storage.provider:}' == 'oss'")
     @ConditionalOnProperty(name = "dinghai.file-storage.cache.enabled", havingValue = "true",
             matchIfMissing = true)
     public ProviderFileReadCacheCleaner providerFileReadCacheCleaner(ProviderFileReadCache cache,
@@ -348,6 +413,40 @@ public class FileStorageAutoConfiguration {
         } catch (IllegalArgumentException exception) {
             throw invalidConfiguration("rustfs configuration is incomplete", exception);
         }
+    }
+
+    /**
+     * 创建使用受管 SDK client 的固定 bucket OSS 适配器。
+     *
+     * @param properties 已绑定的文件存储属性
+     * @param bucket 已校验公共 bucket
+     * @param client 受 Spring 管理的 OSS SDK client
+     * @return OSS 适配器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    private FileStorage ossStorage(FileStorageProperties properties, String bucket, OSS client) {
+        try {
+            OssStorageConfiguration configuration = ossConfiguration(properties);
+            return new OssFileStorageAdapter(client, bucket, configuration.endpoint(),
+                    configuration.accessKey());
+        } catch (IllegalArgumentException exception) {
+            throw invalidConfiguration("oss configuration is incomplete", exception);
+        }
+    }
+
+    /**
+     * 将 Starter 属性转换为 OSS SDK 所需的已校验连接配置。
+     *
+     * @param properties 已绑定的文件存储属性
+     * @return 已校验 OSS 连接配置
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-14
+     */
+    private OssStorageConfiguration ossConfiguration(FileStorageProperties properties) {
+        FileStorageProperties.Oss oss = properties.getOss();
+        return new OssStorageConfiguration(oss.getEndpoint(), properties.getBucket(), oss.getAccessKey(),
+                oss.getSecretKey(), oss.getConnectTimeout(), oss.getReadTimeout(), oss.getWriteTimeout());
     }
 
     /**

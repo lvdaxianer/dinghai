@@ -6,6 +6,6 @@
 
 ## 2. Starter integration and documentation
 
-- [ ] 2.1 以 RED/GREEN 测试接入 `provider=oss`、`oss` 属性、自动装配和远端读取缓存。
-- [ ] 2.2 更新中英文 README、环境变量模板，并验证文档中的 OSS 配置契约。
-- [ ] 2.3 执行 Starter 及文件存储全量测试、计划一致性审计和代码审查，完成 T2 提交与集成。
+- [x] 2.1 以 RED/GREEN 测试接入 `provider=oss`、`oss` 属性、自动装配和远端读取缓存。
+- [x] 2.2 更新中英文 README、环境变量模板，并验证文档中的 OSS 配置契约。
+- [x] 2.3 执行 Starter 及文件存储全量测试、计划一致性审计和代码审查，完成 T2 提交与集成。
