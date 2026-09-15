@@ -247,15 +247,15 @@ public class LocalFileStorageAdapterTest {
         Path root = temporaryFolder.newFolder("storage").toPath();
         LocalFileStorageAdapter first = new LocalFileStorageAdapter(root, SIGNING_KEY);
         MultipartUploadSession session = first.initiate(multipartRequest("restart.bin", 6));
-        MultipartPart uploaded = first.uploadPart(new MultipartPartRequest(session.uploadId(), 1),
+        MultipartPart uploaded = first.uploadPart(session, new MultipartPartRequest(session.uploadId(), 1),
                 bytes("abc"), 3);
-        MultipartPart second = first.uploadPart(new MultipartPartRequest(session.uploadId(), 2),
+        MultipartPart second = first.uploadPart(session, new MultipartPartRequest(session.uploadId(), 2),
                 bytes("def"), 3);
 
         LocalFileStorageAdapter restarted = new LocalFileStorageAdapter(root, SIGNING_KEY);
 
-        assertEquals(List.of(uploaded, second), restarted.listParts(session.uploadId()));
-        ObjectMetadata completed = restarted.complete(session.uploadId(),
+        assertEquals(List.of(uploaded, second), restarted.listParts(session));
+        ObjectMetadata completed = restarted.complete(session,
                 new MultipartCompletion(List.of(uploaded, second)));
         assertEquals(6L, completed.contentLength());
     }
@@ -265,13 +265,13 @@ public class LocalFileStorageAdapterTest {
     public void retriesMultipartPartByAtomicReplacement() throws Exception {
         LocalFileStorageAdapter storage = storage();
         MultipartUploadSession session = storage.initiate(multipartRequest("retry.bin", 6));
-        MultipartPart first = storage.uploadPart(new MultipartPartRequest(session.uploadId(), 1),
+        MultipartPart first = storage.uploadPart(session, new MultipartPartRequest(session.uploadId(), 1),
                 bytes("old"), 3);
-        MultipartPart second = storage.uploadPart(new MultipartPartRequest(session.uploadId(), 1),
+        MultipartPart second = storage.uploadPart(session, new MultipartPartRequest(session.uploadId(), 1),
                 bytes("new"), 3);
 
         assertNotEquals(first.etag(), second.etag());
-        assertEquals(List.of(second), storage.listParts(session.uploadId()));
+        assertEquals(List.of(second), storage.listParts(session));
     }
 
     /** 完成操作按分片顺序流式合并并可幂等重复提交。 */
@@ -279,14 +279,14 @@ public class LocalFileStorageAdapterTest {
     public void completesMultipartByStreamingMergeAndIsIdempotent() throws Exception {
         LocalFileStorageAdapter storage = storage();
         MultipartUploadSession session = storage.initiate(multipartRequest("merged.bin", 6));
-        MultipartPart first = storage.uploadPart(new MultipartPartRequest(session.uploadId(), 1),
+        MultipartPart first = storage.uploadPart(session, new MultipartPartRequest(session.uploadId(), 1),
                 bytes("abc"), 3);
-        MultipartPart second = storage.uploadPart(new MultipartPartRequest(session.uploadId(), 2),
+        MultipartPart second = storage.uploadPart(session, new MultipartPartRequest(session.uploadId(), 2),
                 bytes("def"), 3);
 
-        ObjectMetadata completed = storage.complete(session.uploadId(),
+        ObjectMetadata completed = storage.complete(session,
                 new MultipartCompletion(List.of(first, second)));
-        ObjectMetadata repeated = storage.complete(session.uploadId(),
+        ObjectMetadata repeated = storage.complete(session,
                 new MultipartCompletion(List.of(first, second)));
 
         assertEquals(6L, completed.contentLength());
@@ -299,11 +299,11 @@ public class LocalFileStorageAdapterTest {
     public void rejectsMultipartCompletionWithMissingPart() throws Exception {
         LocalFileStorageAdapter storage = storage();
         MultipartUploadSession session = storage.initiate(multipartRequest("missing.bin", 6));
-        MultipartPart first = storage.uploadPart(new MultipartPartRequest(session.uploadId(), 1),
+        MultipartPart first = storage.uploadPart(session, new MultipartPartRequest(session.uploadId(), 1),
                 bytes("abc"), 3);
 
         try {
-            storage.complete(session.uploadId(), new MultipartCompletion(List.of(first)));
+            storage.complete(session, new MultipartCompletion(List.of(first)));
             fail("expected missing part conflict");
         } catch (FileStorageException exception) {
             assertEquals("MULTIPART_CONFLICT", exception.errorCode().name());
@@ -316,11 +316,11 @@ public class LocalFileStorageAdapterTest {
         LocalFileStorageAdapter storage = storage();
         MultipartUploadSession session = storage.initiate(multipartRequest("abort.bin", 3));
 
-        storage.abort(session.uploadId());
-        storage.abort(session.uploadId());
+        storage.abort(session);
+        storage.abort(session);
 
         try {
-            storage.listParts(session.uploadId());
+            storage.listParts(session);
             fail("expected aborted session to be absent");
         } catch (FileStorageException exception) {
             assertEquals("MULTIPART_NOT_FOUND", exception.errorCode().name());
@@ -341,7 +341,7 @@ public class LocalFileStorageAdapterTest {
 
         assertEquals(1, storage.cleanupExpiredMultipartSessions(clock.instant().plusSeconds(2)));
         try {
-            storage.listParts(session.uploadId());
+            storage.listParts(session);
             fail("expected expired session to be absent");
         } catch (FileStorageException exception) {
             assertEquals("MULTIPART_NOT_FOUND", exception.errorCode().name());
