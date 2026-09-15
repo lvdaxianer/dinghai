@@ -4,6 +4,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -32,6 +33,7 @@ public class FileStorageExceptionHandler {
         if (exception.errorCode() == FileStorageErrorCode.RATE_LIMITED) {
             response.header("Retry-After", "1");
         }
+        response.contentType(MediaType.APPLICATION_JSON);
         return response
                 .body(Map.of("code", exception.errorCode().name(), "message", exception.getMessage()));
     }
@@ -45,8 +47,15 @@ public class FileStorageExceptionHandler {
      * @date 2026-09-11
      */
     private HttpStatus status(FileStorageErrorCode errorCode) {
-        if (errorCode == FileStorageErrorCode.OBJECT_NOT_FOUND) {
+        if (errorCode == FileStorageErrorCode.OBJECT_NOT_FOUND
+                || errorCode == FileStorageErrorCode.MULTIPART_NOT_FOUND) {
             return HttpStatus.NOT_FOUND;
+        }
+        if (errorCode == FileStorageErrorCode.MULTIPART_EXPIRED) {
+            return HttpStatus.GONE;
+        }
+        if (errorCode == FileStorageErrorCode.MULTIPART_CONFLICT) {
+            return HttpStatus.CONFLICT;
         }
         if (errorCode == FileStorageErrorCode.OBJECT_TOO_LARGE) {
             return HttpStatus.PAYLOAD_TOO_LARGE;

@@ -302,6 +302,28 @@ public class FileStorageAutoConfiguration {
     }
 
     /**
+     * 为支持 multipart 的 provider 注册受宿主授权策略保护的上传会话接口。
+     *
+     * @param fileStorage 已装配文件存储
+     * @param accessPolicy 宿主授权策略
+     * @param properties 已绑定的文件存储属性
+     * @return multipart 上传控制器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean(FileStorageAccessPolicy.class)
+    @ConditionalOnProperty(name = "dinghai.file-storage.web.enabled", havingValue = "true",
+            matchIfMissing = true)
+    public MultipartUploadController multipartUploadController(FileStorage fileStorage,
+                                                               FileStorageAccessPolicy accessPolicy,
+                                                               FileStorageProperties properties) {
+        return new MultipartUploadController(new MultipartUploadService(fileStorage, accessPolicy,
+                properties, Clock.systemUTC()));
+    }
+
+    /**
      * 创建容量有界的文件存储 Web 异步执行器。
      *
      * @return 文件存储 Web 异步执行器

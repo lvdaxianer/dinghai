@@ -9,6 +9,8 @@ package io.github.lvdaxianer.dinghai.filestorage.spring;
 public enum FileStorageAccessOperation {
     /** 上传对象。 */
     UPLOAD,
+    /** 创建、上传、查询、完成或取消分片会话。 */
+    MULTIPART_UPLOAD,
     /** 下载对象。 */
     DOWNLOAD,
     /** 在线预览对象。 */

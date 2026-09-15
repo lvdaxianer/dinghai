@@ -142,6 +142,17 @@ public class FileStorageAutoConfigurationTest {
                 });
     }
 
+    /** multipart 控制器仅在宿主提供对象访问策略时才暴露。 */
+    @Test
+    public void shouldExposeMultipartControllerOnlyWithAccessPolicy() {
+        contextRunner.withPropertyValues(localProperties())
+                .run(context -> assertThat(context).doesNotHaveBean(MultipartUploadController.class));
+
+        contextRunner.withBean(FileStorageAccessPolicy.class, () -> (principal, key, operation) -> true)
+                .withPropertyValues(localProperties())
+                .run(context -> assertThat(context).hasSingleBean(MultipartUploadController.class));
+    }
+
     /** 本地 provider 默认关闭二级磁盘缓存。 */
     @Test
     public void shouldDisableDiskCacheByDefaultForLocalProvider() {

@@ -4,6 +4,9 @@ import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileReference;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartFileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
@@ -13,6 +16,8 @@ import io.github.lvdaxianer.dinghai.filestorage.core.PresignedUpload;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import java.io.ByteArrayInputStream;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -37,6 +42,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -44,6 +50,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 /**
  * 本地文件存储签名 Web 端点测试。
@@ -70,6 +82,8 @@ public class FileStorageWebControllerTest {
     private MockMvc mockMvc;
     /** 稳定文件读取 ID 编解码器。 */
     private StableFileAccessService stableAccess;
+    /** multipart JSON 响应读取器。 */
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 创建带默认拒绝访问策略的端点。
@@ -88,7 +102,11 @@ public class FileStorageWebControllerTest {
                 "stable-file-id-test-key-material-32b".getBytes(StandardCharsets.UTF_8));
         FileStorageWebController controller = new FileStorageWebController(storage,
                 new FileStorageDirectAccessAuthorizer(false, null), clock, stableAccess);
-        mockMvc = MockMvcBuilders.standaloneSetup(controller)
+        FileStorageAccessPolicy multipartPolicy = (principal, key, operation) ->
+                operation == FileStorageAccessOperation.MULTIPART_UPLOAD;
+        MultipartUploadController multipartController = new MultipartUploadController(
+                new MultipartUploadService(storage, multipartPolicy, new FileStorageProperties(), clock));
+        mockMvc = MockMvcBuilders.standaloneSetup(controller, multipartController)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
     }
 
@@ -116,6 +134,176 @@ public class FileStorageWebControllerTest {
                 .andExpect(jsonPath("$.previewUrl").value("/files/read/key/preview/uploads/new.txt"));
 
         assertEquals("new content", read(ObjectKey.of("uploads/new.txt")));
+    }
+
+    /**
+     * multipart 会话创建端点必须可用于已授权上传。
+     *
+     * @throws Exception MVC 请求执行失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void shouldInitiateMultipartUploadForAuthorizedPrincipal() throws Exception {
+        mockMvc.perform(post("/files/multipart").principal(() -> "alice")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"key\":\"uploads/large.bin\",\"size\":10485760,"
+                                + "\"partSize\":10485760,\"contentType\":\"application/octet-stream\","
+                                + "\"expiresIn\":\"PT10M\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.uploadId").isNotEmpty())
+                .andExpect(jsonPath("$.key.value").value("uploads/large.bin"));
+    }
+
+    /** 未授权创建必须在调用 provider 前被拒绝。 */
+    @Test
+    public void shouldRejectUnauthorizedMultipartInitiationBeforeProviderCall() throws Exception {
+        MultipartFileStorage multipartStorage = multipartStorageMock();
+        MockMvc deniedMvc = multipartMvc(multipartStorage, (principal, key, operation) -> false);
+
+        deniedMvc.perform(post("/files/multipart").principal(() -> "alice")
+                        .contentType(MediaType.APPLICATION_JSON).content(multipartInitiateJson("uploads/no.bin")))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("INVALID_PRESIGN"));
+
+        verify(multipartStorage, never()).initiate(any(MultipartUploadRequest.class));
+    }
+
+    /** 不符合已配置分片策略的创建请求必须在调用 provider 前被拒绝。 */
+    @Test
+    public void shouldRejectMultipartInitiationOutsideConfiguredLimitsBeforeProviderCall() throws Exception {
+        MultipartFileStorage multipartStorage = multipartStorageMock();
+        MockMvc limitedMvc = multipartMvc(multipartStorage, (principal, key, operation) -> true);
+
+        limitedMvc.perform(post("/files/multipart").principal(() -> "alice")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"key\":\"uploads/invalid.bin\",\"size\":10485760,"
+                                + "\"partSize\":5242880,\"expiresIn\":\"PT10M\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MULTIPART_INVALID"));
+
+        verify(multipartStorage, never()).initiate(any(MultipartUploadRequest.class));
+    }
+
+    /** 无法解析的 multipart JSON 必须返回稳定参数错误。 */
+    @Test
+    public void shouldReturnStableErrorForMalformedMultipartJson() throws Exception {
+        mockMvc.perform(post("/files/multipart").principal(() -> "alice")
+                        .contentType(MediaType.APPLICATION_JSON).content("{invalid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("MULTIPART_INVALID"));
+    }
+
+    /** 不支持 multipart 的自定义 provider 不得阻断应用启动，并返回稳定错误。 */
+    @Test
+    public void shouldRejectMultipartForProviderWithoutMultipartCapability() throws Exception {
+        FileStorage storageWithoutMultipart = mock(FileStorage.class);
+        MockMvc unsupportedMvc = multipartMvc(storageWithoutMultipart,
+                (principal, key, operation) -> true);
+
+        unsupportedMvc.perform(post("/files/multipart").principal(() -> "alice")
+                        .contentType(MediaType.APPLICATION_JSON).content(multipartInitiateJson("uploads/a.bin")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MULTIPART_INVALID"));
+    }
+
+    /** 远端 multipart provider 的分片签发必须返回其原生预签名授权。 */
+    @Test
+    public void shouldReturnNativePresignedPartAuthorizationForRemoteProvider() throws Exception {
+        MultipartFileStorage multipartStorage = multipartStorageMock();
+        MultipartUploadSession session = new MultipartUploadSession("remote-upload", ObjectKey.of("uploads/a.bin"),
+                10L * 1024L * 1024L, 10L * 1024L * 1024L, "application/octet-stream",
+                CacheControl.privateNoCache(), 1, NOW.plus(Duration.ofMinutes(10L)), java.util.List.of());
+        PresignedUpload upload = new PresignedUpload("https://provider.example/upload-part", "PUT",
+                NOW.plus(Duration.ofMinutes(5L)), java.util.Map.of("Content-Type", "application/octet-stream"),
+                java.util.Map.of());
+        when(multipartStorage.initiate(any(MultipartUploadRequest.class))).thenReturn(session);
+        when(multipartStorage.presignPart(any(), any())).thenReturn(upload);
+        MockMvc remoteMvc = multipartMvc(multipartStorage, (principal, key, operation) -> true);
+
+        remoteMvc.perform(post("/files/multipart").principal(() -> "alice")
+                        .contentType(MediaType.APPLICATION_JSON).content(multipartInitiateJson("uploads/a.bin")))
+                .andExpect(status().isCreated());
+        remoteMvc.perform(post("/files/multipart/remote-upload/parts/1/presign").principal(() -> "alice"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.url").value("https://provider.example/upload-part"))
+                .andExpect(jsonPath("$.method").value("PUT"));
+    }
+
+    /**
+     * Local multipart 会话必须支持分片写入、查询、完成和重复完成。
+     *
+     * @throws Exception MVC 请求执行失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void shouldCompleteLocalMultipartUploadIdempotently() throws Exception {
+        String uploadId = initiateMultipart("alice", "uploads/large.bin");
+        byte[] content = new byte[10 * 1024 * 1024];
+        java.util.Arrays.fill(content, (byte) 'x');
+
+        MvcResult partResult = mockMvc.perform(put("/files/multipart/" + uploadId + "/parts/1")
+                        .principal(() -> "alice").contentType(MediaType.APPLICATION_OCTET_STREAM)
+                        .content(content))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.partNumber").value(1))
+                .andExpect(jsonPath("$.size").value(content.length)).andReturn();
+        String etag = json(partResult).path("etag").asText();
+
+        mockMvc.perform(get("/files/multipart/" + uploadId + "/parts").principal(() -> "alice"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].partNumber").value(1))
+                .andExpect(jsonPath("$[0].etag").value(etag));
+
+        String completion = "{\"parts\":[{\"partNumber\":1,\"size\":" + content.length
+                + ",\"etag\":\"" + etag + "\"}],\"idempotencyKey\":\"complete-1\"}";
+        mockMvc.perform(post("/files/multipart/" + uploadId + "/complete").principal(() -> "alice")
+                        .contentType(MediaType.APPLICATION_JSON).content(completion))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.key.value").value("uploads/large.bin"))
+                .andExpect(jsonPath("$.contentLength").value(content.length));
+        mockMvc.perform(post("/files/multipart/" + uploadId + "/complete").principal(() -> "alice")
+                        .contentType(MediaType.APPLICATION_JSON).content(completion))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.contentLength").value(content.length));
+        assertEquals(content.length, storage.stat(ObjectKey.of("uploads/large.bin")).orElseThrow()
+                .contentLength());
+    }
+
+    /**
+     * multipart 会话不得被其他主体查询或写入。
+     *
+     * @throws Exception MVC 请求执行失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void shouldRejectMultipartSessionAccessFromDifferentPrincipal() throws Exception {
+        String uploadId = initiateMultipart("alice", "uploads/private.bin");
+
+        mockMvc.perform(get("/files/multipart/" + uploadId + "/parts").principal(() -> "bob"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("MULTIPART_NOT_FOUND"));
+    }
+
+    /**
+     * 已取消 multipart 会话应拒绝后续分片请求，重复取消保持成功语义。
+     *
+     * @throws Exception MVC 请求执行失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void shouldAbortMultipartUploadIdempotently() throws Exception {
+        String uploadId = initiateMultipart("alice", "uploads/cancelled.bin");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/files/multipart/" + uploadId).principal(() -> "alice"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/files/multipart/" + uploadId).principal(() -> "alice"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/files/multipart/" + uploadId + "/parts").principal(() -> "alice"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("MULTIPART_NOT_FOUND"));
     }
 
     /**
@@ -595,6 +783,63 @@ public class FileStorageWebControllerTest {
                 .andExpect(header().string("Retry-After", "1"));
         blockingStorage.releaseFirstRead();
         keyLimitedMvc.perform(asyncDispatch(first)).andExpect(status().isOk());
+    }
+
+    /**
+     * 创建测试 multipart 会话并返回会话标识。
+     *
+     * @param principalName 发起会话的主体名称
+     * @param key 待上传对象 key
+     * @return provider 返回的会话标识
+     * @throws Exception MVC 请求执行失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private String initiateMultipart(String principalName, String key) throws Exception {
+        MvcResult result = mockMvc.perform(post("/files/multipart").principal(() -> principalName)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(multipartInitiateJson(key)))
+                .andExpect(status().isCreated()).andReturn();
+        return json(result).path("uploadId").asText();
+    }
+
+    /** 创建符合默认 multipart 限制的请求 JSON。 */
+    private String multipartInitiateJson(String key) {
+        return "{\"key\":\"" + key + "\",\"size\":10485760,\"partSize\":10485760,"
+                + "\"contentType\":\"application/octet-stream\",\"expiresIn\":\"PT10M\"}";
+    }
+
+    /** 创建同时实现文件存储与 multipart 能力的远端 provider 测试替身。 */
+    private MultipartFileStorage multipartStorageMock() {
+        return (MultipartFileStorage) mock(FileStorage.class, withSettings()
+                .extraInterfaces(MultipartFileStorage.class));
+    }
+
+    /** 创建只暴露 multipart 控制器的测试客户端。 */
+    private MockMvc multipartMvc(MultipartFileStorage multipartStorage, FileStorageAccessPolicy accessPolicy) {
+        return multipartMvc((FileStorage) multipartStorage, accessPolicy);
+    }
+
+    /** 创建只暴露 multipart 控制器的测试客户端。 */
+    private MockMvc multipartMvc(FileStorage storageForTest, FileStorageAccessPolicy accessPolicy) {
+        MultipartUploadController controller = new MultipartUploadController(new MultipartUploadService(
+                storageForTest, accessPolicy, new FileStorageProperties(), Clock.fixed(NOW,
+                ZoneOffset.UTC)));
+        return MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new FileStorageExceptionHandler()).build();
+    }
+
+    /**
+     * 读取 MVC JSON 响应。
+     *
+     * @param result 已完成的 MVC 请求
+     * @return JSON 根节点
+     * @throws Exception 响应解析失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private JsonNode json(MvcResult result) throws Exception {
+        return objectMapper.readTree(result.getResponse().getContentAsByteArray());
     }
 
     /** 创建使用可控阻塞读取 provider 的每 key 限流 MVC 客户端。 */
