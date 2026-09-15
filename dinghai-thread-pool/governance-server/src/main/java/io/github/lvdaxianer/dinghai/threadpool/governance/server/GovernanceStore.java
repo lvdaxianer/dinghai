@@ -8,6 +8,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Optional;
+import java.util.Objects;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 单实例总控的 SQLite 控制面存储。
@@ -20,6 +23,7 @@ public final class GovernanceStore {
 
     /** 创建并初始化 SQLite 控制面存储。 */
     public GovernanceStore(Path path) {
+        Objects.requireNonNull(path, "path");
         createParent(path);
         url = "jdbc:sqlite:" + path.toAbsolutePath();
         initialize();
@@ -33,6 +37,23 @@ public final class GovernanceStore {
             statement.setString(3, environment); statement.setLong(4, System.currentTimeMillis());
             statement.executeUpdate();
         } catch (SQLException exception) { throw failure("register instance", exception); }
+    }
+
+    /**
+     * 返回当前启用实例，供单实例轮询器和管理 API 查询。
+     *
+     * @return 按实例标识排序的不可变实例列表
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public List<GovernanceInstance> instances() {
+        List<GovernanceInstance> instances = new ArrayList<>();
+        String sql = "select instance_id,base_url,environment,enabled,updated_at from governance_instance order by instance_id";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet result = statement.executeQuery()) {
+            while (result.next()) { instances.add(instance(result)); }
+            return List.copyOf(instances);
+        } catch (SQLException exception) { throw failure("list instances", exception); }
     }
 
     /** 读取某实例已确认的 cursor。 */
@@ -68,6 +89,20 @@ public final class GovernanceStore {
         execute("create table if not exists governance_instance(instance_id text primary key,base_url text not null,environment text not null,enabled integer not null,updated_at integer not null)");
         execute("create table if not exists governance_cursor(instance_id text primary key,cursor text not null,updated_at integer not null)");
         execute("create table if not exists governance_collection_gap(id integer primary key autoincrement,instance_id text not null,requested_cursor text,oldest_cursor text,detected_at integer not null,recovery_status text not null)");
+    }
+
+    /**
+     * 从查询行构建不泄露控制面内部状态的实例投影。
+     *
+     * @param result SQLite 查询结果
+     * @return 实例投影
+     * @throws SQLException 读取结果失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private GovernanceInstance instance(ResultSet result) throws SQLException {
+        return new GovernanceInstance(result.getString("instance_id"), result.getString("base_url"),
+                result.getString("environment"), result.getBoolean("enabled"), result.getLong("updated_at"));
     }
 
     private void execute(String sql) {

@@ -39,4 +39,18 @@ public class GovernanceStoreTest {
         }
         assertEquals(false, store.cursor("app-1").isPresent());
     }
+
+    /** 注册实例必须在 SQLite 重启后仍可查询，供总控轮询器恢复工作。 */
+    @Test
+    public void shouldPersistRegisteredInstancesAcrossRestart() throws Exception {
+        Path database = Files.createTempDirectory("governance-store").resolve("governance.db");
+        GovernanceStore first = new GovernanceStore(database);
+        first.register("app-1", "https://app-1.internal", "production");
+
+        GovernanceStore restarted = new GovernanceStore(database);
+
+        assertEquals(1, restarted.instances().size());
+        assertEquals("app-1", restarted.instances().getFirst().instanceId());
+        assertEquals("https://app-1.internal", restarted.instances().getFirst().baseUrl());
+    }
 }
