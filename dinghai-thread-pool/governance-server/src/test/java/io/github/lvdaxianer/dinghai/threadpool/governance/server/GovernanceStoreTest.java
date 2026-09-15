@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -37,6 +38,21 @@ public class GovernanceStoreTest {
 
         assertFalse(store.cursor("app-1").isPresent());
         assertEquals("generation-2", store.instances().getFirst().version());
+    }
+
+    /** 已部署的旧总控 SQLite 必须自动增加实例版本列。 */
+    @Test
+    public void shouldUpgradeLegacyInstanceSchemaWithVersionColumn() throws Exception {
+        Path database = Files.createTempDirectory("governance-legacy").resolve("governance.db");
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database)) {
+            connection.createStatement().execute("create table governance_instance (instance_id text primary key, "
+                    + "base_url text not null, environment text not null, enabled integer not null, updated_at integer not null)");
+        }
+
+        GovernanceStore store = new GovernanceStore(database);
+        store.register("app-1", "https://localhost:8080", "test", "generation-1");
+
+        assertEquals("generation-1", store.instances().getFirst().version());
     }
 
     /** 聚合失败时不得推进 cursor。 */

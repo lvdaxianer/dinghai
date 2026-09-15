@@ -21,6 +21,7 @@ import org.sqlite.SQLiteDataSource;
 final class GovernanceSqliteSessionFactory {
     private static final int BUSY_TIMEOUT_MILLIS = 5_000;
     private static final String SCHEMA = "io/github/lvdaxianer/dinghai/threadpool/governance/server/governance-schema.sql";
+    private static final String MIGRATIONS = "io/github/lvdaxianer/dinghai/threadpool/governance/server/governance-migrations.sql";
 
     private GovernanceSqliteSessionFactory() { }
 
@@ -40,9 +41,10 @@ final class GovernanceSqliteSessionFactory {
 
     /** 通过 MyBatis 脚本执行器初始化外置 SQLite schema。 */
     private static void initialize(DataSource dataSource) {
-        try (var connection = dataSource.getConnection(); Reader reader = schemaReader()) {
+        try (var connection = dataSource.getConnection(); Reader reader = schemaReader(); Reader migrations = migrationReader()) {
             ScriptRunner runner = new ScriptRunner(connection);
-            runner.setLogWriter(null); runner.setErrorLogWriter(null); runner.runScript(reader);
+            runner.setLogWriter(null); runner.setErrorLogWriter(null);
+            runner.runScript(reader); runner.runScript(migrations);
         } catch (Exception exception) {
             throw new IllegalStateException("cannot initialize governance SQLite schema", exception);
         }
@@ -51,6 +53,12 @@ final class GovernanceSqliteSessionFactory {
     /** 打开外置 SQLite schema 资源。 */
     private static Reader schemaReader() {
         return new InputStreamReader(GovernanceSqliteSessionFactory.class.getClassLoader().getResourceAsStream(SCHEMA),
+                StandardCharsets.UTF_8);
+    }
+
+    /** 打开可重复执行的 SQLite schema 升级脚本。 */
+    private static Reader migrationReader() {
+        return new InputStreamReader(GovernanceSqliteSessionFactory.class.getClassLoader().getResourceAsStream(MIGRATIONS),
                 StandardCharsets.UTF_8);
     }
 
