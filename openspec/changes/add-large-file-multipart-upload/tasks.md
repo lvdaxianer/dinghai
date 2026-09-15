@@ -5,8 +5,8 @@
 
 ## 2. Provider implementations
 
-- [ ] 2.1 Implement Local temporary-part storage, atomic merge, restart-safe metadata, expiry cleanup, and focused tests.
-- [ ] 2.2 Implement MinIO S3 multipart lifecycle and per-part presigning with focused tests.
+- [x] 2.1 Implement Local temporary-part storage, atomic merge, restart-safe metadata, expiry cleanup, and focused tests.
+- [x] 2.2 Implement MinIO S3 multipart lifecycle and per-part presigning with focused tests.
 - [x] 2.3 Extend RustFS S3-compatible delegation for multipart lifecycle and native per-part presigning.
 - [x] 2.4 Implement Alibaba Cloud OSS multipart lifecycle and per-part presigning with SDK request tests.
 
