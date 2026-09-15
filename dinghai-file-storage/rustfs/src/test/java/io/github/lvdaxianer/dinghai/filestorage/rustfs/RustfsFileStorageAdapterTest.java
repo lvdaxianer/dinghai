@@ -3,13 +3,22 @@ package io.github.lvdaxianer.dinghai.filestorage.rustfs;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartCompletion;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartFileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPart;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPartRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
+import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignedDownload;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignedUpload;
 import java.time.Duration;
 import java.time.Instant;
+import java.io.ByteArrayInputStream;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -21,6 +30,7 @@ import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 /**
  * RustFS 适配器的最小后端中立契约测试。
@@ -140,6 +150,47 @@ public class RustfsFileStorageAdapterTest {
             assertEquals(FileStorageErrorCode.AUTHENTICATION_FAILED, expected.errorCode());
             assertEquals("RustFS operation failed", expected.getMessage());
         }
+    }
+
+    /** RustFS multipart 生命周期必须委托给 S3 兼容 provider。 */
+    @Test
+    public void forwardsS3CompatibleMultipartLifecycle() {
+        FileStorage delegate = (FileStorage) mock(MultipartFileStorage.class,
+                withSettings().extraInterfaces(FileStorage.class));
+        MultipartFileStorage multipart = (MultipartFileStorage) delegate;
+        MultipartUploadRequest request = new MultipartUploadRequest(ObjectKey.of("large.bin"), 6L, 3L,
+                "application/octet-stream", new io.github.lvdaxianer.dinghai.filestorage.core.CacheControl("private"),
+                Duration.ofMinutes(5));
+        MultipartUploadSession session = new MultipartUploadSession("upload-id", request,
+                Instant.now().plusSeconds(300));
+        MultipartPart part = new MultipartPart(1, 3L, "etag-1");
+        MultipartPartRequest partRequest = new MultipartPartRequest(session.uploadId(), 1, session.partCount());
+        MultipartCompletion completion = new MultipartCompletion(List.of(part));
+        ByteArrayInputStream content = new ByteArrayInputStream(new byte[] {1, 2, 3});
+        PresignedUpload signed = new PresignedUpload("https://rustfs.example/part", "PUT", session.expiresAt(),
+                Map.of(), Map.of());
+        ObjectMetadata metadata = new ObjectMetadata(request.key(), 6L, request.contentType(), "etag-final",
+                Instant.EPOCH, request.cacheControl());
+        when(multipart.initiate(request)).thenReturn(session);
+        when(multipart.presignPart(session, partRequest)).thenReturn(signed);
+        when(multipart.uploadPart(session, partRequest, content, 3L)).thenReturn(part);
+        when(multipart.listParts(session)).thenReturn(List.of(part));
+        when(multipart.complete(session, completion)).thenReturn(metadata);
+        RustfsFileStorageAdapter adapter = new RustfsFileStorageAdapter(delegate);
+
+        assertEquals(session, adapter.initiate(request));
+        assertEquals(signed, adapter.presignPart(session, partRequest));
+        assertEquals(part, adapter.uploadPart(session, partRequest, content, 3L));
+        assertEquals(List.of(part), adapter.listParts(session));
+        assertEquals(metadata, adapter.complete(session, completion));
+        adapter.abort(session);
+
+        verify(multipart).initiate(request);
+        verify(multipart).presignPart(session, partRequest);
+        verify(multipart).uploadPart(session, partRequest, content, 3L);
+        verify(multipart).listParts(session);
+        verify(multipart).complete(session, completion);
+        verify(multipart).abort(session);
     }
 
     /**
