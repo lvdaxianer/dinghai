@@ -3,6 +3,12 @@ package io.github.lvdaxianer.dinghai.filestorage.rustfs;
 import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartCompletion;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartFileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPart;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPartRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
@@ -13,6 +19,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.List;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -25,7 +32,7 @@ import java.util.stream.Stream;
  * @author lvdaxianer@yeah.net
  * @date 2026-09-13
  */
-public final class RustfsFileStorageAdapter implements FileStorage {
+public final class RustfsFileStorageAdapter implements FileStorage, MultipartFileStorage {
     private final FileStorage delegate;
 
     /**
@@ -153,6 +160,46 @@ public final class RustfsFileStorageAdapter implements FileStorage {
         return invoke(() -> delegate.presignDownload(request));
     }
 
+    /** 创建 RustFS 原生 S3 multipart 会话。 */
+    @Override
+    public MultipartUploadSession initiate(MultipartUploadRequest request) {
+        return invoke(() -> multipart().initiate(request));
+    }
+
+    /** 生成绑定 RustFS multipart 会话与分片号的上传授权。 */
+    @Override
+    public PresignedUpload presignPart(MultipartUploadSession session, MultipartPartRequest request) {
+        return invoke(() -> multipart().presignPart(session, request));
+    }
+
+    /** 通过 RustFS S3 multipart API 上传单个分片。 */
+    @Override
+    public MultipartPart uploadPart(MultipartUploadSession session, MultipartPartRequest request,
+                                    java.io.InputStream content, long contentLength) {
+        return invoke(() -> multipart().uploadPart(session, request, content, contentLength));
+    }
+
+    /** 查询 RustFS 已确认的 multipart 分片。 */
+    @Override
+    public List<MultipartPart> listParts(MultipartUploadSession session) {
+        return invoke(() -> multipart().listParts(session));
+    }
+
+    /** 提交 RustFS multipart 分片清单。 */
+    @Override
+    public ObjectMetadata complete(MultipartUploadSession session, MultipartCompletion completion) {
+        return invoke(() -> multipart().complete(session, completion));
+    }
+
+    /** 取消 RustFS multipart 会话。 */
+    @Override
+    public void abort(MultipartUploadSession session) {
+        invoke(() -> {
+            multipart().abort(session);
+            return null;
+        });
+    }
+
     /**
      * 创建仅针对预配置 bucket 的 S3 协议委托。
      *
@@ -164,6 +211,15 @@ public final class RustfsFileStorageAdapter implements FileStorage {
     private static FileStorage createDelegate(RustfsStorageConfiguration configuration) {
         return new MinioFileStorageAdapter(RustfsClientFactory.create(configuration),
                 configuration.bucket(), configuration.endpoint());
+    }
+
+    /** 获取 S3 兼容 multipart 委托。 */
+    private MultipartFileStorage multipart() {
+        if (delegate instanceof MultipartFileStorage multipart) {
+            return multipart;
+        }
+        throw new FileStorageException(io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode.STORAGE_UNAVAILABLE,
+                "RustFS operation failed");
     }
 
     /**
