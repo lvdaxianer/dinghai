@@ -171,6 +171,23 @@ public final class GovernanceStore {
         } catch (SQLException exception) { throw failure("read alert", exception); }
     }
 
+    /**
+     * 返回全部持久化告警状态，供受保护的管理查询使用。
+     *
+     * @return 按告警键排序的告警状态
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public List<GovernanceAlertState> alerts() {
+        List<GovernanceAlertState> alerts = new ArrayList<>();
+        String sql = "select alert_key,status,first_fired_at,last_fired_at,last_value,resolved_at from governance_alert_state order by alert_key";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet result = statement.executeQuery()) {
+            while (result.next()) { alerts.add(alert(result)); }
+            return List.copyOf(alerts);
+        } catch (SQLException exception) { throw failure("list alerts", exception); }
+    }
+
     private void initialize() {
         execute("create table if not exists governance_instance(instance_id text primary key,base_url text not null,environment text not null,enabled integer not null,updated_at integer not null)");
         execute("create table if not exists governance_cursor(instance_id text primary key,cursor text not null,updated_at integer not null)");

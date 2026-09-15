@@ -42,6 +42,18 @@ public class GovernanceInstanceControllerTest {
         assertEquals(1, controller.instances().size());
     }
 
+    /** 总控缺口与告警查询同样必须使用默认拒绝授权边界。 */
+    @Test
+    public void shouldRejectUnauthorizedStatusQueries() throws Exception {
+        Path database = Files.createTempDirectory("governance-status").resolve("governance.db");
+        GovernanceStatusController controller = new GovernanceStatusController(new GovernanceStore(database), () -> false);
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class,
+                controller::alerts);
+
+        assertEquals(HttpStatus.FORBIDDEN, exception.getStatusCode());
+    }
+
     private GovernanceInstanceController controller(GovernanceAccessPolicy policy) throws Exception {
         Path database = Files.createTempDirectory("governance-controller").resolve("governance.db");
         return new GovernanceInstanceController(new GovernanceStore(database), policy);
