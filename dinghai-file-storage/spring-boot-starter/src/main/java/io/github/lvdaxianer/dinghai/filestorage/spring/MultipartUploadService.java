@@ -12,12 +12,15 @@ import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignedUpload;
+import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import java.io.InputStream;
 import java.security.Principal;
 import java.time.Clock;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Supplier;
 
 /**
  * 将 multipart provider 会话绑定到宿主授权主体并执行 Starter 资源校验。
@@ -27,11 +30,15 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class MultipartUploadService {
 
+    /** 不使用读取许可的 multipart 上传限流器占位容量。 */
+    private static final int UNUSED_READ_LIMIT = 1;
     private final MultipartFileStorage multipartStorage;
     private final FileStorageAccessPolicy accessPolicy;
     private final FileStorageProperties.Multipart properties;
     private final long maximumSize;
     private final Clock clock;
+    private final WebTransferLimiter localPartLimiter;
+    private final ReentrantReadWriteLock localSessionLifecycleLock = new ReentrantReadWriteLock(true);
     private final ConcurrentHashMap<String, OwnedSession> sessions = new ConcurrentHashMap<>();
 
     /**
@@ -53,6 +60,8 @@ final class MultipartUploadService {
         this.properties = configuredProperties.getMultipart();
         this.maximumSize = configuredProperties.getUpload().getMaxSize();
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.localPartLimiter = new WebTransferLimiter(this.properties.getMaxConcurrentUploads(),
+                UNUSED_READ_LIMIT);
     }
 
     /**
@@ -69,9 +78,11 @@ final class MultipartUploadService {
         String principalSubject = subject(principal);
         authorize(principal, request.key());
         validateRequest(request);
-        MultipartUploadSession session = storage().initiate(request);
-        sessions.put(session.uploadId(), new OwnedSession(principalSubject, session));
-        return session;
+        return withLocalSessionReadLock(() -> {
+            MultipartUploadSession session = storage().initiate(request);
+            sessions.put(session.uploadId(), new OwnedSession(principalSubject, session));
+            return session;
+        });
     }
 
     /**
@@ -85,8 +96,10 @@ final class MultipartUploadService {
      * @date 2026-09-15
      */
     PresignedUpload presignPart(Principal principal, String uploadId, int partNumber) {
-        MultipartUploadSession session = session(principal, uploadId);
-        return storage().presignPart(session, partRequest(session, partNumber));
+        return withLocalSessionReadLock(() -> {
+            MultipartUploadSession session = session(principal, uploadId);
+            return storage().presignPart(session, partRequest(session, partNumber));
+        });
     }
 
     /**
@@ -99,7 +112,7 @@ final class MultipartUploadService {
      * @date 2026-09-15
      */
     List<MultipartPart> listParts(Principal principal, String uploadId) {
-        return storage().listParts(session(principal, uploadId));
+        return withLocalSessionReadLock(() -> storage().listParts(session(principal, uploadId)));
     }
 
     /**
@@ -116,8 +129,47 @@ final class MultipartUploadService {
      */
     MultipartPart uploadPart(Principal principal, String uploadId, int partNumber,
                              InputStream content, long contentLength) {
-        MultipartUploadSession session = session(principal, uploadId);
-        return storage().uploadPart(session, partRequest(session, partNumber), content, contentLength);
+        try (WebTransferLimiter.Permit ignored = acquireLocalPartPermit()) {
+            return withLocalSessionReadLock(() -> {
+                MultipartUploadSession session = session(principal, uploadId);
+                return storage().uploadPart(session, partRequest(session, partNumber), content, contentLength);
+            });
+        }
+    }
+
+    /**
+     * 获取 Local 分片上传许可，耗尽时请求体尚未被 provider 读取。
+     *
+     * @return 可幂等释放的上传许可
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    WebTransferLimiter.Permit acquireLocalPartPermit() {
+        return localPartLimiter.acquireUpload();
+    }
+
+    /**
+     * 清理 Local provider 临时目录并回收所有已过期的主体会话绑定。
+     *
+     * @param now 清理基准时间
+     * @return Local provider 删除的临时会话数
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    int cleanupExpiredSessions(java.time.Instant now) {
+        Objects.requireNonNull(now, "now");
+        if (!(multipartStorage instanceof LocalFileStorageAdapter)) {
+            sessions.entrySet().removeIf(entry -> !entry.getValue().session.expiresAt().isAfter(now));
+            return 0;
+        }
+        localSessionLifecycleLock.writeLock().lock();
+        try {
+            int removed = cleanupLocalSessions(now);
+            sessions.entrySet().removeIf(entry -> !entry.getValue().session.expiresAt().isAfter(now));
+            return removed;
+        } finally {
+            localSessionLifecycleLock.writeLock().unlock();
+        }
     }
 
     /**
@@ -128,7 +180,7 @@ final class MultipartUploadService {
      * @date 2026-09-15
      */
     boolean acceptsLocalPartUpload() {
-        return multipartStorage instanceof io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
+        return multipartStorage instanceof LocalFileStorageAdapter;
     }
 
     /**
@@ -142,15 +194,17 @@ final class MultipartUploadService {
      * @date 2026-09-15
      */
     ObjectMetadata complete(Principal principal, String uploadId, MultipartCompletion completion) {
-        OwnedSession owned = ownedSession(principal, uploadId);
-        synchronized (owned) {
-            if (owned.completed != null) {
+        return withLocalSessionReadLock(() -> {
+            OwnedSession owned = ownedSession(principal, uploadId);
+            synchronized (owned) {
+                if (owned.completed != null) {
+                    return owned.completed;
+                }
+                session(principal, uploadId);
+                owned.completed = storage().complete(owned.session, completion);
                 return owned.completed;
             }
-            session(principal, uploadId);
-            owned.completed = storage().complete(owned.session, completion);
-            return owned.completed;
-        }
+        });
     }
 
     /**
@@ -162,13 +216,15 @@ final class MultipartUploadService {
      * @date 2026-09-15
      */
     void abort(Principal principal, String uploadId) {
-        OwnedSession owned = ownedSession(principal, uploadId);
-        synchronized (owned) {
-            if (!owned.aborted && owned.completed == null) {
-                storage().abort(owned.session);
-                owned.aborted = true;
+        withLocalSessionReadLock(() -> {
+            OwnedSession owned = ownedSession(principal, uploadId);
+            synchronized (owned) {
+                if (!owned.aborted && owned.completed == null) {
+                    storage().abort(owned.session);
+                    owned.aborted = true;
+                }
             }
-        }
+        });
     }
 
     private void validateRequest(MultipartUploadRequest request) {
@@ -186,6 +242,38 @@ final class MultipartUploadService {
                     "multipart upload is not supported by the selected provider");
         }
         return multipartStorage;
+    }
+
+    private int cleanupLocalSessions(java.time.Instant now) {
+        if (multipartStorage instanceof LocalFileStorageAdapter localStorage) {
+            return localStorage.cleanupExpiredMultipartSessions(now);
+        }
+        return 0;
+    }
+
+    private <T> T withLocalSessionReadLock(Supplier<T> operation) {
+        if (!(multipartStorage instanceof LocalFileStorageAdapter)) {
+            return operation.get();
+        }
+        localSessionLifecycleLock.readLock().lock();
+        try {
+            return operation.get();
+        } finally {
+            localSessionLifecycleLock.readLock().unlock();
+        }
+    }
+
+    private void withLocalSessionReadLock(Runnable operation) {
+        if (!(multipartStorage instanceof LocalFileStorageAdapter)) {
+            operation.run();
+            return;
+        }
+        localSessionLifecycleLock.readLock().lock();
+        try {
+            operation.run();
+        } finally {
+            localSessionLifecycleLock.readLock().unlock();
+        }
     }
 
     private MultipartUploadSession session(Principal principal, String uploadId) {

@@ -146,11 +146,19 @@ public class FileStorageAutoConfigurationTest {
     @Test
     public void shouldExposeMultipartControllerOnlyWithAccessPolicy() {
         contextRunner.withPropertyValues(localProperties())
-                .run(context -> assertThat(context).doesNotHaveBean(MultipartUploadController.class));
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(MultipartUploadService.class);
+                    assertThat(context).doesNotHaveBean(MultipartUploadController.class);
+                    assertThat(context).doesNotHaveBean(MultipartUploadSessionCleaner.class);
+                });
 
         contextRunner.withBean(FileStorageAccessPolicy.class, () -> (principal, key, operation) -> true)
                 .withPropertyValues(localProperties())
-                .run(context -> assertThat(context).hasSingleBean(MultipartUploadController.class));
+                .run(context -> {
+                    assertThat(context).hasSingleBean(MultipartUploadService.class);
+                    assertThat(context).hasSingleBean(MultipartUploadController.class);
+                    assertThat(context).hasSingleBean(MultipartUploadSessionCleaner.class);
+                });
     }
 
     /** 本地 provider 默认关闭二级磁盘缓存。 */

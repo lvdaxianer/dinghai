@@ -316,11 +316,40 @@ public class FileStorageAutoConfiguration {
     @ConditionalOnBean(FileStorageAccessPolicy.class)
     @ConditionalOnProperty(name = "dinghai.file-storage.web.enabled", havingValue = "true",
             matchIfMissing = true)
-    public MultipartUploadController multipartUploadController(FileStorage fileStorage,
-                                                               FileStorageAccessPolicy accessPolicy,
-                                                               FileStorageProperties properties) {
-        return new MultipartUploadController(new MultipartUploadService(fileStorage, accessPolicy,
-                properties, Clock.systemUTC()));
+    public MultipartUploadService multipartUploadService(FileStorage fileStorage,
+                                                          FileStorageAccessPolicy accessPolicy,
+                                                          FileStorageProperties properties) {
+        return new MultipartUploadService(fileStorage, accessPolicy, properties, Clock.systemUTC());
+    }
+
+    /**
+     * 为已启用的 multipart 会话提供受宿主授权保护的 HTTP 端点。
+     *
+     * @param service multipart 会话服务
+     * @return multipart 上传控制器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean(MultipartUploadService.class)
+    public MultipartUploadController multipartUploadController(MultipartUploadService service) {
+        return new MultipartUploadController(service);
+    }
+
+    /**
+     * 注册已过期 multipart 会话的定时清理任务。
+     *
+     * @param service multipart 会话服务
+     * @return multipart 会话清理任务
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean(MultipartUploadService.class)
+    public MultipartUploadSessionCleaner multipartUploadSessionCleaner(MultipartUploadService service) {
+        return new MultipartUploadSessionCleaner(service, Clock.systemUTC());
     }
 
     /**

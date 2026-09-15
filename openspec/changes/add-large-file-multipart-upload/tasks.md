@@ -13,7 +13,7 @@
 ## 3. Starter HTTP integration
 
 - [x] 3.1 Add multipart REST controller, authorization, validation, stable errors, idempotency and Local part PUT handling.
-- [ ] 3.2 Add bounded upload permits, session cleanup scheduling, provider selection and configuration validation.
+- [x] 3.2 Add bounded upload permits, session cleanup scheduling, provider selection and configuration validation.
 
 ## 4. Verification and documentation
 

@@ -3,8 +3,11 @@ package io.github.lvdaxianer.dinghai.filestorage.spring;
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileReference;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
+import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartFileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPart;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
@@ -40,6 +43,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -182,6 +186,94 @@ public class FileStorageWebControllerTest {
                 .andExpect(jsonPath("$.code").value("MULTIPART_INVALID"));
 
         verify(multipartStorage, never()).initiate(any(MultipartUploadRequest.class));
+    }
+
+    /** Local 分片上传并发耗尽时必须在调用 provider 前返回 429。 */
+    @Test
+    public void shouldRejectLocalMultipartPartBeforeProviderReadWhenPermitIsExhausted() throws Exception {
+        FileStorageProperties properties = new FileStorageProperties();
+        properties.getMultipart().setMaxConcurrentUploads(1);
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        MultipartUploadService service = new MultipartUploadService(storage,
+                (principal, key, operation) -> true, properties, clock);
+        MultipartUploadSession session = service.initiate(() -> "alice", new MultipartUploadRequest(
+                ObjectKey.of("uploads/limited.bin"), 10L * 1024L * 1024L, 10L * 1024L * 1024L,
+                "application/octet-stream", CacheControl.privateNoCache(), Duration.ofMinutes(10L)));
+        MockMvc limitedMvc = MockMvcBuilders.standaloneSetup(new MultipartUploadController(service))
+                .setControllerAdvice(new FileStorageExceptionHandler()).build();
+        WebTransferLimiter.Permit heldPermit = service.acquireLocalPartPermit();
+
+        try {
+            limitedMvc.perform(put("/files/multipart/" + session.uploadId() + "/parts/1")
+                            .principal(() -> "alice").contentType(MediaType.APPLICATION_OCTET_STREAM)
+                            .content("blocked"))
+                    .andExpect(status().isTooManyRequests())
+                    .andExpect(header().string("Retry-After", "1"));
+            assertTrue(service.listParts(() -> "alice", session.uploadId()).isEmpty());
+        } finally {
+            heldPermit.close();
+        }
+    }
+
+    /** 过期会话清理必须删除 Local 临时状态并移除主体绑定。 */
+    @Test
+    public void shouldCleanupExpiredMultipartSessionState() {
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        MultipartUploadService service = new MultipartUploadService(storage,
+                (principal, key, operation) -> true, new FileStorageProperties(), clock);
+        MultipartUploadSession session = service.initiate(() -> "alice", new MultipartUploadRequest(
+                ObjectKey.of("uploads/expired.bin"), 10L * 1024L * 1024L, 10L * 1024L * 1024L,
+                "application/octet-stream", CacheControl.privateNoCache(), Duration.ofSeconds(1L)));
+
+        assertEquals(1, service.cleanupExpiredSessions(NOW.plusSeconds(2L)));
+        try {
+            service.listParts(() -> "alice", session.uploadId());
+            org.junit.Assert.fail("expected cleaned multipart session to be unavailable");
+        } catch (FileStorageException exception) {
+            assertEquals(FileStorageErrorCode.MULTIPART_NOT_FOUND, exception.errorCode());
+        }
+    }
+
+    /** 清理过期 Local 会话必须等待正在写入的分片完成，避免删除活跃临时目录。 */
+    @Test
+    public void shouldWaitForActiveLocalPartUploadBeforeCleaningExpiredSession() throws Exception {
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        MultipartUploadService service = new MultipartUploadService(storage,
+                (principal, key, operation) -> true, new FileStorageProperties(), clock);
+        MultipartUploadSession session = service.initiate(() -> "alice", new MultipartUploadRequest(
+                ObjectKey.of("uploads/active-expired.bin"), 10L * 1024L * 1024L, 10L * 1024L * 1024L,
+                "application/octet-stream", CacheControl.privateNoCache(), Duration.ofSeconds(1L)));
+        BlockingMultipartInputStream content = new BlockingMultipartInputStream(10 * 1024 * 1024);
+        AtomicReference<MultipartPart> uploaded = new AtomicReference<>();
+        AtomicReference<Throwable> uploadFailure = new AtomicReference<>();
+        AtomicReference<Integer> cleaned = new AtomicReference<>();
+        CountDownLatch cleanupFinished = new CountDownLatch(1);
+        Thread upload = new Thread(() -> {
+            try {
+                uploaded.set(service.uploadPart(() -> "alice", session.uploadId(), 1, content,
+                        10L * 1024L * 1024L));
+            } catch (Throwable throwable) {
+                uploadFailure.set(throwable);
+            }
+        }, "multipart-active-part-upload-test");
+        Thread cleanup = new Thread(() -> {
+            cleaned.set(service.cleanupExpiredSessions(NOW.plusSeconds(2L)));
+            cleanupFinished.countDown();
+        }, "multipart-active-session-cleanup-test");
+
+        upload.start();
+        assertTrue(content.awaitReadStarted());
+        cleanup.start();
+        assertFalse(cleanupFinished.await(200L, TimeUnit.MILLISECONDS));
+
+        content.releaseRead();
+        upload.join(TimeUnit.SECONDS.toMillis(2L));
+        cleanup.join(TimeUnit.SECONDS.toMillis(2L));
+        assertFalse(upload.isAlive());
+        assertFalse(cleanup.isAlive());
+        assertTrue(uploadFailure.get() == null);
+        assertTrue(uploaded.get() != null);
+        assertEquals(Integer.valueOf(1), cleaned.get());
     }
 
     /** 无法解析的 multipart JSON 必须返回稳定参数错误。 */
@@ -1087,6 +1179,69 @@ public class FileStorageWebControllerTest {
         @Override
         public PresignedDownload presignDownload(PresignDownloadRequest request) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    /** 首次读取时阻塞的固定长度分片流，用于协调上传与清理测试。 */
+    private static final class BlockingMultipartInputStream extends java.io.InputStream {
+        /** 首次读取已开始的同步信号。 */
+        private final CountDownLatch readStarted = new CountDownLatch(1);
+        /** 放行分片读取的同步信号。 */
+        private final CountDownLatch readReleased = new CountDownLatch(1);
+        /** 剩余可读取字节数。 */
+        private long remaining;
+        /** 是否已经等待首次读取放行。 */
+        private boolean hasWaited;
+
+        /** 创建指定长度的阻塞分片流。 */
+        private BlockingMultipartInputStream(long contentLength) {
+            remaining = contentLength;
+        }
+
+        /** 等待 provider 开始读取分片数据。 */
+        private boolean awaitReadStarted() throws InterruptedException {
+            return readStarted.await(2L, TimeUnit.SECONDS);
+        }
+
+        /** 允许 provider 继续读取分片数据。 */
+        private void releaseRead() {
+            readReleased.countDown();
+        }
+
+        /** 读取一个填充字节。 */
+        @Override
+        public int read() throws java.io.IOException {
+            byte[] buffer = new byte[1];
+            return read(buffer, 0, 1) == -1 ? -1 : buffer[0] & 0xff;
+        }
+
+        /** 在首个批量读取时阻塞，再返回固定内容。 */
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws java.io.IOException {
+            if (remaining == 0L) {
+                return -1;
+            }
+            waitForReadRelease();
+            int count = (int) Math.min(remaining, length);
+            java.util.Arrays.fill(buffer, offset, offset + count, (byte) 'a');
+            remaining -= count;
+            return count;
+        }
+
+        /** 等待测试线程允许首次读取继续。 */
+        private void waitForReadRelease() throws java.io.IOException {
+            if (!hasWaited) {
+                hasWaited = true;
+                readStarted.countDown();
+                try {
+                    if (!readReleased.await(2L, TimeUnit.SECONDS)) {
+                        throw new java.io.IOException("multipart read was not released");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new java.io.IOException("multipart read was interrupted", exception);
+                }
+            }
         }
     }
 
