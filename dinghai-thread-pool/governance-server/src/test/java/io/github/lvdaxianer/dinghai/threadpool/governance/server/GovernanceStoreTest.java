@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import io.github.lvdaxianer.dinghai.threadpool.governance.api.MetricPage;
 import org.junit.Test;
 
@@ -52,5 +53,38 @@ public class GovernanceStoreTest {
         assertEquals(1, restarted.instances().size());
         assertEquals("app-1", restarted.instances().getFirst().instanceId());
         assertEquals("https://app-1.internal", restarted.instances().getFirst().baseUrl());
+    }
+
+    /** cursor 过期时必须先记录缺口并发布快照，随后才能重置游标。 */
+    @Test
+    public void shouldRecoverFromExpiredCursorWithSnapshot() throws Exception {
+        Path database = Files.createTempDirectory("governance-recovery").resolve("governance.db");
+        GovernanceStore store = new GovernanceStore(database);
+        store.register("app-1", "https://localhost:8080", "test");
+        store.commitCursor("app-1", "1");
+        AtomicBoolean snapshotConsumed = new AtomicBoolean();
+        GovernanceCollector collector = new GovernanceCollector(store);
+
+        collector.collectWithRecovery("app-1", ignored -> { throw new CursorExpiredException("5"); },
+                () -> List.of(), ignored -> { }, ignored -> snapshotConsumed.set(true));
+
+        assertEquals("5", store.cursor("app-1").orElseThrow());
+        assertEquals(1, store.gaps("app-1").size());
+        assertEquals("RECOVERED", store.gaps("app-1").getFirst().recoveryStatus());
+        assertEquals(true, snapshotConsumed.get());
+    }
+
+    /** 总控告警必须在 SQLite 重启后保留，并可被恢复流程关闭。 */
+    @Test
+    public void shouldPersistAndResolveAlertState() throws Exception {
+        Path database = Files.createTempDirectory("governance-alert").resolve("governance.db");
+        GovernanceStore first = new GovernanceStore(database);
+        first.fireAlert("collection-gap:app-1", "9");
+
+        GovernanceStore restarted = new GovernanceStore(database);
+        assertEquals("OPEN", restarted.alert("collection-gap:app-1").orElseThrow().status());
+        restarted.resolveAlert("collection-gap:app-1");
+
+        assertEquals("RESOLVED", restarted.alert("collection-gap:app-1").orElseThrow().status());
     }
 }

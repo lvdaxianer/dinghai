@@ -85,10 +85,97 @@ public final class GovernanceStore {
         } catch (SQLException exception) { throw failure("record collection gap", exception); }
     }
 
+    /**
+     * 返回一个实例全部采集缺口，供管理查询和告警恢复使用。
+     *
+     * @param instanceId 子控实例标识
+     * @return 按发现时间排序的缺口记录
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public List<GovernanceCollectionGap> gaps(String instanceId) {
+        List<GovernanceCollectionGap> gaps = new ArrayList<>();
+        String sql = "select id,instance_id,requested_cursor,oldest_cursor,detected_at,recovery_status from governance_collection_gap where instance_id=? order by id";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, instanceId);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) { gaps.add(gap(result)); }
+            }
+            return List.copyOf(gaps);
+        } catch (SQLException exception) { throw failure("list collection gaps", exception); }
+    }
+
+    /**
+     * 将尚未恢复的缺口标记为已用快照恢复。
+     *
+     * @param instanceId 子控实例标识
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public void markLatestGapRecovered(String instanceId) {
+        String sql = "update governance_collection_gap set recovery_status='RECOVERED' where id=(select max(id) from governance_collection_gap where instance_id=? and recovery_status='OPEN')";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, instanceId);
+            statement.executeUpdate();
+        } catch (SQLException exception) { throw failure("mark collection gap recovered", exception); }
+    }
+
+    /**
+     * 创建或刷新一个开放告警，保留首次触发时间。
+     *
+     * @param alertKey 稳定告警键
+     * @param value 当前安全摘要值
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public void fireAlert(String alertKey, String value) {
+        long now = System.currentTimeMillis();
+        String sql = "insert into governance_alert_state(alert_key,status,first_fired_at,last_fired_at,last_value,resolved_at) values(?,?,?,?,?,null) on conflict(alert_key) do update set status='OPEN',last_fired_at=excluded.last_fired_at,last_value=excluded.last_value,resolved_at=null";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, alertKey); statement.setString(2, "OPEN");
+            statement.setLong(3, now); statement.setLong(4, now); statement.setString(5, value);
+            statement.executeUpdate();
+        } catch (SQLException exception) { throw failure("fire alert", exception); }
+    }
+
+    /**
+     * 将一个已恢复的告警标记为已解决。
+     *
+     * @param alertKey 稳定告警键
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public void resolveAlert(String alertKey) {
+        String sql = "update governance_alert_state set status='RESOLVED',resolved_at=? where alert_key=? and status='OPEN'";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, System.currentTimeMillis()); statement.setString(2, alertKey);
+            statement.executeUpdate();
+        } catch (SQLException exception) { throw failure("resolve alert", exception); }
+    }
+
+    /**
+     * 读取一个告警的当前持久化状态。
+     *
+     * @param alertKey 稳定告警键
+     * @return 可选告警状态
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public Optional<GovernanceAlertState> alert(String alertKey) {
+        String sql = "select alert_key,status,first_fired_at,last_fired_at,last_value,resolved_at from governance_alert_state where alert_key=?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, alertKey);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() ? Optional.of(alert(result)) : Optional.empty();
+            }
+        } catch (SQLException exception) { throw failure("read alert", exception); }
+    }
+
     private void initialize() {
         execute("create table if not exists governance_instance(instance_id text primary key,base_url text not null,environment text not null,enabled integer not null,updated_at integer not null)");
         execute("create table if not exists governance_cursor(instance_id text primary key,cursor text not null,updated_at integer not null)");
         execute("create table if not exists governance_collection_gap(id integer primary key autoincrement,instance_id text not null,requested_cursor text,oldest_cursor text,detected_at integer not null,recovery_status text not null)");
+        execute("create table if not exists governance_alert_state(alert_key text primary key,status text not null,first_fired_at integer not null,last_fired_at integer not null,last_value text,resolved_at integer)");
     }
 
     /**
@@ -103,6 +190,38 @@ public final class GovernanceStore {
     private GovernanceInstance instance(ResultSet result) throws SQLException {
         return new GovernanceInstance(result.getString("instance_id"), result.getString("base_url"),
                 result.getString("environment"), result.getBoolean("enabled"), result.getLong("updated_at"));
+    }
+
+    /**
+     * 从查询行构建采集缺口投影。
+     *
+     * @param result SQLite 查询结果
+     * @return 采集缺口投影
+     * @throws SQLException 读取结果失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private GovernanceCollectionGap gap(ResultSet result) throws SQLException {
+        return new GovernanceCollectionGap(result.getLong("id"), result.getString("instance_id"),
+                result.getString("requested_cursor"), result.getString("oldest_cursor"),
+                result.getLong("detected_at"), result.getString("recovery_status"));
+    }
+
+    /**
+     * 从查询行构建告警状态投影。
+     *
+     * @param result SQLite 查询结果
+     * @return 告警状态投影
+     * @throws SQLException 读取结果失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private GovernanceAlertState alert(ResultSet result) throws SQLException {
+        long resolvedAt = result.getLong("resolved_at");
+        Long resolved = result.wasNull() ? null : resolvedAt;
+        return new GovernanceAlertState(result.getString("alert_key"), result.getString("status"),
+                result.getLong("first_fired_at"), result.getLong("last_fired_at"),
+                result.getString("last_value"), resolved);
     }
 
     private void execute(String sql) {
