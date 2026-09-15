@@ -32,6 +32,7 @@ public class ThreadPoolAutoConfiguration {
     public ThreadPoolGovernor threadPoolGovernor(ThreadPoolProperties properties,
                                                  Optional<ThreadPoolRetryPersistence> retryPersistence,
                                                  Optional<ThreadPoolDropNotifier> dropNotifier) {
+        validateProcessThreadCapacity(properties);
         validateReliabilityPorts(properties, retryPersistence);
         ThreadPoolGovernor governor = new ThreadPoolGovernor(properties.getManagedWorkerBudget(),
                 retryPersistence.orElse(null), dropNotifier.orElse((poolName, owner) -> { }));
@@ -39,10 +40,19 @@ public class ThreadPoolAutoConfiguration {
         return governor;
     }
 
+    /** 验证进程线程容量已显式声明且覆盖受管 worker 预算。 */
+    private void validateProcessThreadCapacity(ThreadPoolProperties properties) {
+        Integer capacity = properties.getProcessThreadCapacity();
+        if (capacity == null || capacity < 1 || capacity < properties.getManagedWorkerBudget()) {
+            throw new IllegalArgumentException("process-thread-capacity must cover managed-worker-budget");
+        }
+    }
+
     /** 在容器启动时拒绝缺少业务重试端口的可靠性配置。 */
     private void validateReliabilityPorts(ThreadPoolProperties properties,
                                           Optional<ThreadPoolRetryPersistence> retryPersistence) {
-        boolean needsRetry = properties.getPools().values().stream()
+        boolean needsRetry = properties.getPools() != null && properties.getPools().values().stream()
+                .filter(java.util.Objects::nonNull)
                 .anyMatch(pool -> ThreadPoolDefinition.Reliability.PERSIST_FOR_RETRY.name()
                         .equals(pool.getReliability()));
         if (needsRetry && retryPersistence.isEmpty()) {

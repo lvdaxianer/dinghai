@@ -10,6 +10,7 @@
 dinghai:
   thread-pool:
     enabled: true
+    process-thread-capacity: 64
     managed-worker-budget: 16
     endpoint-enabled: false
     metrics:
@@ -26,6 +27,8 @@ dinghai:
         queue-capacity: 64
 ```
 
+`process-thread-capacity` 是应用显式声明的进程线程容量，必须大于等于
+`managed-worker-budget`，并应为容器、JVM、调度和三方库线程预留预算。
 `managed-worker-budget` 仅约束由 `ThreadPoolGovernor` 创建的 worker。业务代码从
 `ThreadPoolGovernor.executor(name)` 获取 `ExecutorService`；不要持有原始
 `ThreadPoolExecutor`。任务执行期由全局许可限制，MDC 通过 `MdcTaskDecorator` 传播。

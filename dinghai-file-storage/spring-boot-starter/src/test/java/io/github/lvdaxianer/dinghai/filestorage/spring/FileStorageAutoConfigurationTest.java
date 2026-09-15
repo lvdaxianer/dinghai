@@ -847,6 +847,7 @@ public class FileStorageAutoConfigurationTest {
     private String[] threadPoolProperties() {
         return new String[]{
                 "dinghai.thread-pool.enabled=true",
+                "dinghai.thread-pool.process-thread-capacity=1",
                 "dinghai.thread-pool.managed-worker-budget=1",
                 "dinghai.thread-pool.metrics.sqlite-path=" + temporaryFolder.getRoot().toPath()
                         .resolve("thread-pool-metrics.db"),

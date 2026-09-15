@@ -12,13 +12,21 @@ import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolGovernor;
 import java.time.Duration;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.Test;
 
 /** 验证子控 SQLite 的 cursor 分页。 */
 public class SqliteMetricStoreTest {
+
+    private static final int CONCURRENT_METRIC_COUNT = 100;
 
     /** 重启后的存储必须能从上次 cursor 续拉。 */
     @Test
@@ -99,6 +107,62 @@ public class SqliteMetricStoreTest {
         assertFalse(content.contains("java.sql."));
         assertFalse(content.contains("DriverManager"));
         assertFalse(content.contains("PreparedStatement"));
+    }
+
+    /** SQLite 在 WAL 模式下必须允许指标写入与分页读取并发执行。 */
+    @Test
+    public void shouldReadAndWriteMetricsConcurrently() throws Exception {
+        Path database = Files.createTempDirectory("thread-pool-store").resolve("metrics.db");
+        SqliteMetricStore store = new SqliteMetricStore(database, 10);
+        CountDownLatch started = new CountDownLatch(2);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Void> writer = executor.submit(metricWriter(store, started));
+            Future<Void> reader = executor.submit(metricReader(store, started));
+            writer.get(10, TimeUnit.SECONDS);
+            reader.get(10, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertEquals(CONCURRENT_METRIC_COUNT, allMetrics(store).size());
+    }
+
+    /** 返回持续写入固定数量指标的并发任务。 */
+    private Callable<Void> metricWriter(SqliteMetricStore store, CountDownLatch started) {
+        return () -> {
+            started.countDown();
+            started.await(5, TimeUnit.SECONDS);
+            for (int index = 0; index < CONCURRENT_METRIC_COUNT; index++) {
+                store.append(metric("concurrent-work-h"));
+            }
+            return null;
+        };
+    }
+
+    /** 返回在写入期间持续读取分页数据的并发任务。 */
+    private Callable<Void> metricReader(SqliteMetricStore store, CountDownLatch started) {
+        return () -> {
+            started.countDown();
+            started.await(5, TimeUnit.SECONDS);
+            for (int index = 0; index < CONCURRENT_METRIC_COUNT; index++) {
+                store.page(null, 10);
+            }
+            return null;
+        };
+    }
+
+    /** 读取全部指标以验证并发写入没有丢失。 */
+    private List<ThreadPoolMetric> allMetrics(SqliteMetricStore store) {
+        List<ThreadPoolMetric> metrics = new ArrayList<>(CONCURRENT_METRIC_COUNT);
+        MetricPage page = store.page(null, 10);
+        while (true) {
+            metrics.addAll(page.metrics());
+            if (!page.hasMore()) {
+                return metrics;
+            }
+            page = store.page(page.nextCursor(), 10);
+        }
     }
 
     private ThreadPoolMetric metric(String name) {

@@ -16,6 +16,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class ThreadPoolProperties {
     private boolean enabled;
     private boolean endpointEnabled;
+    private Integer processThreadCapacity;
     private int managedWorkerBudget = 1;
     private Map<String, Pool> pools = new LinkedHashMap<>();
     private Metrics metrics = new Metrics();
@@ -35,6 +36,14 @@ public class ThreadPoolProperties {
 
     /** @param endpointEnabled 是否暴露子控只读端点 */
     public void setEndpointEnabled(boolean endpointEnabled) { this.endpointEnabled = endpointEnabled; }
+
+    /** @return 应用进程可承受的总线程容量声明 */
+    public Integer getProcessThreadCapacity() { return processThreadCapacity; }
+
+    /** @param processThreadCapacity 应用进程可承受的总线程容量声明 */
+    public void setProcessThreadCapacity(Integer processThreadCapacity) {
+        this.processThreadCapacity = processThreadCapacity;
+    }
 
     /** @return 受管 worker 预算 */
     public int getManagedWorkerBudget() { return managedWorkerBudget; }
@@ -93,8 +102,8 @@ public class ThreadPoolProperties {
         private int minimumSize = 1;
         private int maximumSize = 1;
         private int weight = 1;
-        private String priority = "MEDIUM";
-        private String reliability = "FAIL_FAST";
+        private String priority;
+        private String reliability;
         private int queueCapacity = 100;
         private String owner;
 
