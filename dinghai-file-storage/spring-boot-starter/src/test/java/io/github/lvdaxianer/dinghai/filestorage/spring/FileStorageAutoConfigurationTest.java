@@ -251,6 +251,59 @@ public class FileStorageAutoConfigurationTest {
                 .run(context -> assertThat(context).hasFailed());
     }
 
+    /**
+     * 小于远端共同最小值的分片大小必须在启动期失败。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void shouldRejectMultipartPartSizeBelowProviderMinimum() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.multipart.part-size=1MB")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining(
+                            "multipart configuration is invalid");
+                });
+    }
+
+    /**
+     * multipart 临时目录不得与正式本地存储目录重叠。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void shouldRejectOverlappingLocalStorageAndMultipartRoots() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.multipart.local-root=" + storageRoot())
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining(
+                            "multipart root overlaps local storage root");
+                });
+    }
+
+    /**
+     * Local provider 必须初始化配置指定的独立分片临时目录。
+     *
+     * @throws Exception 创建测试目录失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void shouldUseConfiguredMultipartRootForLocalProvider() throws Exception {
+        Path multipartRoot = temporaryFolder.getRoot().toPath().resolve("multipart-sessions");
+
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.multipart.local-root=" + multipartRoot)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(LocalFileStorageAdapter.class);
+                    assertThat(Files.isDirectory(multipartRoot)).isTrue();
+                });
+    }
+
     /** 显式启用迁移后自动装配应提供迁移服务所需的 Jackson 编解码器。 */
     @Test
     public void shouldProvideObjectMapperForMigrationService() {

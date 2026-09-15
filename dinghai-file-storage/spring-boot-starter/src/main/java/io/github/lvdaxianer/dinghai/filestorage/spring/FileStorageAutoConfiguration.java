@@ -64,6 +64,7 @@ public class FileStorageAutoConfiguration {
     public FileStorage fileStorage(FileStorageProperties properties, Environment environment,
                                    Optional<OSSClient> aliyunOssClient) {
         validateWebPathPrefix(properties.getWeb().getPathPrefix());
+        validateMultipartProperties(properties.getMultipart());
         String bucket = validateBucket(properties.getBucket());
         return selectedFileStorage(properties, environment, bucket, aliyunOssClient);
     }
@@ -373,7 +374,7 @@ public class FileStorageAutoConfiguration {
                 signingKey.getBytes(StandardCharsets.UTF_8), properties.getUpload().getMaxSize(),
                 properties.getUpload().getContentTypeWhitelist(),
                 properties.getSecurity().getMaximumPresignExpiry(), Clock.systemUTC(),
-                properties.getWeb().getPathPrefix());
+                properties.getWeb().getPathPrefix(), properties.getMultipart().getLocalRoot());
     }
 
     /**
@@ -502,7 +503,15 @@ public class FileStorageAutoConfiguration {
         return bucketRoot;
     }
 
-    /** 校验 Local 主存储不会复用可清理缓存目录，并拒绝已移除的显式缓存配置。 */
+    /**
+     * 校验 Local 主存储不会复用可清理缓存或分片临时目录，并拒绝已移除的显式缓存配置。
+     *
+     * @param properties 已绑定的文件存储属性
+     * @param environment Spring 运行环境
+     * @param bucket 已校验的公共 bucket
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
     private void validateLocalCacheConfiguration(FileStorageProperties properties,
                                                  Environment environment, String bucket) {
         if ("true".equalsIgnoreCase(environment.getProperty("dinghai.file-storage.cache.enabled"))) {
@@ -510,13 +519,21 @@ public class FileStorageAutoConfiguration {
         }
         Path cacheRoot = properties.getCache().getRoot();
         Path localRoot = properties.getLocal().getRoot();
-        if (cacheRoot == null || localRoot == null) {
+        if (localRoot == null) {
             return;
         }
         Path primaryRoot = resolveLocalBucketRoot(localRoot, bucket);
-        Path normalizedCache = cacheRoot.toAbsolutePath().normalize();
-        if (normalizedCache.startsWith(primaryRoot) || primaryRoot.startsWith(normalizedCache)) {
-            throw invalidConfiguration("cache root overlaps local storage root", null);
+        if (cacheRoot != null) {
+            Path normalizedCache = cacheRoot.toAbsolutePath().normalize();
+            // 缓存清理不能触及正式对象目录。
+            if (normalizedCache.startsWith(primaryRoot) || primaryRoot.startsWith(normalizedCache)) {
+                throw invalidConfiguration("cache root overlaps local storage root", null);
+            }
+        }
+        Path multipartRoot = properties.getMultipart().getLocalRoot().toAbsolutePath().normalize();
+        // multipart 会话清理不能触及正式对象目录。
+        if (multipartRoot.startsWith(primaryRoot) || primaryRoot.startsWith(multipartRoot)) {
+            throw invalidConfiguration("multipart root overlaps local storage root", null);
         }
     }
 
@@ -532,6 +549,21 @@ public class FileStorageAutoConfiguration {
         }
         if (web.getMaxConcurrentTransfersPerKey() < 0) {
             throw invalidConfiguration("file storage per-key transfer limit must not be negative", null);
+        }
+    }
+
+    /**
+     * 将 multipart 属性错误映射为不会泄露部署细节的稳定启动失败。
+     *
+     * @param multipart multipart 上传配置
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private void validateMultipartProperties(FileStorageProperties.Multipart multipart) {
+        try {
+            multipart.validate();
+        } catch (IllegalArgumentException exception) {
+            throw invalidConfiguration("multipart configuration is invalid", exception);
         }
     }
 
