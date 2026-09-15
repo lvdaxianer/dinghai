@@ -17,7 +17,7 @@ dinghai:
       retention: 24h
       page-limit-max: 1000
     pools:
-      file-storage-web-h:
+      file-storage-web:
         minimum-size: 2
         maximum-size: 8
         weight: 10
@@ -29,10 +29,21 @@ dinghai:
 `managed-worker-budget` 仅约束由 `ThreadPoolGovernor` 创建的 worker。业务代码从
 `ThreadPoolGovernor.executor(name)` 获取 `ExecutorService`；不要持有原始
 `ThreadPoolExecutor`。任务执行期由全局许可限制，MDC 通过 `MdcTaskDecorator` 传播。
+`fileStorageWebTaskExecutor` 在同名池存在时也会复用该全局许可，仍保持原 Spring Bean 名称与
+`ThreadPoolTaskExecutor` 类型。
+
+SQLite 是本地文件型数据库，`metrics.sqlite-path` 必须位于持久卷；它替代 cursor offset
+文件和内存缓冲区，但不替代 Prometheus 的长期指标存储。子控导出
+`dinghai.thread.pool.*` Micrometer 指标，并注册 `dinghaiThreadPoolMetricStore` 健康检查。
+
+过载策略：`FAIL_FAST` 抛出稳定 `ThreadPoolOverloadException`；`PERSIST_FOR_RETRY` 必须由
+应用提供 `ThreadPoolRetryPersistence` Bean；`BEST_EFFORT_DROP` 必须配置 `owner`，并可提供
+`ThreadPoolDropNotifier` 接收可归属的丢弃通知。
 
 指标查询端点默认关闭。打开 `endpoint-enabled` 后暴露
 `GET /actuator/dinghai-thread-pool/metrics?cursor=&limit=`。必须在网关或 Spring Security
-中为此路径配置 TLS 与服务身份认证。
+中为此路径配置 TLS 与服务身份认证。端点还包括用于过期 cursor 恢复的
+`GET /actuator/dinghai-thread-pool/snapshot`。
 
 ## 总控
 
@@ -40,4 +51,9 @@ dinghai:
 不提供高可用。原始时序指标由应用的 Micrometer/Prometheus 体系保存。
 
 总控只在指标页成功被实时聚合后提交 `nextCursor`。因此失败会幂等重拉，不会跳过数据。
-SQLite 文件路径必须挂载持久卷。
+cursor 过期会记录 gap、触发告警并使用子控快照恢复。SQLite 文件路径必须挂载持久卷；总控不
+保存原始高频指标、访问 Token、mTLS 私钥或业务任务内容。子控注册仅接受 HTTPS 地址，服务
+认证可使用部署注入且可轮换的 Token，TLS/mTLS 由运行环境配置。
+
+总控管理 API 默认拒绝访问。宿主提供 `GovernanceAccessPolicy` 后可使用实例注册与查询 API，
+以及 `GET /governance/gaps?instanceId=`、`GET /governance/alerts` 查询持久化恢复状态。

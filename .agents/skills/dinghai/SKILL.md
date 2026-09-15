@@ -118,6 +118,24 @@ dinghai:
 
 **不要用它**：分布式锁、消息队列、Redis 数据结构（List/Set/Hash）封装、持久化存储——超出契约定位。
 
+## 模块：dinghai-thread-pool
+
+受管业务线程池治理能力，限制业务 worker 预算并提供本地 SQLite 子控采集与单实例总控。
+
+```xml
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-thread-pool-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+- **边界**：仅治理 `ThreadPoolGovernor` 创建或显式装饰接入的业务任务，不控制 Tomcat、GC/JIT、ForkJoin 默认池或三方 SDK 线程。
+- **子控**：启用后使用 `metrics.sqlite-path` 本地 SQLite 保存增量指标；生产必须挂载持久卷，配置 TLS 和服务身份认证后才可开放快照与 cursor 指标端点。
+- **总控**：`dinghai-thread-pool-governance-server` 是非高可用单实例服务，其 SQLite 只保存实例、cursor、gap 和 alert 控制面状态；原始时序数据由 Prometheus 保存。
+- **可靠性**：`FAIL_FAST` 返回稳定过载错误，`PERSIST_FOR_RETRY` 要求应用提供 `ThreadPoolRetryPersistence`，`BEST_EFFORT_DROP` 要求声明业务 `owner`。
+- **首个接入**：文件存储的 `fileStorageWebTaskExecutor` 配置同名 `file-storage-web` 池后将共享全局 worker 许可，并保持 Bean 兼容性。
+
 ## 扩展约定
 
 - 新的通用基础设施能力沉淀为本仓库的新模块（`dinghai-*`），并同步更新本 Skill 的模块清单与速查表。
