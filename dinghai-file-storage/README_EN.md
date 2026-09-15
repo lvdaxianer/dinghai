@@ -143,6 +143,17 @@ Alibaba Cloud OSS uses `com.aliyun:alibabacloud-oss-v2:0.5.1`. Its bucket should
 | `upload.max-size` | `long` (bytes) | `100MB` | Size limit shared by plain and presigned uploads; exceeding it throws `OBJECT_TOO_LARGE` |
 | `upload.content-type-whitelist` | `Set<String>` | empty set (no restriction) | Content type whitelist; when non-empty, uploads whose content type is not in the list throw `CONTENT_TYPE_NOT_ALLOWED` |
 
+### multipart (Large-File Multipart Upload)
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `multipart.part-size` | `DataSize` | `10MB` | Target part size: every non-final part must equal it and the final part may be smaller. It must be at least `5MB` to satisfy S3 and OSS requirements |
+| `multipart.max-parts` | `int` | `10000` | Maximum number of parts in one object; valid range is `1` through `10000` |
+| `multipart.session-ttl` | `Duration` | `24h` | Maximum lifetime of an incomplete session; a client `expiresIn` cannot exceed it |
+| `multipart.local-root` | `Path` | `${java.io.tmpdir}/dinghai-file-storage-multipart` | Root for incomplete Local parts and session metadata; configure a persistent directory in production |
+| `multipart.max-concurrent-uploads` | `int` | `8` | Limit for Local parts written through the application; exhaustion returns `429` immediately without reading the rejected request body |
+| `multipart.cleanup-interval` | `Duration` | `PT5M` | Fixed-delay interval for scheduled expired-session cleanup |
+
 ### migration (Offline Migration)
 
 | Key | Type | Default | Description |
@@ -182,6 +193,13 @@ dinghai:
       queue-capacity: 32
     upload:
       max-size: 100MB
+    multipart:
+      part-size: 10MB
+      max-parts: 10000
+      session-ttl: 24h
+      local-root: /var/lib/app/multipart
+      max-concurrent-uploads: 8
+      cleanup-interval: PT5M
 ```
 
 ## Web Endpoints
@@ -195,6 +213,67 @@ With `web.enabled=true`, the following endpoints are registered (default prefix 
 | `GET /preview/{*key}` | Preview; forces `inline` and is limited by `web.max-concurrent-reads` |
 | `GET /read/key/{*key}` plus `/read/key/preview/{*key}` and `/read/key/download/{*key}` | Anonymous read by the real object key; no component read credential required, but limited by `web.max-concurrent-reads` |
 | `GET /read/v1/{id}` plus `/read/v1/preview/{id}` and `/read/v1/download/{id}` | Anonymous read by stable file ID — no user authentication and no signature required (see next section) |
+
+### Large-File Multipart Upload
+
+Multipart endpoints also require `web.enabled=true` and use `web.path-prefix`, but they are registered only when the host provides a `FileStorageAccessPolicy` Bean. That policy still decides `MULTIPART_UPLOAD` for the current principal and object key on every request. Without the Bean these endpoints are not registered; this is independent of normal `web.direct-access` authorization.
+
+| Endpoint | Description |
+| --- | --- |
+| `POST /multipart` | Creates a session and returns `201 Created` with `uploadId`, part sizing, expiry, and the confirmed-parts snapshot |
+| `POST /multipart/{uploadId}/parts/{partNumber}/presign` | Returns the upload method, expiry, and required headers for one part |
+| `GET /multipart/{uploadId}/parts` | Returns provider-confirmed parts sorted by `partNumber`; this is the authority for resuming |
+| `PUT /multipart/{uploadId}/parts/{partNumber}` | **Local only**: the application streams this part; remote providers return `MULTIPART_INVALID` from this route |
+| `POST /multipart/{uploadId}/complete` | Submits the part manifest and completes the upload, returning confirmed `ObjectMetadata` |
+| `DELETE /multipart/{uploadId}` | Aborts the session and returns `204 No Content` |
+
+This example creates a 20 MiB object with fixed 10 MiB parts. `partSize` must equal `multipart.part-size`, `size` must not exceed `upload.max-size`, and `expiresIn` must not exceed `multipart.session-ttl`:
+
+```bash
+curl --request POST https://app.example/files/multipart \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "key":"uploads/video.mp4",
+    "size":20971520,
+    "partSize":10485760,
+    "contentType":"video/mp4",
+    "expiresIn":"PT30M"
+  }'
+```
+
+A typical creation response contains the following fields (`uploadId` is opaque):
+
+```json
+{
+  "uploadId": "opaque-upload-id",
+  "key": {"value": "uploads/video.mp4"},
+  "totalSize": 20971520,
+  "partSize": 10485760,
+  "partCount": 2,
+  "expiresAt": "2026-09-15T12:30:00Z",
+  "parts": []
+}
+```
+
+- **Local**: optionally call `POST /multipart/opaque-upload-id/parts/1/presign` to obtain the application-declared `PUT` method, expiry, and required headers, then stream the part to `PUT /files/multipart/opaque-upload-id/parts/1`. Every part must have exactly its expected length. The application limits these writes with `multipart.max-concurrent-uploads`; exhaustion returns `429` with `Retry-After: 1` before the body is read.
+- **MinIO / RustFS / Alibaba Cloud OSS**: after calling the same `presign` endpoint, the client must perform the provider-native `PUT` directly using the returned `url`, `method`, and `requiredHeaders`; part content does not pass through the application. Never log, cache, or commit a complete presigned URL.
+- For a failed part or network interruption, upload the **same partNumber** again; the later upload replaces the earlier one. Before resuming, call `GET /multipart/{uploadId}/parts` and build completion only from its `partNumber`, `size`, and `etag` values. Do not infer state from a local client cache.
+
+Completion must contain every provider-confirmed part. `idempotencyKey` is optional and can be used for client-side call tracking:
+
+```bash
+curl --request POST https://app.example/files/multipart/opaque-upload-id/complete \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "parts":[
+      {"partNumber":1,"size":10485760,"etag":"provider-etag-1"},
+      {"partNumber":2,"size":10485760,"etag":"provider-etag-2"}
+    ],
+    "idempotencyKey":"client-completion-token"
+  }'
+```
+
+During the session TTL, repeating completion for the same session returns the first confirmed metadata; repeating abort also retains `204` success semantics. The scheduled cleanup reclaims incomplete sessions after expiry. An expired session cannot resume and must be created again.
 
 The migration management endpoints are fixed at `POST /files/migration/export` and `POST /files/migration/import` (parameter `packageName`) and do not follow `web.path-prefix`.
 
@@ -270,9 +349,9 @@ Offline migration only handles server-directory packages; large files are not up
 
 ## Error Codes
 
-Unified error codes are defined in `FileStorageErrorCode`: `INVALID_REQUEST`, `OBJECT_NOT_FOUND`, `INVALID_OBJECT_KEY`, `OBJECT_TOO_LARGE`, `CONTENT_TYPE_NOT_ALLOWED`, `AUTHENTICATION_FAILED`, `STORAGE_UNAVAILABLE`, `INVALID_PRESIGN`, `INVALID_CONFIGURATION`, `RATE_LIMITED`, `INTERNAL_ERROR`.
+Unified error codes are defined in `FileStorageErrorCode`: `INVALID_REQUEST`, `OBJECT_NOT_FOUND`, `INVALID_OBJECT_KEY`, `OBJECT_TOO_LARGE`, `CONTENT_TYPE_NOT_ALLOWED`, `AUTHENTICATION_FAILED`, `STORAGE_UNAVAILABLE`, `INVALID_PRESIGN`, `INVALID_CONFIGURATION`, `RATE_LIMITED`, `MULTIPART_INVALID`, `MULTIPART_NOT_FOUND`, `MULTIPART_EXPIRED`, `MULTIPART_CONFLICT`, `INTERNAL_ERROR`.
 
-Web-layer HTTP mapping: `OBJECT_NOT_FOUND` → 404, `OBJECT_TOO_LARGE` → 413, `INVALID_PRESIGN` / `AUTHENTICATION_FAILED` → 403, `STORAGE_UNAVAILABLE` → 503, `RATE_LIMITED` → 429 (with a `Retry-After: 1` header), everything else → 400; the response body is `{code, message}`.
+Web-layer HTTP mapping: `OBJECT_NOT_FOUND` / `MULTIPART_NOT_FOUND` → 404, `MULTIPART_EXPIRED` → 410, `MULTIPART_CONFLICT` → 409, `OBJECT_TOO_LARGE` → 413, `INVALID_PRESIGN` / `AUTHENTICATION_FAILED` → 403, `STORAGE_UNAVAILABLE` → 503, `RATE_LIMITED` → 429 (with a `Retry-After: 1` header), and `MULTIPART_INVALID` plus other request errors → 400. The response body is `{code, message}`.
 
 ## Design Notes
 
@@ -310,7 +389,23 @@ The benchmark uses independent random object keys and best-effort deletes the ob
 mvn test
 ```
 
-The Alibaba Cloud OSS acceptance test runs only when credentials are injected. It uses random
+Multipart lifecycle acceptance tests are skipped by default and run only with explicit temporary test credentials. The MinIO test creates a temporary bucket; the RustFS test also creates and deletes a temporary bucket:
+
+```bash
+export DINGHAI_FILE_STORAGE_MINIO_IT=true
+export DINGHAI_FILE_STORAGE_MINIO_ENDPOINT=http://localhost:9000
+export DINGHAI_FILE_STORAGE_MINIO_ACCESS_KEY=CHANGE_ME
+export DINGHAI_FILE_STORAGE_MINIO_SECRET_KEY=CHANGE_ME
+mvn -pl minio -am -Dtest=MinioMultipartLifecycleIntegrationTest test
+
+export DINGHAI_FILE_STORAGE_RUSTFS_IT=true
+export DINGHAI_FILE_STORAGE_RUSTFS_ENDPOINT=http://localhost:9100
+export DINGHAI_FILE_STORAGE_RUSTFS_ACCESS_KEY=CHANGE_ME
+export DINGHAI_FILE_STORAGE_RUSTFS_SECRET_KEY=CHANGE_ME
+mvn -pl rustfs -am -Dtest=RustfsLifecycleIntegrationTest test
+```
+
+The Alibaba Cloud OSS acceptance test runs when credentials are injected. It uses random
 `__dinghai_it__/` objects in the `dinghai` bucket and deletes them on completion:
 
 ```bash

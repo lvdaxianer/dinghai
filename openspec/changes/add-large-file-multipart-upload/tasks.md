@@ -18,4 +18,4 @@
 ## 4. Verification and documentation
 
 - [x] 4.1 Add provider isolation, duplicate/retry/concurrency/recovery tests and opt-in integration lifecycle tests.
-- [ ] 4.2 Update Chinese and English README/configuration examples and run focused plus full reactor verification.
+- [x] 4.2 Update Chinese and English README/configuration examples and run focused plus full reactor verification.

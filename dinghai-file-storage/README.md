@@ -143,6 +143,17 @@ RustFS 使用 S3 兼容 API；其 bucket 应保持私有并由运维预先创建
 | `upload.max-size` | `long`（字节） | `100MB` | 普通上传与预签名上传共用的体积上限，超限抛 `OBJECT_TOO_LARGE` |
 | `upload.content-type-whitelist` | `Set<String>` | 空集（不限制） | 内容类型白名单；非空时不在名单内的上传抛 `CONTENT_TYPE_NOT_ALLOWED` |
 
+### multipart（大文件分片上传）
+
+| 配置键 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `multipart.part-size` | `DataSize` | `10MB` | 目标分片大小；非末分片必须等于该值，末片可更小。该值必须不小于 `5MB`，以满足 S3 和 OSS 的限制 |
+| `multipart.max-parts` | `int` | `10000` | 单个对象最多分片数，取值范围为 `1` 到 `10000` |
+| `multipart.session-ttl` | `Duration` | `24h` | 未完成会话的最长存活时间；客户端 `expiresIn` 不得超过该值 |
+| `multipart.local-root` | `Path` | `${java.io.tmpdir}/dinghai-file-storage-multipart` | Local 未完成分片与会话元数据根目录；生产环境应显式配置持久目录 |
+| `multipart.max-concurrent-uploads` | `int` | `8` | Local 分片经应用写入时的并发上限；耗尽立即返回 `429`，且不读取被拒绝请求体 |
+| `multipart.cleanup-interval` | `Duration` | `PT5M` | 定时清理过期会话的 fixed-delay 间隔 |
+
 ### migration（离线迁移）
 
 | 配置键 | 类型 | 默认值 | 说明 |
@@ -182,6 +193,13 @@ dinghai:
       queue-capacity: 32
     upload:
       max-size: 100MB
+    multipart:
+      part-size: 10MB
+      max-parts: 10000
+      session-ttl: 24h
+      local-root: /var/lib/app/multipart
+      max-concurrent-uploads: 8
+      cleanup-interval: PT5M
 ```
 
 ## Web 端点
@@ -195,6 +213,67 @@ dinghai:
 | `GET /preview/{*key}` | 预览，强制 `inline` 响应模式，受 `web.max-concurrent-reads` 限制 |
 | `GET /read/key/{*key}` 及 `/read/key/preview/{*key}`、`/read/key/download/{*key}` | 按真实 object key 匿名直读，不要求组件读取凭证；受 `web.max-concurrent-reads` 限制 |
 | `GET /read/v1/{id}` 及 `/read/v1/preview/{id}`、`/read/v1/download/{id}` | 按稳定文件 ID 匿名读取，不做用户鉴权也不需要签名（见下节） |
+
+### 大文件分片上传
+
+分片端点也受 `web.enabled=true` 和 `web.path-prefix` 控制，但只有宿主注册 `FileStorageAccessPolicy` Bean 时才会注册。每个请求仍由该策略按当前主体和对象 key 判定 `MULTIPART_UPLOAD`；没有该 Bean 时不会注册这些端点。这与普通 `web.direct-access` 授权无关。
+
+| 端点 | 说明 |
+| --- | --- |
+| `POST /multipart` | 创建会话，响应 `201 Created`，返回 `uploadId`、分片大小、分片数、过期时间和已确认分片快照 |
+| `POST /multipart/{uploadId}/parts/{partNumber}/presign` | 返回该片的上传方式、过期时间和必需请求头 |
+| `GET /multipart/{uploadId}/parts` | 返回 provider 已确认的分片清单，按 `partNumber` 排序，是断点续传的权威状态 |
+| `PUT /multipart/{uploadId}/parts/{partNumber}` | **仅 Local**：应用流式接收这个分片；远端 provider 调用此路由返回 `MULTIPART_INVALID` |
+| `POST /multipart/{uploadId}/complete` | 提交分片清单并完成，成功返回确认后的 `ObjectMetadata` |
+| `DELETE /multipart/{uploadId}` | 取消会话，成功返回 `204 No Content` |
+
+下面以 20 MiB 文件和 10 MiB 固定分片为例。创建请求的 `partSize` 必须等于 `multipart.part-size`，`size` 不得超过 `upload.max-size`，`expiresIn` 不得超过 `multipart.session-ttl`：
+
+```bash
+curl --request POST https://app.example/files/multipart \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "key":"uploads/video.mp4",
+    "size":20971520,
+    "partSize":10485760,
+    "contentType":"video/mp4",
+    "expiresIn":"PT30M"
+  }'
+```
+
+典型创建响应包含以下字段（`uploadId` 为不透明会话标识）：
+
+```json
+{
+  "uploadId": "opaque-upload-id",
+  "key": {"value": "uploads/video.mp4"},
+  "totalSize": 20971520,
+  "partSize": 10485760,
+  "partCount": 2,
+  "expiresAt": "2026-09-15T12:30:00Z",
+  "parts": []
+}
+```
+
+- **Local**：可先调用 `POST /multipart/opaque-upload-id/parts/1/presign` 获取由应用声明的 `PUT` 方法、过期时间与必需头，再向 `PUT /files/multipart/opaque-upload-id/parts/1` 流式发送该片；每片必须恰好等于期望长度。应用以 `multipart.max-concurrent-uploads` 限制此类写入，额度耗尽时在读取请求体前返回 `429` 和 `Retry-After: 1`。
+- **MinIO / RustFS / 阿里云 OSS**：调用同一 `presign` 端点后，客户端必须按响应的 `url`、`method`、`requiredHeaders` 直接执行 provider 原生 `PUT`；分片内容不经过应用。不得记录、缓存或提交完整预签名 URL。
+- 分片失败或网络中断时，可对**同一 partNumber** 重新上传，后一次会替换前一次。恢复前先 `GET /multipart/{uploadId}/parts`，仅按该清单中的 `partNumber`、`size`、`etag` 组装完成请求；不要猜测本地状态。
+
+完成请求必须提交服务端已确认的所有分片，`idempotencyKey` 可由客户端携带用于调用侧追踪：
+
+```bash
+curl --request POST https://app.example/files/multipart/opaque-upload-id/complete \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "parts":[
+      {"partNumber":1,"size":10485760,"etag":"provider-etag-1"},
+      {"partNumber":2,"size":10485760,"etag":"provider-etag-2"}
+    ],
+    "idempotencyKey":"client-completion-token"
+  }'
+```
+
+在会话 TTL 内，同一会话的重复完成返回首次确认的对象元数据；重复取消也保持 `204` 成功语义。未完成会话会在过期后由清理任务回收，过期会话不能恢复，需重新创建。
 
 迁移管理端点固定为 `POST /files/migration/export`、`POST /files/migration/import`（参数 `packageName`），不随 `web.path-prefix` 变化。
 
@@ -270,9 +349,9 @@ MinIO、RustFS 与阿里云 OSS 默认启用经远端 `stat` 校验的二级磁�
 
 ## 错误码
 
-统一错误码定义在 `FileStorageErrorCode`：`INVALID_REQUEST`、`OBJECT_NOT_FOUND`、`INVALID_OBJECT_KEY`、`OBJECT_TOO_LARGE`、`CONTENT_TYPE_NOT_ALLOWED`、`AUTHENTICATION_FAILED`、`STORAGE_UNAVAILABLE`、`INVALID_PRESIGN`、`INVALID_CONFIGURATION`、`RATE_LIMITED`、`INTERNAL_ERROR`。
+统一错误码定义在 `FileStorageErrorCode`：`INVALID_REQUEST`、`OBJECT_NOT_FOUND`、`INVALID_OBJECT_KEY`、`OBJECT_TOO_LARGE`、`CONTENT_TYPE_NOT_ALLOWED`、`AUTHENTICATION_FAILED`、`STORAGE_UNAVAILABLE`、`INVALID_PRESIGN`、`INVALID_CONFIGURATION`、`RATE_LIMITED`、`MULTIPART_INVALID`、`MULTIPART_NOT_FOUND`、`MULTIPART_EXPIRED`、`MULTIPART_CONFLICT`、`INTERNAL_ERROR`。
 
-Web 层 HTTP 映射：`OBJECT_NOT_FOUND` → 404，`OBJECT_TOO_LARGE` → 413，`INVALID_PRESIGN` / `AUTHENTICATION_FAILED` → 403，`STORAGE_UNAVAILABLE` → 503，`RATE_LIMITED` → 429（携带 `Retry-After: 1`），其余 → 400；响应体为 `{code, message}`。
+Web 层 HTTP 映射：`OBJECT_NOT_FOUND` / `MULTIPART_NOT_FOUND` → 404，`MULTIPART_EXPIRED` → 410，`MULTIPART_CONFLICT` → 409，`OBJECT_TOO_LARGE` → 413，`INVALID_PRESIGN` / `AUTHENTICATION_FAILED` → 403，`STORAGE_UNAVAILABLE` → 503，`RATE_LIMITED` → 429（携带 `Retry-After: 1`），`MULTIPART_INVALID` 及其余参数错误 → 400；响应体为 `{code, message}`。
 
 ## 设计要点
 
@@ -310,7 +389,23 @@ mvn -f dinghai-file-storage/benchmark/pom.xml exec:java \
 mvn test
 ```
 
-阿里云 OSS 真实验收只在已注入凭证时执行，使用 `dinghai` bucket 的随机 `__dinghai_it__/` 对象并在结束时删除：
+分片生命周期真实验收默认跳过，只有显式注入临时测试凭据时执行。MinIO 测试创建临时 bucket，RustFS 测试也创建并删除临时 bucket：
+
+```bash
+export DINGHAI_FILE_STORAGE_MINIO_IT=true
+export DINGHAI_FILE_STORAGE_MINIO_ENDPOINT=http://localhost:9000
+export DINGHAI_FILE_STORAGE_MINIO_ACCESS_KEY=CHANGE_ME
+export DINGHAI_FILE_STORAGE_MINIO_SECRET_KEY=CHANGE_ME
+mvn -pl minio -am -Dtest=MinioMultipartLifecycleIntegrationTest test
+
+export DINGHAI_FILE_STORAGE_RUSTFS_IT=true
+export DINGHAI_FILE_STORAGE_RUSTFS_ENDPOINT=http://localhost:9100
+export DINGHAI_FILE_STORAGE_RUSTFS_ACCESS_KEY=CHANGE_ME
+export DINGHAI_FILE_STORAGE_RUSTFS_SECRET_KEY=CHANGE_ME
+mvn -pl rustfs -am -Dtest=RustfsLifecycleIntegrationTest test
+```
+
+阿里云 OSS 真实验收在已注入凭证时执行，使用 `dinghai` bucket 的随机 `__dinghai_it__/` 对象并在结束时删除：
 
 ```bash
 export OSS_ACCESS_KEY_ID=CHANGE_ME
