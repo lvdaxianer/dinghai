@@ -4,6 +4,11 @@ import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.core.LocalFileSource;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartCompletion;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPart;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPartRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
@@ -16,6 +21,11 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -231,6 +241,114 @@ public class LocalFileStorageAdapterTest {
         }
     }
 
+    /** 分片会话和分片内容可在适配器重启后恢复。 */
+    @Test
+    public void persistsMultipartPartsAcrossAdapterRestart() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        LocalFileStorageAdapter first = new LocalFileStorageAdapter(root, SIGNING_KEY);
+        MultipartUploadSession session = first.initiate(multipartRequest("restart.bin", 6));
+        MultipartPart uploaded = first.uploadPart(new MultipartPartRequest(session.uploadId(), 1),
+                bytes("abc"), 3);
+        MultipartPart second = first.uploadPart(new MultipartPartRequest(session.uploadId(), 2),
+                bytes("def"), 3);
+
+        LocalFileStorageAdapter restarted = new LocalFileStorageAdapter(root, SIGNING_KEY);
+
+        assertEquals(List.of(uploaded, second), restarted.listParts(session.uploadId()));
+        ObjectMetadata completed = restarted.complete(session.uploadId(),
+                new MultipartCompletion(List.of(uploaded, second)));
+        assertEquals(6L, completed.contentLength());
+    }
+
+    /** 同一分片重试使用原子替换，最终只保留最新内容。 */
+    @Test
+    public void retriesMultipartPartByAtomicReplacement() throws Exception {
+        LocalFileStorageAdapter storage = storage();
+        MultipartUploadSession session = storage.initiate(multipartRequest("retry.bin", 6));
+        MultipartPart first = storage.uploadPart(new MultipartPartRequest(session.uploadId(), 1),
+                bytes("old"), 3);
+        MultipartPart second = storage.uploadPart(new MultipartPartRequest(session.uploadId(), 1),
+                bytes("new"), 3);
+
+        assertNotEquals(first.etag(), second.etag());
+        assertEquals(List.of(second), storage.listParts(session.uploadId()));
+    }
+
+    /** 完成操作按分片顺序流式合并并可幂等重复提交。 */
+    @Test
+    public void completesMultipartByStreamingMergeAndIsIdempotent() throws Exception {
+        LocalFileStorageAdapter storage = storage();
+        MultipartUploadSession session = storage.initiate(multipartRequest("merged.bin", 6));
+        MultipartPart first = storage.uploadPart(new MultipartPartRequest(session.uploadId(), 1),
+                bytes("abc"), 3);
+        MultipartPart second = storage.uploadPart(new MultipartPartRequest(session.uploadId(), 2),
+                bytes("def"), 3);
+
+        ObjectMetadata completed = storage.complete(session.uploadId(),
+                new MultipartCompletion(List.of(first, second)));
+        ObjectMetadata repeated = storage.complete(session.uploadId(),
+                new MultipartCompletion(List.of(first, second)));
+
+        assertEquals(6L, completed.contentLength());
+        assertEquals(completed.etag(), repeated.etag());
+        assertEquals("abcdef", read(storage.get(ObjectKey.of("merged.bin"))));
+    }
+
+    /** 缺少分片时完成必须返回稳定冲突错误。 */
+    @Test
+    public void rejectsMultipartCompletionWithMissingPart() throws Exception {
+        LocalFileStorageAdapter storage = storage();
+        MultipartUploadSession session = storage.initiate(multipartRequest("missing.bin", 6));
+        MultipartPart first = storage.uploadPart(new MultipartPartRequest(session.uploadId(), 1),
+                bytes("abc"), 3);
+
+        try {
+            storage.complete(session.uploadId(), new MultipartCompletion(List.of(first)));
+            fail("expected missing part conflict");
+        } catch (FileStorageException exception) {
+            assertEquals("MULTIPART_CONFLICT", exception.errorCode().name());
+        }
+    }
+
+    /** 取消会话具备幂等语义并移除临时目录。 */
+    @Test
+    public void abortsMultipartSessionIdempotently() throws Exception {
+        LocalFileStorageAdapter storage = storage();
+        MultipartUploadSession session = storage.initiate(multipartRequest("abort.bin", 3));
+
+        storage.abort(session.uploadId());
+        storage.abort(session.uploadId());
+
+        try {
+            storage.listParts(session.uploadId());
+            fail("expected aborted session to be absent");
+        } catch (FileStorageException exception) {
+            assertEquals("MULTIPART_NOT_FOUND", exception.errorCode().name());
+        }
+    }
+
+    /** 过期会话清理不会影响已完成对象。 */
+    @Test
+    public void cleansExpiredMultipartSessionsWithoutDeletingObjects() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        Clock clock = Clock.fixed(Instant.parse("2026-09-15T00:00:00Z"), ZoneOffset.UTC);
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY,
+                UploadRequest.DEFAULT_MAX_SIZE_BYTES, Set.of(),
+                LocalFileStorageAdapter.DEFAULT_MAXIMUM_PRESIGN_EXPIRY, clock);
+        MultipartUploadSession session = storage.initiate(new MultipartUploadRequest(
+                ObjectKey.of("expired.bin"), 3, 3, "text/plain", null, Duration.ofSeconds(1)));
+        storage.put(upload(ObjectKey.of("kept.bin"), "kept"));
+
+        assertEquals(1, storage.cleanupExpiredMultipartSessions(clock.instant().plusSeconds(2)));
+        try {
+            storage.listParts(session.uploadId());
+            fail("expected expired session to be absent");
+        } catch (FileStorageException exception) {
+            assertEquals("MULTIPART_NOT_FOUND", exception.errorCode().name());
+        }
+        assertTrue(storage.exists(ObjectKey.of("kept.bin")));
+    }
+
     private LocalFileStorageAdapter storage() throws Exception {
         return new LocalFileStorageAdapter(temporaryFolder.newFolder("storage").toPath(), SIGNING_KEY);
     }
@@ -238,6 +356,15 @@ public class LocalFileStorageAdapterTest {
     private static UploadRequest upload(ObjectKey key, String value) {
         byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
         return new UploadRequest(key, new ByteArrayInputStream(bytes), bytes.length, "text/plain");
+    }
+
+    private static MultipartUploadRequest multipartRequest(String key, long totalSize) {
+        return new MultipartUploadRequest(ObjectKey.of(key), totalSize, 3,
+                "text/plain", null, Duration.ofMinutes(10));
+    }
+
+    private static InputStream bytes(String value) {
+        return new ByteArrayInputStream(value.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String read(Optional<DownloadObject> object) throws Exception {
