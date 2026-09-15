@@ -27,10 +27,12 @@ import org.apache.ibatis.session.SqlSessionFactory;
  */
 public final class SqliteMetricStore {
     private static final String CURSOR_SECRET_KEY = "cursor_secret";
+    private static final String INSTANCE_VERSION_KEY = "instance_version";
     private static final String HMAC_ALGORITHM = "HmacSHA256";
     private final SqlSessionFactory sessionFactory;
     private final int maximumPageSize;
     private final byte[] cursorSecret;
+    private final String instanceVersion;
 
     /** 创建并初始化本地 SQLite 指标库。 */
     public SqliteMetricStore(Path path, int maximumPageSize) {
@@ -39,6 +41,7 @@ public final class SqliteMetricStore {
         sessionFactory = ThreadPoolSqliteSessionFactory.create(path);
         this.maximumPageSize = maximumPageSize;
         cursorSecret = loadCursorSecret();
+        instanceVersion = loadInstanceVersion();
     }
 
     /** 持久化一个采样指标。 */
@@ -78,6 +81,17 @@ public final class SqliteMetricStore {
                 .lt(ThreadPoolMetricEntity::getSampledAt, threshold)));
     }
 
+    /**
+     * 返回由本地 SQLite 持久化卷决定的子控实例世代。
+     *
+     * @return 稳定的子控实例世代
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public String instanceVersion() {
+        return instanceVersion;
+    }
+
     /** 读取指定 cursor 后的有界指标列表。 */
     private List<ThreadPoolMetric> query(long after, int limit) {
         return withMetricMapper(mapper -> mapper.selectPage(Page.of(1, limit, false), new LambdaQueryWrapper<ThreadPoolMetricEntity>()
@@ -115,39 +129,49 @@ public final class SqliteMetricStore {
 
     /** 从 SQLite 元数据读取或创建跨重启稳定的 cursor 签名密钥。 */
     private byte[] loadCursorSecret() {
+        return Base64.getDecoder().decode(loadOrCreateMetadata(CURSOR_SECRET_KEY,
+                () -> Base64.getEncoder().encodeToString(UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8))));
+    }
+
+    /** 读取或创建本地 SQLite 持久化卷的稳定实例世代。 */
+    private String loadInstanceVersion() {
+        return loadOrCreateMetadata(INSTANCE_VERSION_KEY, () -> UUID.randomUUID().toString());
+    }
+
+    /** 在 SQLite metadata 表中读取或原子创建指定值。 */
+    private String loadOrCreateMetadata(String key, MetadataValueFactory valueFactory) {
         try (SqlSession session = sessionFactory.openSession(false)) {
             ThreadPoolMetricMetadataMapper mapper = session.getMapper(ThreadPoolMetricMetadataMapper.class);
-            ThreadPoolMetricMetadataEntity metadata = mapper.selectById(CURSOR_SECRET_KEY);
+            ThreadPoolMetricMetadataEntity metadata = mapper.selectById(key);
             if (metadata != null) {
-                return Base64.getDecoder().decode(metadata.getMetaValue());
+                return metadata.getMetaValue();
             }
-            ThreadPoolMetricMetadataEntity created = metadata();
+            ThreadPoolMetricMetadataEntity created = metadata(key, valueFactory.create());
             mapper.insert(created);
             session.commit();
-            return Base64.getDecoder().decode(created.getMetaValue());
+            return created.getMetaValue();
         } catch (RuntimeException exception) {
-            return readPersistedCursorSecret(exception);
+            return readPersistedMetadata(key, exception);
         }
     }
 
     /** 在首次密钥写入竞争后读取已持久化值。 */
-    private byte[] readPersistedCursorSecret(RuntimeException cause) {
+    private String readPersistedMetadata(String key, RuntimeException cause) {
         try (SqlSession session = sessionFactory.openSession()) {
             ThreadPoolMetricMetadataEntity metadata = session.getMapper(ThreadPoolMetricMetadataMapper.class)
-                    .selectById(CURSOR_SECRET_KEY);
+                    .selectById(key);
             if (metadata != null) {
-                return Base64.getDecoder().decode(metadata.getMetaValue());
+                return metadata.getMetaValue();
             }
         }
-        throw new IllegalStateException("cannot initialize thread pool cursor secret", cause);
+        throw new IllegalStateException("cannot initialize thread pool SQLite metadata", cause);
     }
 
     /** 创建尚未持久化的 cursor 密钥元数据。 */
-    private ThreadPoolMetricMetadataEntity metadata() {
+    private ThreadPoolMetricMetadataEntity metadata(String key, String value) {
         ThreadPoolMetricMetadataEntity metadata = new ThreadPoolMetricMetadataEntity();
-        metadata.setMetaKey(CURSOR_SECRET_KEY);
-        metadata.setMetaValue(Base64.getEncoder().encodeToString(UUID.randomUUID().toString()
-                .getBytes(StandardCharsets.UTF_8)));
+        metadata.setMetaKey(key);
+        metadata.setMetaValue(value);
         return metadata;
     }
 
@@ -242,5 +266,12 @@ public final class SqliteMetricStore {
     private interface MetricMapperOperation<T> {
         /** 执行 Mapper 操作。 */
         T execute(ThreadPoolMetricMapper mapper);
+    }
+
+    /** SQLite metadata 默认值创建函数。 */
+    @FunctionalInterface
+    private interface MetadataValueFactory {
+        /** @return 待持久化的 metadata 值 */
+        String create();
     }
 }

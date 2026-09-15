@@ -3,9 +3,11 @@ package io.github.lvdaxianer.dinghai.threadpool.governance.server;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.lvdaxianer.dinghai.threadpool.governance.api.MetricPage;
+import io.github.lvdaxianer.dinghai.threadpool.governance.api.ThreadPoolInstanceIdentity;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -55,6 +57,31 @@ public final class HttpChildControllerClient implements ChildControllerClient {
             return requirePage(page);
         } catch (RestClientResponseException exception) {
             throw classifyFailure(exception);
+        }
+    }
+
+    /**
+     * 读取子控 SQLite 持久化卷的实例世代。
+     *
+     * @return 新版子控的实例世代；旧版子控未提供端点时为空
+     * @throws Exception 非兼容性网络或协议失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Override
+    public Optional<String> fetchInstanceVersion() throws Exception {
+        try {
+            ThreadPoolInstanceIdentity identity = client.get().uri("/actuator/dinghai-thread-pool/identity")
+                    .retrieve().body(ThreadPoolInstanceIdentity.class);
+            if (identity == null || identity.version() == null || identity.version().isBlank()) {
+                throw new IllegalStateException("child thread-pool instance identity is incomplete");
+            }
+            return Optional.of(identity.version());
+        } catch (RestClientResponseException exception) {
+            if (exception.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw new IllegalStateException("cannot read child thread-pool instance identity", exception);
         }
     }
 

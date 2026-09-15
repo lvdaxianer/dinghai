@@ -46,6 +46,15 @@ public class SqliteMetricStoreTest {
         assertEquals("third-work-l", next.metrics().getFirst().poolName());
     }
 
+    /** 同一子控 SQLite 重启后必须保留实例世代标识。 */
+    @Test
+    public void shouldRetainInstanceVersionAcrossStoreRestart() throws Exception {
+        Path database = Files.createTempDirectory("thread-pool-store").resolve("metrics.db");
+        String version = new SqliteMetricStore(database, 10).instanceVersion();
+
+        assertEquals(version, new SqliteMetricStore(database, 10).instanceVersion());
+    }
+
     /** 保留清理产生数据缺口时，旧 cursor 不能静默跳过缺失指标。 */
     @Test
     public void shouldRejectExpiredCursorAfterRetentionPurge() throws Exception {

@@ -1,6 +1,7 @@
 package io.github.lvdaxianer.dinghai.threadpool.spring;
 
 import io.github.lvdaxianer.dinghai.threadpool.governance.api.MetricPage;
+import io.github.lvdaxianer.dinghai.threadpool.governance.api.ThreadPoolInstanceIdentity;
 import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolGovernor;
 import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolSnapshot;
 import java.util.List;
@@ -47,6 +48,19 @@ public class ThreadPoolMetricController {
     public List<ThreadPoolSnapshot> snapshot() {
         rejectUnauthorizedRequest();
         return governor.snapshots();
+    }
+
+    /**
+     * 返回总控用于识别 SQLite 卷重建的子控实例世代。
+     *
+     * @return 与当前 SQLite 持久化卷绑定的稳定世代
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @GetMapping("/identity")
+    public ThreadPoolInstanceIdentity identity() {
+        rejectUnauthorizedRequest();
+        return new ThreadPoolInstanceIdentity(store.instanceVersion());
     }
 
     private void rejectUnauthorizedRequest() {

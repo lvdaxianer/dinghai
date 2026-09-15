@@ -3,6 +3,7 @@ package io.github.lvdaxianer.dinghai.threadpool.governance.server;
 import io.github.lvdaxianer.dinghai.threadpool.governance.api.MetricPage;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 总控读取一个子控指标与快照的协议边界。
@@ -22,6 +23,18 @@ public interface ChildControllerClient {
      * @date 2026-09-15
      */
     MetricPage fetch(String cursor, int limit) throws Exception;
+
+    /**
+     * 读取子控本地 SQLite 对应的稳定实例世代。
+     *
+     * @return 实例世代；旧子控未提供身份端点时为空
+     * @throws Exception 网络或协议失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    default Optional<String> fetchInstanceVersion() throws Exception {
+        return Optional.empty();
+    }
 
     /**
      * 读取当前快照。

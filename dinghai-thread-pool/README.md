@@ -46,7 +46,9 @@ SQLite 是本地文件型数据库，`metrics.sqlite-path` 必须位于持久卷
 指标查询端点默认关闭。打开 `endpoint-enabled` 后暴露
 `GET /actuator/dinghai-thread-pool/metrics?cursor=&limit=`。必须在网关或 Spring Security
 中为此路径配置 TLS 与服务身份认证。端点还包括用于过期 cursor 恢复的
-`GET /actuator/dinghai-thread-pool/snapshot`。
+`GET /actuator/dinghai-thread-pool/snapshot`，以及返回本地 SQLite 卷稳定世代的
+`GET /actuator/dinghai-thread-pool/identity`。同一持久卷重启会保留该世代；重建或更换
+SQLite 卷会生成新世代。
 
 ## 总控
 
@@ -58,6 +60,8 @@ cursor 过期会记录 gap、触发告警并使用子控快照恢复。SQLite �
 保存原始高频指标、访问 Token、mTLS 私钥或业务任务内容。子控注册仅接受 HTTPS 地址，服务
 认证可使用部署注入且可轮换的 Token，TLS/mTLS 由运行环境配置。注册版本变化代表子控本地
 SQLite 可能已重建，总控会清除旧 cursor 并从新的增量窗口恢复采集。
+总控在每次轮询前自动读取子控的 `identity` 并执行该判断；尚未升级的旧子控返回 404 时，
+总控按兼容模式跳过世代检查，继续原有的 metrics/snapshot 采集。
 
 总控管理 API 默认拒绝访问。宿主提供 `GovernanceAccessPolicy` 后可使用实例注册与查询 API，
 以及 `GET /governance/gaps?instanceId=`、`GET /governance/alerts` 查询持久化恢复状态。

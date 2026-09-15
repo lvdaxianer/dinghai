@@ -50,6 +50,7 @@ public final class GovernancePoller {
     private void collectOne(GovernanceInstance instance) {
         try {
             ChildControllerClient client = clients.create(instance);
+            client.fetchInstanceVersion().ifPresent(version -> store.observeInstanceVersion(instance.instanceId(), version));
             collector.collectWithRecovery(instance.instanceId(),
                     cursor -> client.fetch(cursor, pageLimit), client::fetchSnapshot,
                     page -> metrics.pageConsumed(instance.instanceId(), page),

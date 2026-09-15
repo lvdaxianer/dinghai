@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
 
@@ -41,6 +42,27 @@ public class HttpChildControllerClientTest {
                     () -> client(server.baseUrl()).fetch("1", 100));
 
             assertEquals("9", exception.oldestCursor());
+        }
+    }
+
+    /** 新旧子控滚动升级期间，缺少 identity 端点不能阻断指标采集。 */
+    @Test
+    public void shouldTreatMissingIdentityEndpointAsLegacyChild() throws Exception {
+        try (TestServer server = server(exchange ->
+                respond(exchange, 200, "{\"nextCursor\":\"2\",\"hasMore\":false,\"oldestCursor\":\"1\",\"metrics\":[]}"))) {
+            assertEquals(Optional.empty(), client(server.baseUrl()).fetchInstanceVersion());
+        }
+    }
+
+    /** 新子控必须将 SQLite 持久化的世代通过身份端点返回。 */
+    @Test
+    public void shouldFetchInstanceVersion() throws Exception {
+        try (TestServer server = server(exchange ->
+                respond(exchange, 200, "{\"nextCursor\":\"2\",\"hasMore\":false,\"oldestCursor\":\"1\",\"metrics\":[]}"))) {
+            server.server().createContext("/actuator/dinghai-thread-pool/identity", exchange ->
+                    respond(exchange, 200, "{\"version\":\"generation-2\"}"));
+
+            assertEquals(Optional.of("generation-2"), client(server.baseUrl()).fetchInstanceVersion());
         }
     }
 

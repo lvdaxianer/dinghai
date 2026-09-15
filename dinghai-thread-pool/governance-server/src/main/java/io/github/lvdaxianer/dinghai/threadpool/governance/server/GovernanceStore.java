@@ -48,6 +48,32 @@ public final class GovernanceStore {
         });
     }
 
+    /**
+     * 观察到子控实例世代时更新控制面，并在变化后清理旧 cursor。
+     *
+     * @param instanceId 已注册子控实例标识
+     * @param version 子控 SQLite 持久化卷世代
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public void observeInstanceVersion(String instanceId, String version) {
+        if (version == null || version.isBlank()) {
+            return;
+        }
+        withMappers(mappers -> {
+            GovernanceInstanceEntity entity = mappers.instance().selectById(instanceId);
+            if (entity == null) {
+                throw new IllegalArgumentException("governance instance is not registered: " + instanceId);
+            }
+            if (!Objects.equals(entity.getVersion(), version)) {
+                mappers.cursor().deleteById(instanceId);
+                entity.setVersion(version); entity.setUpdatedAt(System.currentTimeMillis());
+                mappers.instance().updateById(entity);
+            }
+            return null;
+        });
+    }
+
     /** 返回当前启用实例，供单实例轮询器和管理 API 查询。 */
     public List<GovernanceInstance> instances() {
         return withMappers(mappers -> mappers.instance().selectList(new LambdaQueryWrapper<GovernanceInstanceEntity>()
