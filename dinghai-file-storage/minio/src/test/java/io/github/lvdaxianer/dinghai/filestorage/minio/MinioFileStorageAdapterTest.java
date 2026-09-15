@@ -3,6 +3,10 @@ package io.github.lvdaxianer.dinghai.filestorage.minio;
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartFileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPartRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignedDownload;
@@ -84,6 +88,27 @@ public class MinioFileStorageAdapterTest {
         assertEquals("public, max-age=60", result.formFields().get("Cache-Control"));
         assertTrue(result.formFields().containsKey("x-amz-signature"));
         verify(client).getPresignedPostFormData(any(PostPolicy.class));
+    }
+
+    /** 分片预签名必须使用 S3 UploadPart 的 PUT 查询参数。 */
+    @Test
+    public void presignsNativeUploadPart() throws Exception {
+        MinioClient client = mock(MinioClient.class);
+        when(client.getPresignedObjectUrl(any(GetPresignedObjectUrlArgs.class)))
+                .thenReturn("https://minio.example/uploads/large.bin?signature");
+        MinioFileStorageAdapter adapter = adapter(client);
+        MultipartUploadRequest request = new MultipartUploadRequest(ObjectKey.of("large.bin"),
+                2_000L, 1_000L, "application/octet-stream", new CacheControl("private"),
+                Duration.ofMinutes(5));
+        MultipartUploadSession session = new MultipartUploadSession("upload-id", request,
+                Instant.now().plusSeconds(300));
+
+        PresignedUpload result = adapter.presignPart(session, new MultipartPartRequest("upload-id", 2, 2));
+
+        assertEquals("PUT", result.method());
+        assertTrue(result.url().contains("signature"));
+        verify(client).getPresignedObjectUrl(any(GetPresignedObjectUrlArgs.class));
+        assertTrue(adapter instanceof MultipartFileStorage);
     }
 
     /** 下载 URL 绑定 GET、响应处置和缓存策略。 */
