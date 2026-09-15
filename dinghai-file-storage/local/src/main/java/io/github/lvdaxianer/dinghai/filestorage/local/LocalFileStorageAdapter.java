@@ -257,8 +257,8 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
 
     /** 生成绑定本地分片会话的上传地址。 */
     @Override
-    public PresignedUpload presignPart(MultipartPartRequest request) {
-        SessionData session = requireOpenOrCompleted(request.uploadId());
+    public PresignedUpload presignPart(MultipartUploadSession expected, MultipartPartRequest request) {
+        SessionData session = requireOpenOrCompleted(expected);
         if (session.completed()) {
             throw failure(FileStorageErrorCode.MULTIPART_CONFLICT,
                     "multipart session is already completed", null);
@@ -277,13 +277,13 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
 
     /** 将一个分片先写临时文件，再原子替换为已确认分片。 */
     @Override
-    public MultipartPart uploadPart(MultipartPartRequest request, InputStream content,
+    public MultipartPart uploadPart(MultipartUploadSession expected, MultipartPartRequest request, InputStream content,
                                     long contentLength) {
         Objects.requireNonNull(content, "content");
-        SessionData session = requireOpen(request.uploadId());
+        SessionData session = requireOpen(expected);
         validatePartNumber(request.partNumber(), session.session());
-        long expected = expectedPartSize(session.session(), request.partNumber());
-        if (contentLength != expected) {
+        long expectedLength = expectedPartSize(session.session(), request.partNumber());
+        if (contentLength != expectedLength) {
             closeQuietly(content);
             throw failure(FileStorageErrorCode.MULTIPART_INVALID,
                     "multipart part length is invalid", null);
@@ -312,8 +312,9 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
 
     /** 从本地临时目录读取已确认分片清单。 */
     @Override
-    public List<MultipartPart> listParts(String uploadId) {
-        SessionData session = requireSession(uploadId);
+    public List<MultipartPart> listParts(MultipartUploadSession expected) {
+        SessionData session = requireSession(expected);
+        String uploadId = expected.uploadId();
         if (session.completed()) {
             return session.parts();
         }
@@ -335,14 +336,15 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
 
     /** 校验清单后流式合并分片，并原子发布最终对象。 */
     @Override
-    public synchronized ObjectMetadata complete(String uploadId, MultipartCompletion completion) {
+    public synchronized ObjectMetadata complete(MultipartUploadSession expected, MultipartCompletion completion) {
         Objects.requireNonNull(completion, "completion");
-        SessionData session = requireSession(uploadId);
+        SessionData session = requireSession(expected);
+        String uploadId = expected.uploadId();
         if (session.completed()) {
             return stat(session.session().key()).orElseThrow();
         }
         if (!session.session().expiresAt().isAfter(clock.instant())) {
-            abort(uploadId);
+            abort(expected);
             throw failure(FileStorageErrorCode.MULTIPART_EXPIRED,
                     "multipart session has expired", null);
         }
@@ -374,11 +376,11 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
 
     /** 删除本地临时会话，重复取消保持幂等。 */
     @Override
-    public synchronized void abort(String uploadId) {
-        if (uploadId == null || uploadId.isBlank()) {
+    public synchronized void abort(MultipartUploadSession session) {
+        if (session == null || session.uploadId() == null || session.uploadId().isBlank()) {
             return;
         }
-        deleteTemporaryDirectory(multipartDirectory(uploadId));
+        deleteTemporaryDirectory(multipartDirectory(session.uploadId()));
     }
 
     /** 删除指定时间前已经过期的本地临时会话。 */
@@ -393,24 +395,24 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
         }
     }
 
-    private SessionData requireOpen(String uploadId) {
-        SessionData data = requireSession(uploadId);
+    private SessionData requireOpen(MultipartUploadSession expected) {
+        SessionData data = requireSession(expected);
         if (data.completed()) {
             throw failure(FileStorageErrorCode.MULTIPART_CONFLICT,
                     "multipart session is already completed", null);
         }
         if (!data.session().expiresAt().isAfter(clock.instant())) {
-            abort(uploadId);
+            abort(expected);
             throw failure(FileStorageErrorCode.MULTIPART_EXPIRED,
                     "multipart session has expired", null);
         }
         return data;
     }
 
-    private SessionData requireOpenOrCompleted(String uploadId) {
-        SessionData data = requireSession(uploadId);
+    private SessionData requireOpenOrCompleted(MultipartUploadSession expected) {
+        SessionData data = requireSession(expected);
         if (!data.session().expiresAt().isAfter(clock.instant()) && !data.completed()) {
-            abort(uploadId);
+            abort(expected);
             throw failure(FileStorageErrorCode.MULTIPART_EXPIRED,
                     "multipart session has expired", null);
         }
@@ -435,6 +437,18 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
             throw failure(FileStorageErrorCode.MULTIPART_NOT_FOUND,
                     "multipart session metadata is invalid", exception);
         }
+    }
+
+    private SessionData requireSession(MultipartUploadSession expected) {
+        Objects.requireNonNull(expected, "session");
+        SessionData actual = requireSession(expected.uploadId());
+        if (!actual.session().key().equals(expected.key())
+                || actual.session().partCount() != expected.partCount()
+                || actual.session().totalSize() != expected.totalSize()) {
+            throw failure(FileStorageErrorCode.MULTIPART_CONFLICT,
+                    "multipart session does not match stored state", null);
+        }
+        return actual;
     }
 
     private MultipartUploadSession readSession(String uploadId, Properties values) {
@@ -538,7 +552,7 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
     }
 
     private MultipartPart findPart(SessionData session, int partNumber) {
-        return listParts(session.session().uploadId()).stream()
+        return listParts(session.session()).stream()
                 .filter(part -> part.partNumber() == partNumber).findFirst()
                 .orElseThrow(() -> failure(FileStorageErrorCode.MULTIPART_CONFLICT,
                         "multipart completion part is missing", null));
