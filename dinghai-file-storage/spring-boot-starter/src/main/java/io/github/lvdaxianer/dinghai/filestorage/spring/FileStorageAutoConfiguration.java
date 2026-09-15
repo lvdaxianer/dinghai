@@ -13,6 +13,7 @@ import io.github.lvdaxianer.dinghai.filestorage.aliyunoss.AliyunOssFileStorageAd
 import io.github.lvdaxianer.dinghai.filestorage.aliyunoss.AliyunOssStorageConfiguration;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsStorageConfiguration;
+import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolGovernor;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -50,6 +51,8 @@ public class FileStorageAutoConfiguration {
     private static final int WEB_EXECUTOR_QUEUE_CAPACITY = 64;
     /** 文件存储 Web 异步关闭等待秒数。 */
     private static final int WEB_EXECUTOR_SHUTDOWN_SECONDS = 30;
+    /** 文件存储 Web 执行器对应的受管池名称。 */
+    private static final String WEB_EXECUTOR_POOL_NAME = "file-storage-web";
 
     /**
      * 创建唯一的本地、MinIO、RustFS 或 OSS 文件存储 Bean。
@@ -364,17 +367,39 @@ public class FileStorageAutoConfiguration {
     @ConditionalOnMissingBean(name = "fileStorageWebTaskExecutor")
     @ConditionalOnProperty(name = "dinghai.file-storage.web.enabled", havingValue = "true",
             matchIfMissing = true)
-    public ThreadPoolTaskExecutor fileStorageWebTaskExecutor(Optional<TaskDecorator> taskDecorator) {
+    public ThreadPoolTaskExecutor fileStorageWebTaskExecutor(Optional<TaskDecorator> taskDecorator,
+                                                             Optional<ThreadPoolGovernor> governor) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(WEB_EXECUTOR_CORE_SIZE);
         executor.setMaxPoolSize(WEB_EXECUTOR_MAX_SIZE);
         executor.setQueueCapacity(WEB_EXECUTOR_QUEUE_CAPACITY);
         executor.setThreadNamePrefix("file-storage-web-");
-        taskDecorator.ifPresent(executor::setTaskDecorator);
+        taskDecorator(executor, taskDecorator, governor);
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(WEB_EXECUTOR_SHUTDOWN_SECONDS);
         executor.initialize();
         return executor;
+    }
+
+    /**
+     * 组合现有 MDC 装饰与可选的受管池许可装饰。
+     *
+     * @param executor 文件存储 Web 执行器
+     * @param taskDecorator 宿主或 Dinghai 提供的任务装饰器
+     * @param governor 可选线程池治理器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private void taskDecorator(ThreadPoolTaskExecutor executor, Optional<TaskDecorator> taskDecorator,
+                               Optional<ThreadPoolGovernor> governor) {
+        TaskDecorator mdcDecorator = taskDecorator.orElse(task -> task);
+        // 仅在应用显式注册文件存储池时才改变执行器的并发治理行为。
+        if (governor.isPresent() && governor.get().isRegistered(WEB_EXECUTOR_POOL_NAME)) {
+            executor.setTaskDecorator(task -> governor.get().decorate(WEB_EXECUTOR_POOL_NAME,
+                    mdcDecorator.decorate(task)));
+        } else {
+            executor.setTaskDecorator(mdcDecorator);
+        }
     }
 
     /**

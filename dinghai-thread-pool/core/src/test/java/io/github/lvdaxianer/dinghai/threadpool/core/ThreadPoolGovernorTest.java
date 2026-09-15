@@ -74,6 +74,34 @@ public class ThreadPoolGovernorTest {
         }
     }
 
+    /**
+     * 外部 Spring 执行器任务也必须通过已注册池的全局许可运行。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void shouldGovernDecoratedExternalTask() throws Exception {
+        try (ThreadPoolGovernor governor = new ThreadPoolGovernor(1)) {
+            governor.register(definition("external-work-h"));
+            CountDownLatch firstStarted = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            CountDownLatch secondStarted = new CountDownLatch(1);
+            Thread first = Thread.ofVirtual().start(governor.decorate("external-work-h", () -> {
+                firstStarted.countDown();
+                await(release);
+            }));
+            assertTrue(firstStarted.await(2, TimeUnit.SECONDS));
+            Thread second = Thread.ofVirtual().start(governor.decorate("external-work-h", secondStarted::countDown));
+            assertEquals(1L, secondStarted.getCount());
+
+            release.countDown();
+            second.join(2_000);
+            first.join(2_000);
+            assertEquals(0L, secondStarted.getCount());
+        }
+    }
+
     private ThreadPoolDefinition definition(String name) {
         return new ThreadPoolDefinition(name, 1, 1, 1, ThreadPoolDefinition.Priority.HIGH,
                 ThreadPoolDefinition.Reliability.FAIL_FAST, 10);
@@ -90,6 +118,21 @@ public class ThreadPoolGovernorTest {
             Thread.currentThread().interrupt();
         } finally {
             concurrent.decrementAndGet();
+        }
+    }
+
+    /**
+     * 等待并发测试的释放信号。
+     *
+     * @param latch 协作信号
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private void await(CountDownLatch latch) {
+        try {
+            latch.await(2, TimeUnit.SECONDS);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
         }
     }
 }

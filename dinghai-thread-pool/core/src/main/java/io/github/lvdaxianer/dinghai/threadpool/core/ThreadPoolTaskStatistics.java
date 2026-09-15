@@ -15,6 +15,7 @@ final class ThreadPoolTaskStatistics {
     private final AtomicLong failed = new AtomicLong();
     private final AtomicLong waitMillis = new AtomicLong();
     private final AtomicLong executionMillis = new AtomicLong();
+    private final AtomicLong active = new AtomicLong();
 
     /**
      * 记录一次成功提交。
@@ -60,6 +61,31 @@ final class ThreadPoolTaskStatistics {
      * @date 2026-09-15
      */
     void waited(long waitNanos) { waitMillis.addAndGet(toMillis(waitNanos)); }
+
+    /**
+     * 增加当前正在持有全局 worker 许可的任务数。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    void started() { active.incrementAndGet(); }
+
+    /**
+     * 减少当前正在持有全局 worker 许可的任务数。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    void finished() { active.decrementAndGet(); }
+
+    /**
+     * 返回当前持有全局 worker 许可的任务数。
+     *
+     * @return 运行任务数
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    long activeCount() { return active.get(); }
 
     /**
      * 返回提交任务数。

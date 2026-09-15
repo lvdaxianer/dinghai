@@ -49,7 +49,7 @@ final class PermitExecutorService extends AbstractExecutorService {
         statistics.submitted();
         long submittedAt = System.nanoTime();
         try {
-            delegate.execute(() -> runWithPermit(command, submittedAt));
+            delegate.execute(() -> PermitTaskRunner.run(permits, command, submittedAt, statistics));
         } catch (RejectedExecutionException exception) {
             statistics.rejected();
             throw exception;
@@ -166,36 +166,6 @@ final class PermitExecutorService extends AbstractExecutorService {
     @Override
     public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
         return delegate.awaitTermination(timeout, unit);
-    }
-
-    /**
-     * 在任务执行期获取并释放许可。
-     *
-     * @param command 待执行任务
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
-    private void runWithPermit(Runnable command, long submittedAt) {
-        boolean acquired = false;
-        long startedAt = 0;
-        try {
-            permits.acquire();
-            acquired = true;
-            startedAt = System.nanoTime();
-            statistics.waited(startedAt - submittedAt);
-            command.run();
-        } catch (RuntimeException | Error exception) {
-            statistics.failed();
-            throw exception;
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("interrupted while waiting for worker permit", exception);
-        } finally {
-            if (acquired) {
-                permits.release();
-                statistics.completed(System.nanoTime() - startedAt);
-            }
-        }
     }
 
     /** 运行 Callable 并保留失败计数。 */

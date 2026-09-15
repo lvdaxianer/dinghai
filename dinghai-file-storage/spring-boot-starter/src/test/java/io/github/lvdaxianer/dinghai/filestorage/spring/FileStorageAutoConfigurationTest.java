@@ -8,11 +8,16 @@ import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
+import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolGovernor;
+import io.github.lvdaxianer.dinghai.threadpool.spring.ThreadPoolAutoConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -37,7 +42,8 @@ public class FileStorageAutoConfigurationTest {
 
     /** 自动装配测试上下文。 */
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(FileStorageAutoConfiguration.class));
+            .withConfiguration(AutoConfigurations.of(FileStorageAutoConfiguration.class,
+                    ThreadPoolAutoConfiguration.class));
 
     /**
      * local provider 应仅注册本地存储主 Bean。
@@ -561,6 +567,45 @@ public class FileStorageAutoConfigurationTest {
     }
 
     /**
+     * 文件存储 Web 执行器启用治理后必须复用全局并发许可。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void shouldGovernFileStorageWebExecutorWhenManagedPoolIsConfigured() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues(threadPoolProperties())
+                .run(context -> {
+                    ThreadPoolTaskExecutor executor = context.getBean("fileStorageWebTaskExecutor",
+                            ThreadPoolTaskExecutor.class);
+                    ThreadPoolGovernor governor = context.getBean(ThreadPoolGovernor.class);
+                    CountDownLatch firstStarted = new CountDownLatch(1);
+                    CountDownLatch release = new CountDownLatch(1);
+                    CountDownLatch secondStarted = new CountDownLatch(1);
+                    AtomicInteger concurrent = new AtomicInteger();
+                    AtomicInteger maximum = new AtomicInteger();
+
+                    executor.execute(() -> awaitAndTrack(firstStarted, release, concurrent, maximum));
+                    assertThat(await(firstStarted)).isTrue();
+                    executor.execute(() -> {
+                        concurrent.incrementAndGet();
+                        secondStarted.countDown();
+                        concurrent.decrementAndGet();
+                    });
+
+                    assertThat(await(secondStarted, 100)).isFalse();
+                    release.countDown();
+                    assertThat(await(secondStarted)).isTrue();
+                    assertThat(maximum.get()).isEqualTo(1);
+                    assertThat(governor.snapshots()).anySatisfy(snapshot -> {
+                        assertThat(snapshot.name()).isEqualTo("file-storage-web");
+                        assertThat(snapshot.completed()).isEqualTo(2);
+                    });
+                });
+    }
+
+    /**
      * 禁用 Web 集成时不应创建文件存储执行器。
      *
      * @author lvdaxianer@yeah.net
@@ -791,6 +836,67 @@ public class FileStorageAutoConfigurationTest {
                 "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
                 "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
         };
+    }
+
+    /**
+     * 返回文件存储 Web 池的最小治理配置。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private String[] threadPoolProperties() {
+        return new String[]{
+                "dinghai.thread-pool.enabled=true",
+                "dinghai.thread-pool.managed-worker-budget=1",
+                "dinghai.thread-pool.metrics.sqlite-path=" + temporaryFolder.getRoot().toPath()
+                        .resolve("thread-pool-metrics.db"),
+                "dinghai.thread-pool.pools.file-storage-web.minimum-size=1",
+                "dinghai.thread-pool.pools.file-storage-web.maximum-size=1",
+                "dinghai.thread-pool.pools.file-storage-web.weight=1",
+                "dinghai.thread-pool.pools.file-storage-web.priority=HIGH",
+                "dinghai.thread-pool.pools.file-storage-web.reliability=FAIL_FAST",
+                "dinghai.thread-pool.pools.file-storage-web.queue-capacity=10"
+        };
+    }
+
+    /**
+     * 在第一个任务占用许可期间维护并发数。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private void awaitAndTrack(CountDownLatch started, CountDownLatch release, AtomicInteger concurrent,
+                               AtomicInteger maximum) {
+        int current = concurrent.incrementAndGet();
+        maximum.accumulateAndGet(current, Math::max);
+        started.countDown();
+        await(release);
+        concurrent.decrementAndGet();
+    }
+
+    /**
+     * 等待默认超时内的并发协作信号。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private boolean await(CountDownLatch latch) {
+        return await(latch, 2_000);
+    }
+
+    /**
+     * 等待指定时间内的并发协作信号。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private boolean await(CountDownLatch latch, long timeoutMillis) {
+        try {
+            return latch.await(timeoutMillis, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("test thread interrupted", exception);
+        }
     }
 
     /**

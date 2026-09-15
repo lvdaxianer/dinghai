@@ -74,6 +74,33 @@ public final class ThreadPoolGovernor implements AutoCloseable {
     }
 
     /**
+     * 包装外部执行器提交的任务，使其复用指定池的全局许可与指标统计。
+     *
+     * @param name 已注册池名称
+     * @param command 外部执行器将执行的任务
+     * @return 受全局许可限制的任务
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public Runnable decorate(String name, Runnable command) {
+        ManagedPool pool = managedPool(name);
+        Objects.requireNonNull(command, "command");
+        pool.statistics().submitted();
+        long submittedAt = System.nanoTime();
+        return () -> PermitTaskRunner.run(permits, command, submittedAt, pool.statistics());
+    }
+
+    /**
+     * 判断一个池是否已注册，可用于可选的框架适配。
+     *
+     * @param name 池名称
+     * @return 是否已注册
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public boolean isRegistered(String name) { return executors.containsKey(name); }
+
+    /**
      * 返回受管业务 worker 预算。
      *
      * @return worker 预算
@@ -113,6 +140,15 @@ public final class ThreadPoolGovernor implements AutoCloseable {
         }
     }
 
+    /** 返回已注册池，不存在时给出稳定配置错误。 */
+    private ManagedPool managedPool(String name) {
+        ManagedPool pool = executors.get(name);
+        if (pool == null) {
+            throw new IllegalArgumentException("thread pool is not registered: " + name);
+        }
+        return pool;
+    }
+
     /**
      * 创建带全局许可包装的 JDK 执行器。
      *
@@ -149,7 +185,7 @@ public final class ThreadPoolGovernor implements AutoCloseable {
     private record ManagedPool(ThreadPoolDefinition definition, ThreadPoolExecutor delegate,
                                ThreadPoolTaskStatistics statistics, ExecutorService exposed) {
         private ThreadPoolSnapshot snapshot() {
-            return new ThreadPoolSnapshot(definition.name(), delegate.getActiveCount(), delegate.getPoolSize(),
+            return new ThreadPoolSnapshot(definition.name(), Math.toIntExact(statistics.activeCount()), delegate.getPoolSize(),
                     delegate.getQueue().size(), delegate.getMaximumPoolSize(), statistics.submittedCount(),
                     statistics.completedCount(), statistics.rejectedCount(), statistics.failedCount(),
                     statistics.waitMillis(), statistics.executionMillis(), definition.priority().name(),
