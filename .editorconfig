@@ -11,6 +11,10 @@ trim_trailing_whitespace = true
 indent_style = space
 indent_size = 4
 
+[*.{ts,json,css,html,vue}]
+indent_style = space
+indent_size = 2
+
 [*.md]
 trim_trailing_whitespace = false
 ; <<< project-hygiene (managed) <<<

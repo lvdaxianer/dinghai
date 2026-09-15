@@ -14,6 +14,7 @@ Requirements: Java 21+, Spring Boot 3.x.
 | `dinghai-thread-pool-governance-api` | Protocol models shared between child controller and governor (metric pages, pool snapshots, instance generations); no dependencies |
 | `dinghai-thread-pool-spring-boot-starter` | Child controller: auto-configures the governor, MDC task decorator, SQLite metric sampling and storage, read-only collection endpoints, Micrometer metrics, and a health check |
 | `dinghai-thread-pool-governance-server` | Governor: standalone Spring Boot application with a single-instance SQLite control plane that polls child metrics and manages collection gaps and alerts |
+| `governance-ui` | Vue 3 + Element Plus analysis console; reads only governor REST APIs |
 
 ## Quick Start
 
@@ -155,7 +156,7 @@ The child controller exports Micrometer metrics (tag `pool=<name>`, all Gauges):
 
 ## Governance Server
 
-`dinghai-thread-pool-governance-server` is a standalone Spring Boot application that stores instances, versions, cursors, and collection gaps in a single-instance SQLite database and **provides no high availability**. Raw time-series metrics remain in the application's Micrometer/Prometheus stack; the governor stores neither raw high-frequency metrics, access tokens, mTLS private keys, nor business task content.
+`dinghai-thread-pool-governance-server` is a standalone Spring Boot application that stores instances, versions, cursors, collection gaps, alerts, and collected thread-pool history in a single-instance SQLite database and **provides no high availability**. Its history is retained for 30 days by default. It never stores access tokens, mTLS private keys, task parameters, or task payloads.
 
 ### Configuration
 
@@ -166,6 +167,7 @@ Configuration prefix is `dinghai.thread-pool.governance`. Web parameters such as
 | `sqlite-path` | `Path` | `dinghai-governance.db` | Governor SQLite file path; startup fails if missing. **Must be mounted on a persistent volume** |
 | `poll-interval` | `Duration` | `30s` | Polling interval (fixed-delay); must be positive |
 | `request-timeout` | `Duration` | `5s` | Connect and read timeout for child controller requests; must be positive |
+| `retention` | `Duration` | `30d` | Governor thread-pool history retention; must be positive and is purged daily |
 | `page-limit` | `int` | `1000` | Page size per fetch; must be positive |
 | `api-token` | `String` | none | When non-empty, child requests carry `Authorization: Bearer <token>`. The token is injected by deployment and can be rotated |
 
@@ -179,13 +181,26 @@ The management API denies access by default. The following endpoints are enabled
 | `GET /governance/instances` | Lists registered instances |
 | `GET /governance/gaps?instanceId=` | Lists collection gaps (requested cursor, oldest cursor, detection time, recovery status OPEN/RECOVERED) |
 | `GET /governance/alerts` | Lists alert states; alert keys are `collection-gap:<instanceId>` and `collection-failure:<instanceId>` |
+| `GET /governance/metrics?instanceId=&poolName=&from=&to=` | Lists persisted governor SQLite samples; filters are query parameters and `from`/`to` are inclusive epoch milliseconds |
+
+### Vue Console
+
+The frontend project is located at `governance-ui`. Vite proxies `/governance` to a local governor during development; production should reverse-proxy it to the same governor address:
+
+```bash
+cd dinghai-thread-pool/governance-ui
+npm install
+npm run dev
+```
+
+It presents instance/pool filters, active and maximum threads, queue depth, cumulative completion/rejection/failure, wait and execution trends, top pools, alerts, collection gaps, and recent sample details. It reads only governor APIs; the governor pulls children and persists SQLite history.
 
 ### Polling Collection and Recovery
 
 The governor polls every registered instance on a schedule (failures of one instance are isolated from the others):
 
 1. Before polling, it reads the child's `identity` for a generation check; when the generation differs from the record, the old cursor is deleted and the version updated. Older child controllers that have not been upgraded return 404, in which case the governor skips the generation check in compatibility mode and continues the original metrics/snapshot collection;
-2. Metric pages are fetched in a loop starting from the confirmed cursor, and **`nextCursor` is committed only after a page has been successfully aggregated in real time** — failures are therefore retried idempotently and no data is skipped;
+2. Metric pages are fetched from the confirmed cursor, batch-persisted to governor SQLite, published to real-time aggregation, and only then commit `nextCursor`; positive child `metricId` values are deduplicated by `(instanceId, sourceMetricId)`, so retries do not duplicate history;
 3. When a cursor has expired (the child returns 409), the governor records a collection gap, fires the `collection-gap` alert, restores observability from the child snapshot, commits `oldestCursor`, marks the gap RECOVERED, and resolves the alert;
 4. A whole-instance collection failure fires the `collection-failure` alert and increments the failure counter; success resolves it.
 

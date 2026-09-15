@@ -10,10 +10,57 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 import io.github.lvdaxianer.dinghai.threadpool.governance.api.MetricPage;
+import io.github.lvdaxianer.dinghai.threadpool.governance.api.ThreadPoolMetric;
 import org.junit.Test;
 
 /** 验证单实例总控的 cursor 持久化。 */
 public class GovernanceStoreTest {
+
+    /** 总控必须保存子控指标，并按实例、线程池和时间范围查询。 */
+    @Test
+    public void shouldPersistAndQueryCollectedMetrics() throws Exception {
+        GovernanceStore store = store("governance-history");
+        store.register("app-1", "https://app-1.internal", "test");
+        store.register("app-2", "https://app-2.internal", "test");
+        long now = System.currentTimeMillis();
+
+        store.appendMetrics("app-1", List.of(metric(now - 2_000L, "orders"), metric(now - 1_000L, "emails")));
+        store.appendMetrics("app-2", List.of(metric(now, "orders")));
+
+        List<GovernanceThreadPoolMetric> metrics = store.metrics("app-1", "orders", now - 3_000L, now);
+        assertEquals(1, metrics.size());
+        assertEquals("app-1", metrics.getFirst().instanceId());
+        assertEquals("orders", metrics.getFirst().poolName());
+        assertEquals(8, metrics.getFirst().active());
+    }
+
+    /** 总控必须清理超过保留期的历史指标，避免本地 SQLite 无限增长。 */
+    @Test
+    public void shouldPurgeExpiredMetrics() throws Exception {
+        GovernanceStore store = store("governance-retention");
+        store.register("app-1", "https://app-1.internal", "test");
+        long now = System.currentTimeMillis();
+
+        store.appendMetrics("app-1", List.of(metric(now - 31L * 24 * 60 * 60 * 1_000L, "orders")));
+        store.appendMetrics("app-1", List.of(metric(now, "orders")));
+        store.purgeMetrics(java.time.Duration.ofDays(30));
+
+        assertEquals(1, store.metrics("app-1", "orders", 0, Long.MAX_VALUE).size());
+    }
+
+    /** 子控重试同一指标页时，总控不得重复写入同一原始指标。 */
+    @Test
+    public void shouldIgnorePreviouslyPersistedSourceMetric() throws Exception {
+        GovernanceStore store = store("governance-idempotency");
+        store.register("app-1", "https://app-1.internal", "test");
+        ThreadPoolMetric metric = new ThreadPoolMetric(42L, System.currentTimeMillis(), "orders", 1, 2, 3, 4,
+                5L, 6L, 7L, 8L, 9L, 10L, "NORMAL", "FAIL_FAST");
+
+        store.appendMetrics("app-1", List.of(metric));
+        store.appendMetrics("app-1", List.of(metric));
+
+        assertEquals(1, store.metrics("app-1", "orders", 0, Long.MAX_VALUE).size());
+    }
 
     /** 总控重启后必须保留已提交的 cursor。 */
     @Test
@@ -117,5 +164,16 @@ public class GovernanceStoreTest {
         restarted.resolveAlert("collection-gap:app-1");
 
         assertEquals("RESOLVED", restarted.alert("collection-gap:app-1").orElseThrow().status());
+    }
+
+    /** 创建隔离 SQLite 测试库。 */
+    private GovernanceStore store(String name) throws Exception {
+        return new GovernanceStore(Files.createTempDirectory(name).resolve("governance.db"));
+    }
+
+    /** 创建满足总控查询断言的子控采样记录。 */
+    private ThreadPoolMetric metric(long sampledAt, String poolName) {
+        return new ThreadPoolMetric(0L, sampledAt, poolName, 8, 12, 4, 16,
+                100L, 90L, 2L, 1L, 3_000L, 5_000L, "NORMAL", "FAIL_FAST");
     }
 }

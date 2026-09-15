@@ -5,6 +5,12 @@
 target/
 .flattened-pom.xml
 
+# Node.js / Vite（检测到 package.json）
+node_modules/
+*.tsbuildinfo
+dist/
+dist-ssr/
+
 # 通用
 .DS_Store
 Thumbs.db

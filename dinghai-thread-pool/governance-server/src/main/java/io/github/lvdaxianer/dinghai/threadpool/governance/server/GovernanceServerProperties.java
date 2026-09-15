@@ -15,6 +15,7 @@ public class GovernanceServerProperties {
     private Path sqlitePath = Path.of("dinghai-governance.db");
     private Duration pollInterval = Duration.ofSeconds(30);
     private Duration requestTimeout = Duration.ofSeconds(5);
+    private Duration retention = Duration.ofDays(30);
     private int pageLimit = 1000;
     private String apiToken;
 
@@ -71,6 +72,24 @@ public class GovernanceServerProperties {
      * @date 2026-09-15
      */
     public void setRequestTimeout(Duration requestTimeout) { this.requestTimeout = requestTimeout; }
+
+    /**
+     * 返回总控历史指标保留期。
+     *
+     * @return 正数保留期
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public Duration getRetention() { return retention; }
+
+    /**
+     * 设置总控历史指标保留期。
+     *
+     * @param retention 正数保留期
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public void setRetention(Duration retention) { this.retention = retention; }
 
     /**
      * 返回子控指标页上限。

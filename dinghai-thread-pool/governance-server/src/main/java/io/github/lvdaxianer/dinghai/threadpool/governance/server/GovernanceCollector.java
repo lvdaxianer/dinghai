@@ -32,6 +32,7 @@ public final class GovernanceCollector {
         boolean hasMore = true;
         while (hasMore) {
             MetricPage page = fetcher.fetch(cursor);
+            store.appendMetrics(instanceId, page.metrics());
             consumer.accept(page);
             store.commitCursor(instanceId, page.nextCursor());
             cursor = page.nextCursor();

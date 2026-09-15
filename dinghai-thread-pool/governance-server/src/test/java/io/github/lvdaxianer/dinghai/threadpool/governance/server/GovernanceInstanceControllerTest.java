@@ -5,6 +5,8 @@ import static org.junit.Assert.assertThrows;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import io.github.lvdaxianer.dinghai.threadpool.governance.api.ThreadPoolMetric;
 import org.junit.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -52,6 +54,22 @@ public class GovernanceInstanceControllerTest {
                 controller::alerts);
 
         assertEquals(HttpStatus.FORBIDDEN, exception.getStatusCode());
+    }
+
+    /** 历史指标接口必须复用总控授权策略并接受实例、线程池和时间筛选。 */
+    @Test
+    public void shouldQueryAuthorizedMetricHistory() throws Exception {
+        Path database = Files.createTempDirectory("governance-metric-api").resolve("governance.db");
+        GovernanceStore store = new GovernanceStore(database);
+        store.register("app-1", "https://app-1.internal", "test");
+        store.appendMetrics("app-1", List.of(new ThreadPoolMetric(0L, 100L, "orders", 1, 2, 3, 4,
+                5L, 6L, 7L, 8L, 9L, 10L, "NORMAL", "FAIL_FAST")));
+        GovernanceMetricsController controller = new GovernanceMetricsController(store, () -> true);
+
+        List<GovernanceThreadPoolMetric> metrics = controller.metrics("app-1", "orders", 0L, 200L);
+
+        assertEquals(1, metrics.size());
+        assertEquals("orders", metrics.getFirst().poolName());
     }
 
     private GovernanceInstanceController controller(GovernanceAccessPolicy policy) throws Exception {

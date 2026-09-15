@@ -112,6 +112,21 @@ public class GovernanceServerConfiguration {
     }
 
     /**
+     * 创建总控历史指标保留任务。
+     *
+     * @param store 总控 SQLite 存储
+     * @param properties 总控配置
+     * @return 定时清理任务
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public GovernanceRetentionJob governanceRetentionJob(GovernanceStore store, GovernanceServerProperties properties) {
+        return new GovernanceRetentionJob(store, properties.getRetention());
+    }
+
+    /**
      * 校验部署配置提供了 SQLite 持久化路径。
      *
      * @param properties 总控配置
@@ -131,6 +146,8 @@ public class GovernanceServerConfiguration {
         if (properties.getPollInterval() == null || properties.getPollInterval().isNegative()
                 || properties.getPollInterval().isZero() || properties.getRequestTimeout() == null
                 || properties.getRequestTimeout().isNegative() || properties.getRequestTimeout().isZero()
+                || properties.getRetention() == null || properties.getRetention().isNegative()
+                || properties.getRetention().isZero()
                 || properties.getPageLimit() < 1) {
             throw new IllegalArgumentException("invalid thread-pool governance polling configuration");
         }

@@ -36,6 +36,7 @@ final class GovernanceSqliteSessionFactory {
         configuration.addMapper(GovernanceMappers.Cursor.class);
         configuration.addMapper(GovernanceMappers.Gap.class);
         configuration.addMapper(GovernanceMappers.Alert.class);
+        configuration.addMapper(GovernanceMappers.Metric.class);
         return new MybatisSqlSessionFactoryBuilder().build(configuration);
     }
 

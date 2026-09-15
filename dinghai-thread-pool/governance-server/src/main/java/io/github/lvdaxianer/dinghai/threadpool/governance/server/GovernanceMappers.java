@@ -9,4 +9,5 @@ final class GovernanceMappers {
     /** Cursor Mapper。 */ interface Cursor extends BaseMapper<GovernanceCursorEntity> { }
     /** 缺口 Mapper。 */ interface Gap extends BaseMapper<GovernanceCollectionGapEntity> { }
     /** 告警 Mapper。 */ interface Alert extends BaseMapper<GovernanceAlertStateEntity> { }
+    /** 线程池历史指标 Mapper。 */ interface Metric extends BaseMapper<GovernanceThreadPoolMetricEntity> { }
 }

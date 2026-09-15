@@ -14,6 +14,7 @@
 | `dinghai-thread-pool-governance-api` | 子控与总控之间的协议模型（指标页、池快照、实例世代），无任何依赖 |
 | `dinghai-thread-pool-spring-boot-starter` | 子控：自动装配治理器、MDC 任务装饰器、SQLite 指标采样与存储、只读采集端点、Micrometer 指标与健康检查 |
 | `dinghai-thread-pool-governance-server` | 总控：独立 Spring Boot 应用，单实例 SQLite 控制面，定时轮询拉取子控指标并管理采集缺口与告警 |
+| `governance-ui` | Vue 3 + Element Plus 总控分析台，只调用总控 REST API，不直连子控 |
 
 ## 快速开始
 
@@ -155,7 +156,7 @@ cursor 过期（请求位置早于当前最旧数据）时端点返回 **HTTP 40
 
 ## 治理总控
 
-`dinghai-thread-pool-governance-server` 是独立 Spring Boot 应用，使用单实例 SQLite 保存实例、版本、cursor 和采集缺口，**不提供高可用**。原始时序指标由应用的 Micrometer/Prometheus 体系保存，总控不保存原始高频指标、访问 Token、mTLS 私钥或业务任务内容。
+`dinghai-thread-pool-governance-server` 是独立 Spring Boot 应用，使用单实例 SQLite 保存实例、版本、cursor、采集缺口、告警和已采集的线程池历史指标，**不提供高可用**。总控历史默认保留 30 天；不保存访问 Token、mTLS 私钥或业务任务参数、内容等敏感负载。
 
 ### 配置项
 
@@ -166,6 +167,7 @@ cursor 过期（请求位置早于当前最旧数据）时端点返回 **HTTP 40
 | `sqlite-path` | `Path` | `dinghai-governance.db` | 总控 SQLite 文件路径，缺失时启动失败。**必须挂载持久卷** |
 | `poll-interval` | `Duration` | `30s` | 轮询间隔（fixed-delay），必须为正 |
 | `request-timeout` | `Duration` | `5s` | 请求子控的连接与读取超时，必须为正 |
+| `retention` | `Duration` | `30d` | 总控线程池历史指标保留期，必须为正；每日清理一次 |
 | `page-limit` | `int` | `1000` | 单页拉取条数，必须为正 |
 | `api-token` | `String` | 无 | 非空时请求子控携带 `Authorization: Bearer <token>`。Token 由部署注入且可轮换 |
 
@@ -179,13 +181,26 @@ cursor 过期（请求位置早于当前最旧数据）时端点返回 **HTTP 40
 | `GET /governance/instances` | 查询已注册实例清单 |
 | `GET /governance/gaps?instanceId=` | 查询采集缺口（请求 cursor、最旧 cursor、发现时间、恢复状态 OPEN/RECOVERED） |
 | `GET /governance/alerts` | 查询告警状态，告警键为 `collection-gap:<instanceId>` 与 `collection-failure:<instanceId>` |
+| `GET /governance/metrics?instanceId=&poolName=&from=&to=` | 查询总控 SQLite 已持久化的线程池采样；全部条件为 query 参数，`from`/`to` 为毫秒时间戳且包含边界 |
+
+### Vue 分析台
+
+前端工程位于 `governance-ui`，开发时由 Vite 代理 `/governance` 到本地总控，生产部署时将反向代理配置到同一总控地址：
+
+```bash
+cd dinghai-thread-pool/governance-ui
+npm install
+npm run dev
+```
+
+界面展示实例/线程池筛选、活跃与最大线程、队列深度、完成/拒绝/失败累计、等待与执行耗时趋势、Top 线程池、告警、采集缺口和最近采样明细。它只读取总控 API；总控负责拉取子控并落 SQLite，浏览器不会访问子控。
 
 ### 轮询采集与恢复
 
 总控定时轮询每个已注册实例（单实例失败隔离，不影响其他实例）：
 
 1. 轮询前先读取子控 `identity` 做世代检查；世代与记录不符时删除旧 cursor 并更新版本。尚未升级的旧子控返回 404 时按兼容模式跳过世代检查，继续原有的 metrics/snapshot 采集；
-2. 从已确认 cursor 起循环拉取指标页，**只在指标页成功被实时聚合后才提交 `nextCursor`**，因此失败会幂等重拉，不会跳过数据；
+2. 从已确认 cursor 起循环拉取指标页，先批量持久化到总控 SQLite，再发布实时聚合，最后提交 `nextCursor`；子控正数 `metricId` 在总控按 `(instanceId, sourceMetricId)` 去重，因此失败重拉不会重复写入；
 3. cursor 过期（子控返回 409）时记录采集缺口、触发 `collection-gap` 告警、拉取子控快照恢复可观测性、提交 `oldestCursor` 后将缺口标记为 RECOVERED 并解决告警；
 4. 整实例采集失败触发 `collection-failure` 告警并计数，成功则解决。
 
