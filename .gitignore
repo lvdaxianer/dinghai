@@ -13,6 +13,14 @@ logs/
 coverage/
 *.lcov
 
+# SQLite 运行时数据
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
 # 密钥红线
 .env
 .env.*

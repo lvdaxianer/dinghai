@@ -125,7 +125,9 @@ public final class ThreadPoolGovernor implements AutoCloseable {
         ThreadPoolExecutor executor = new ThreadPoolExecutor(definition.minimumSize(), definition.maximumSize(),
                 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(definition.queueCapacity()),
                 namedThreadFactory(definition.name()), new ThreadPoolExecutor.AbortPolicy());
-        return new ManagedPool(definition, executor, new PermitExecutorService(executor, permits));
+        ThreadPoolTaskStatistics statistics = new ThreadPoolTaskStatistics();
+        return new ManagedPool(definition, executor, statistics,
+                new PermitExecutorService(executor, permits, statistics));
     }
 
     /**
@@ -145,11 +147,13 @@ public final class ThreadPoolGovernor implements AutoCloseable {
     }
 
     private record ManagedPool(ThreadPoolDefinition definition, ThreadPoolExecutor delegate,
-                               ExecutorService exposed) {
+                               ThreadPoolTaskStatistics statistics, ExecutorService exposed) {
         private ThreadPoolSnapshot snapshot() {
             return new ThreadPoolSnapshot(definition.name(), delegate.getActiveCount(), delegate.getPoolSize(),
-                    delegate.getQueue().size(), delegate.getMaximumPoolSize(), delegate.getCompletedTaskCount(),
-                    definition.priority().name(), definition.reliability().name());
+                    delegate.getQueue().size(), delegate.getMaximumPoolSize(), statistics.submittedCount(),
+                    statistics.completedCount(), statistics.rejectedCount(), statistics.failedCount(),
+                    statistics.waitMillis(), statistics.executionMillis(), definition.priority().name(),
+                    definition.reliability().name());
         }
     }
 }

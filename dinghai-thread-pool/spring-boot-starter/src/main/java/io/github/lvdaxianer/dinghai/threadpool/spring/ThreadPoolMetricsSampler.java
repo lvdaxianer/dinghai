@@ -34,7 +34,8 @@ public final class ThreadPoolMetricsSampler {
 
     private ThreadPoolMetric metric(ThreadPoolSnapshot snapshot, long now) {
         return new ThreadPoolMetric(0, now, snapshot.name(), snapshot.active(), snapshot.poolSize(),
-                snapshot.queueSize(), snapshot.actualMaximum(), 0, snapshot.completed(), 0, 0, 0, 0,
+                snapshot.queueSize(), snapshot.actualMaximum(), snapshot.submitted(), snapshot.completed(),
+                snapshot.rejected(), snapshot.failed(), snapshot.waitMillis(), snapshot.executionMillis(),
                 snapshot.priority(), snapshot.reliability());
     }
 }

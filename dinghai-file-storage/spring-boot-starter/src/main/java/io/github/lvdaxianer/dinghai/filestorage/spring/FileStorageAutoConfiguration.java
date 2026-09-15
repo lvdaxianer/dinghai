@@ -29,6 +29,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.core.task.TaskDecorator;
 
 /**
  * 按配置选择唯一文件存储后端的 Spring Boot 自动装配。
@@ -363,12 +364,13 @@ public class FileStorageAutoConfiguration {
     @ConditionalOnMissingBean(name = "fileStorageWebTaskExecutor")
     @ConditionalOnProperty(name = "dinghai.file-storage.web.enabled", havingValue = "true",
             matchIfMissing = true)
-    public ThreadPoolTaskExecutor fileStorageWebTaskExecutor() {
+    public ThreadPoolTaskExecutor fileStorageWebTaskExecutor(Optional<TaskDecorator> taskDecorator) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(WEB_EXECUTOR_CORE_SIZE);
         executor.setMaxPoolSize(WEB_EXECUTOR_MAX_SIZE);
         executor.setQueueCapacity(WEB_EXECUTOR_QUEUE_CAPACITY);
         executor.setThreadNamePrefix("file-storage-web-");
+        taskDecorator.ifPresent(executor::setTaskDecorator);
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(WEB_EXECUTOR_SHUTDOWN_SECONDS);
         executor.initialize();

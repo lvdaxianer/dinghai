@@ -57,9 +57,17 @@ public class ThreadPoolAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnProperty(prefix = "dinghai.thread-pool", name = "endpoint-enabled", havingValue = "true")
-    public ThreadPoolMetricController threadPoolMetricController(SqliteMetricStore store,
+    public ThreadPoolMetricController threadPoolMetricController(SqliteMetricStore store, ThreadPoolGovernor governor,
                                                                   ThreadPoolMetricsAccessPolicy accessPolicy) {
-        return new ThreadPoolMetricController(store, accessPolicy);
+        return new ThreadPoolMetricController(store, governor, accessPolicy);
+    }
+
+    /** 注册子控端点的协议异常映射器。 */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "dinghai.thread-pool", name = "endpoint-enabled", havingValue = "true")
+    public ThreadPoolEndpointExceptionHandler threadPoolEndpointExceptionHandler() {
+        return new ThreadPoolEndpointExceptionHandler();
     }
 
     /** 注册默认拒绝访问的指标端点授权策略。 */

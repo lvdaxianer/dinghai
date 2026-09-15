@@ -46,6 +46,7 @@ public final class SqliteMetricStore {
     /** 按 cursor 返回有界的一页指标。 */
     public MetricPage page(String cursor, int requestedLimit) {
         long after = cursor == null || cursor.isBlank() ? 0 : Long.parseLong(cursor);
+        rejectExpiredCursor(after);
         int limit = Math.min(Math.max(1, requestedLimit), maximumPageSize);
         List<ThreadPoolMetric> metrics = query(after, limit + 1);
         boolean hasMore = metrics.size() > limit;
@@ -107,6 +108,14 @@ public final class SqliteMetricStore {
             return result.next() ? String.valueOf(result.getLong(1)) : "0";
         } catch (SQLException exception) {
             throw new IllegalStateException("cannot query oldest cursor", exception);
+        }
+    }
+
+    /** 拒绝会跳过已清理指标的增量读取。 */
+    private void rejectExpiredCursor(long after) {
+        long oldest = Long.parseLong(oldestCursor());
+        if (after > 0 && oldest > 0 && after < oldest - 1) {
+            throw new CursorExpiredException(String.valueOf(oldest));
         }
     }
 

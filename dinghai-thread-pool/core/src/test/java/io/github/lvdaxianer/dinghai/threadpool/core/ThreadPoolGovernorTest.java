@@ -1,6 +1,7 @@
 package io.github.lvdaxianer.dinghai.threadpool.core;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertThrows;
 
 import java.util.concurrent.CountDownLatch;
@@ -42,6 +43,34 @@ public class ThreadPoolGovernorTest {
             governor.register(definition("duplicate-work-h"));
             assertThrows(IllegalArgumentException.class,
                     () -> governor.register(definition("duplicate-work-h")));
+        }
+    }
+
+    /** 已完成的受控任务必须反映到治理快照，供子控 SQLite 采样。 */
+    @Test
+    public void shouldExposeCompletedTaskCountersInSnapshot() throws Exception {
+        try (ThreadPoolGovernor governor = new ThreadPoolGovernor(1)) {
+            ExecutorService executor = governor.register(definition("metric-work-h"));
+            CountDownLatch completed = new CountDownLatch(1);
+            executor.execute(completed::countDown);
+
+            assertTrue(completed.await(5, TimeUnit.SECONDS));
+            ThreadPoolSnapshot snapshot = governor.snapshots().getFirst();
+            assertEquals(1, snapshot.submitted());
+            assertEquals(1, snapshot.completed());
+            assertTrue(snapshot.executionMillis() >= 0);
+        }
+    }
+
+    /** Future 吞掉任务异常时，治理快照仍必须记录失败次数。 */
+    @Test
+    public void shouldCountFailedSubmittedTask() throws Exception {
+        try (ThreadPoolGovernor governor = new ThreadPoolGovernor(1)) {
+            ExecutorService executor = governor.register(definition("failed-work-h"));
+            assertThrows(Exception.class,
+                    () -> executor.submit(() -> { throw new IllegalStateException("expected"); }).get());
+            ThreadPoolSnapshot snapshot = governor.snapshots().getFirst();
+            assertEquals(1, snapshot.failed());
         }
     }
 

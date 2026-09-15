@@ -1,4 +1,6 @@
 # >>> project-hygiene (managed, do not edit by hand) >>>
 * text=auto eol=lf
 *.java text eol=lf
+*.db binary
+*.sqlite binary
 # <<< project-hygiene (managed) <<<

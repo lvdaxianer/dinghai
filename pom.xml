@@ -35,8 +35,8 @@
 
     <modules>
         <module>dinghai-shared-state</module>
-        <module>dinghai-file-storage</module>
         <module>dinghai-thread-pool</module>
+        <module>dinghai-file-storage</module>
     </modules>
 
     <properties>
