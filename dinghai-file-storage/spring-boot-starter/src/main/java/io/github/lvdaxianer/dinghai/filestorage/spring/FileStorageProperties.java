@@ -34,6 +34,8 @@ public class FileStorageProperties {
     private final AliyunOss aliyunOss = new AliyunOss();
     /** 上传策略配置。 */
     private final Upload upload = new Upload();
+    /** 大文件分片上传配置。 */
+    private final Multipart multipart = new Multipart();
     /** 本地签名配置。 */
     private final Security security = new Security();
     /** Web 访问配置。 */
@@ -162,6 +164,17 @@ public class FileStorageProperties {
      */
     public Upload getUpload() {
         return upload;
+    }
+
+    /**
+     * 获取大文件分片上传配置。
+     *
+     * @return 分片上传资源与会话限制
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public Multipart getMultipart() {
+        return multipart;
     }
 
     /**
@@ -562,6 +575,130 @@ public class FileStorageProperties {
          */
         public void setContentTypeWhitelist(Set<String> contentTypeWhitelist) {
             this.contentTypeWhitelist = contentTypeWhitelist;
+        }
+    }
+
+    /**
+     * 大文件 multipart 上传的资源与会话限制。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public static class Multipart {
+        /** S3 与 OSS 对非末分片共同要求的最小大小。 */
+        private static final DataSize MIN_SUPPORTED_PART_SIZE = DataSize.ofMegabytes(5L);
+        /** 对象存储 provider 共同支持的最大分片数。 */
+        private static final int MAX_SUPPORTED_PARTS = 10_000;
+        /** 默认分片大小，满足 S3 与 OSS 的最小分片约束。 */
+        private DataSize partSize = DataSize.ofMegabytes(10L);
+        /** 对象存储 provider 共同支持的最大分片数。 */
+        private int maxParts = MAX_SUPPORTED_PARTS;
+        /** 未完成会话的最长保留时间。 */
+        private Duration sessionTtl = Duration.ofHours(24L);
+        /** Local provider 未完成分片的独立临时目录。 */
+        private Path localRoot = Paths.get(System.getProperty("java.io.tmpdir"),
+                "dinghai-file-storage-multipart");
+        /** 应用代理 Local 分片写入时允许的最大并发数。 */
+        private int maxConcurrentUploads = 8;
+
+        /**
+         * 获取单片大小。
+         *
+         * @return 单片大小
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        public DataSize getPartSize() { return partSize; }
+        /**
+         * 设置单片大小。
+         *
+         * @param partSize 单片大小
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        public void setPartSize(DataSize partSize) { this.partSize = partSize; }
+        /**
+         * 获取最大分片数。
+         *
+         * @return 最大分片数
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        public int getMaxParts() { return maxParts; }
+        /**
+         * 设置最大分片数。
+         *
+         * @param maxParts 最大分片数
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        public void setMaxParts(int maxParts) { this.maxParts = maxParts; }
+        /**
+         * 获取未完成会话保留时间。
+         *
+         * @return 未完成会话保留时间
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        public Duration getSessionTtl() { return sessionTtl; }
+        /**
+         * 设置未完成会话保留时间。
+         *
+         * @param sessionTtl 未完成会话保留时间
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        public void setSessionTtl(Duration sessionTtl) { this.sessionTtl = sessionTtl; }
+        /**
+         * 获取 Local 未完成分片根目录。
+         *
+         * @return Local 未完成分片根目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        public Path getLocalRoot() { return localRoot; }
+        /**
+         * 设置 Local 未完成分片根目录。
+         *
+         * @param localRoot Local 未完成分片根目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        public void setLocalRoot(Path localRoot) { this.localRoot = localRoot; }
+        /**
+         * 获取 Local 分片上传最大并发数。
+         *
+         * @return Local 分片上传最大并发数
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        public int getMaxConcurrentUploads() { return maxConcurrentUploads; }
+        /**
+         * 设置 Local 分片上传最大并发数。
+         *
+         * @param maxConcurrentUploads Local 分片上传最大并发数
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        public void setMaxConcurrentUploads(int maxConcurrentUploads) {
+            this.maxConcurrentUploads = maxConcurrentUploads;
+        }
+
+        /**
+         * 校验跨 provider 一致的 multipart 资源边界。
+         *
+         * @throws IllegalArgumentException multipart 配置不满足资源边界时抛出
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-15
+         */
+        void validate() {
+            // 任一资源限制无效时拒绝启动，避免请求到达 provider 后才失败。
+            if (partSize == null || partSize.compareTo(MIN_SUPPORTED_PART_SIZE) < 0 || maxParts < 1
+                    || maxParts > MAX_SUPPORTED_PARTS
+                    || sessionTtl == null || sessionTtl.isZero() || sessionTtl.isNegative()
+                    || localRoot == null || maxConcurrentUploads < 1) {
+                throw new IllegalArgumentException("multipart configuration is invalid");
+            }
         }
     }
 

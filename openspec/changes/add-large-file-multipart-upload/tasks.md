@@ -1,7 +1,7 @@
 ## 1. Core contract and validation
 
 - [x] 1.1 Add multipart request/result models, stable error codes, lifecycle interface, validation rules, and contract tests.
-- [ ] 1.2 Define configuration for part size, max parts, session TTL, local multipart root, and bounded concurrency.
+- [x] 1.2 Define configuration for part size, max parts, session TTL, local multipart root, and bounded concurrency.
 
 ## 2. Provider implementations
 

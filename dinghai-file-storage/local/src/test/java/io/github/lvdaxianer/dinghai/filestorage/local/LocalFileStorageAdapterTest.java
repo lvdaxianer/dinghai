@@ -57,6 +57,27 @@ public class LocalFileStorageAdapterTest {
         assertEquals("image", read(storage.get(key)));
     }
 
+    /**
+     * multipart 临时目录与正式对象目录重叠时必须拒绝创建适配器。
+     *
+     * @throws Exception 创建测试目录失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    @Test
+    public void rejectsMultipartRootOverlappingObjectRoot() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+
+        try {
+            new LocalFileStorageAdapter(root, SIGNING_KEY, Long.MAX_VALUE, Set.of(),
+                    LocalFileStorageAdapter.DEFAULT_MAXIMUM_PRESIGN_EXPIRY, Clock.systemUTC(),
+                    "/files", root);
+            fail("expected multipart root overlap rejection");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("multipart root"));
+        }
+    }
+
     /** 可选本地文件来源只暴露根目录内已存在的普通对象文件。 */
     @Test
     public void exposesExistingObjectAsSafeLocalFileSource() throws Exception {

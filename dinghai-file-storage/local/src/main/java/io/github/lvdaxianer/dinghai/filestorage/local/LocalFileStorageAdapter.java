@@ -85,6 +85,28 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
     public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes,
                                    Set<String> contentTypeWhitelist,
                                    Duration maximumPresignExpiry, Clock clock, String pathPrefix) {
+        this(root, signingKey, maxSizeBytes, contentTypeWhitelist, maximumPresignExpiry, clock,
+                pathPrefix, null);
+    }
+
+    /**
+     * 使用指定 multipart 临时目录创建本地适配器。
+     *
+     * @param root 正式对象根目录
+     * @param signingKey 本地预签名密钥
+     * @param maxSizeBytes 对象最大字节数
+     * @param contentTypeWhitelist 允许的内容类型
+     * @param maximumPresignExpiry 预签名最大有效期
+     * @param clock 用于会话过期判断的时钟
+     * @param pathPrefix 本地 Web 访问路径前缀
+     * @param multipartRoot 独立的分片临时根目录
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes,
+                                   Set<String> contentTypeWhitelist,
+                                   Duration maximumPresignExpiry, Clock clock, String pathPrefix,
+                                   Path multipartRoot) {
         if (maxSizeBytes < 0) {
             throw new IllegalArgumentException("max size must be non-negative");
         }
@@ -96,9 +118,17 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
                 contentTypeWhitelist, "contentTypeWhitelist"));
         this.pathPrefix = LocalFileStorageSigner.validatePathPrefix(pathPrefix);
         this.clock = Objects.requireNonNull(clock, "clock");
-        this.multipartRoot = paths.root().resolveSibling(paths.root().getFileName()
-                + ".dinghai-multipart");
-        createDirectory(multipartRoot);
+        Path configuredMultipartRoot = multipartRoot == null
+                ? paths.root().resolveSibling(paths.root().getFileName() + ".dinghai-multipart")
+                : multipartRoot.toAbsolutePath().normalize();
+        configuredMultipartRoot = resolveExistingPath(configuredMultipartRoot);
+        // 临时会话清理不能递归删除正式对象目录。
+        if (configuredMultipartRoot.startsWith(paths.root())
+                || paths.root().startsWith(configuredMultipartRoot)) {
+            throw new IllegalArgumentException("multipart root overlaps local storage root");
+        }
+        this.multipartRoot = configuredMultipartRoot;
+        createDirectory(this.multipartRoot);
     }
 
     /** 写入或覆盖对象，并以临时文件和原子移动完成替换。 */
@@ -652,6 +682,26 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
     private static void createDirectory(Path directory) {
         try {
             Files.createDirectories(directory);
+        } catch (IOException exception) {
+            throw failure(FileStorageErrorCode.INVALID_CONFIGURATION,
+                    "multipart root is unavailable", exception);
+        }
+    }
+
+    /**
+     * 解析已存在目录的真实路径，统一符号链接别名后的目录比较语义。
+     *
+     * @param path 待规范化的目录路径
+     * @return 可用的标准化目录路径
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    private static Path resolveExistingPath(Path path) {
+        if (!Files.exists(path)) {
+            return path;
+        }
+        try {
+            return path.toRealPath();
         } catch (IOException exception) {
             throw failure(FileStorageErrorCode.INVALID_CONFIGURATION,
                     "multipart root is unavailable", exception);
