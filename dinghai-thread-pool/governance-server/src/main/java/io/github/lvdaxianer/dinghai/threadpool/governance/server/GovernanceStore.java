@@ -1,267 +1,222 @@
 package io.github.lvdaxianer.dinghai.threadpool.governance.server;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.Optional;
-import java.util.Objects;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import org.apache.ibatis.session.SqlSession;
+import org.apache.ibatis.session.SqlSessionFactory;
 
 /**
- * 单实例总控的 SQLite 控制面存储。
+ * 使用 MyBatis-Plus 保存单实例总控 SQLite 控制面状态。
  *
  * @author lvdaxianer@yeah.net
  * @date 2026-09-15
  */
 public final class GovernanceStore {
-    private final String url;
+    private static final String OPEN = "OPEN";
+    private static final String RESOLVED = "RESOLVED";
+    private static final String RECOVERED = "RECOVERED";
+    private final SqlSessionFactory sessionFactory;
 
     /** 创建并初始化 SQLite 控制面存储。 */
     public GovernanceStore(Path path) {
         Objects.requireNonNull(path, "path");
         createParent(path);
-        url = "jdbc:sqlite:" + path.toAbsolutePath();
-        initialize();
+        sessionFactory = GovernanceSqliteSessionFactory.create(path);
     }
 
     /** 注册或更新一个子控实例。 */
     public void register(String instanceId, String baseUrl, String environment) {
-        String sql = "insert into governance_instance(instance_id,base_url,environment,enabled,updated_at) values(?,?,?,1,?) on conflict(instance_id) do update set base_url=excluded.base_url,environment=excluded.environment,enabled=1,updated_at=excluded.updated_at";
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, instanceId); statement.setString(2, baseUrl);
-            statement.setString(3, environment); statement.setLong(4, System.currentTimeMillis());
-            statement.executeUpdate();
-        } catch (SQLException exception) { throw failure("register instance", exception); }
+        withMappers(mappers -> {
+            GovernanceInstanceEntity entity = mappers.instance().selectById(instanceId);
+            if (entity == null) {
+                mappers.instance().insert(instance(instanceId, baseUrl, environment));
+            } else {
+                updateInstance(entity, baseUrl, environment, mappers);
+            }
+            return null;
+        });
     }
 
-    /**
-     * 返回当前启用实例，供单实例轮询器和管理 API 查询。
-     *
-     * @return 按实例标识排序的不可变实例列表
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
+    /** 返回当前启用实例，供单实例轮询器和管理 API 查询。 */
     public List<GovernanceInstance> instances() {
-        List<GovernanceInstance> instances = new ArrayList<>();
-        String sql = "select instance_id,base_url,environment,enabled,updated_at from governance_instance order by instance_id";
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql);
-             ResultSet result = statement.executeQuery()) {
-            while (result.next()) { instances.add(instance(result)); }
-            return List.copyOf(instances);
-        } catch (SQLException exception) { throw failure("list instances", exception); }
+        return withMappers(mappers -> mappers.instance().selectList(new LambdaQueryWrapper<GovernanceInstanceEntity>()
+                .orderByAsc(GovernanceInstanceEntity::getInstanceId)).stream().map(this::instance).toList());
     }
 
     /** 读取某实例已确认的 cursor。 */
     public Optional<String> cursor(String instanceId) {
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement("select cursor from governance_cursor where instance_id=?")) {
-            statement.setString(1, instanceId);
-            try (ResultSet result = statement.executeQuery()) {
-                return result.next() ? Optional.of(result.getString(1)) : Optional.empty();
-            }
-        } catch (SQLException exception) { throw failure("read cursor", exception); }
+        return withMappers(mappers -> Optional.ofNullable(mappers.cursor().selectById(instanceId))
+                .map(GovernanceCursorEntity::getCursor));
     }
 
     /** 在聚合成功后提交一个实例 cursor。 */
     public void commitCursor(String instanceId, String cursor) {
-        String sql = "insert into governance_cursor(instance_id,cursor,updated_at) values(?,?,?) on conflict(instance_id) do update set cursor=excluded.cursor,updated_at=excluded.updated_at";
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, instanceId); statement.setString(2, cursor);
-            statement.setLong(3, System.currentTimeMillis()); statement.executeUpdate();
-        } catch (SQLException exception) { throw failure("commit cursor", exception); }
+        withMappers(mappers -> {
+            GovernanceCursorEntity entity = mappers.cursor().selectById(instanceId);
+            if (entity == null) {
+                mappers.cursor().insert(cursor(instanceId, cursor));
+            } else {
+                entity.setCursor(cursor); entity.setUpdatedAt(System.currentTimeMillis());
+                mappers.cursor().updateById(entity);
+            }
+            return null;
+        });
     }
 
     /** 记录一次无法补齐的指标采集缺口。 */
     public void recordGap(String instanceId, String requestedCursor, String oldestCursor) {
-        String sql = "insert into governance_collection_gap(instance_id,requested_cursor,oldest_cursor,detected_at,recovery_status) values(?,?,?,?,?)";
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, instanceId); statement.setString(2, requestedCursor);
-            statement.setString(3, oldestCursor); statement.setLong(4, System.currentTimeMillis());
-            statement.setString(5, "OPEN"); statement.executeUpdate();
-        } catch (SQLException exception) { throw failure("record collection gap", exception); }
+        withMappers(mappers -> {
+            GovernanceCollectionGapEntity entity = new GovernanceCollectionGapEntity();
+            entity.setInstanceId(instanceId); entity.setRequestedCursor(requestedCursor);
+            entity.setOldestCursor(oldestCursor); entity.setDetectedAt(System.currentTimeMillis());
+            entity.setRecoveryStatus(OPEN); mappers.gap().insert(entity);
+            return null;
+        });
     }
 
-    /**
-     * 返回一个实例全部采集缺口，供管理查询和告警恢复使用。
-     *
-     * @param instanceId 子控实例标识
-     * @return 按发现时间排序的缺口记录
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
+    /** 返回一个实例全部采集缺口，供管理查询和告警恢复使用。 */
     public List<GovernanceCollectionGap> gaps(String instanceId) {
-        List<GovernanceCollectionGap> gaps = new ArrayList<>();
-        String sql = "select id,instance_id,requested_cursor,oldest_cursor,detected_at,recovery_status from governance_collection_gap where instance_id=? order by id";
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, instanceId);
-            try (ResultSet result = statement.executeQuery()) {
-                while (result.next()) { gaps.add(gap(result)); }
-            }
-            return List.copyOf(gaps);
-        } catch (SQLException exception) { throw failure("list collection gaps", exception); }
+        return withMappers(mappers -> mappers.gap().selectList(new LambdaQueryWrapper<GovernanceCollectionGapEntity>()
+                .eq(GovernanceCollectionGapEntity::getInstanceId, instanceId)
+                .orderByAsc(GovernanceCollectionGapEntity::getId)).stream().map(this::gap).toList());
     }
 
-    /**
-     * 将尚未恢复的缺口标记为已用快照恢复。
-     *
-     * @param instanceId 子控实例标识
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
+    /** 将尚未恢复的最新缺口标记为已用快照恢复。 */
     public void markLatestGapRecovered(String instanceId) {
-        String sql = "update governance_collection_gap set recovery_status='RECOVERED' where id=(select max(id) from governance_collection_gap where instance_id=? and recovery_status='OPEN')";
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, instanceId);
-            statement.executeUpdate();
-        } catch (SQLException exception) { throw failure("mark collection gap recovered", exception); }
-    }
-
-    /**
-     * 创建或刷新一个开放告警，保留首次触发时间。
-     *
-     * @param alertKey 稳定告警键
-     * @param value 当前安全摘要值
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
-    public void fireAlert(String alertKey, String value) {
-        long now = System.currentTimeMillis();
-        String sql = "insert into governance_alert_state(alert_key,status,first_fired_at,last_fired_at,last_value,resolved_at) values(?,?,?,?,?,null) on conflict(alert_key) do update set status='OPEN',last_fired_at=excluded.last_fired_at,last_value=excluded.last_value,resolved_at=null";
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, alertKey); statement.setString(2, "OPEN");
-            statement.setLong(3, now); statement.setLong(4, now); statement.setString(5, value);
-            statement.executeUpdate();
-        } catch (SQLException exception) { throw failure("fire alert", exception); }
-    }
-
-    /**
-     * 将一个已恢复的告警标记为已解决。
-     *
-     * @param alertKey 稳定告警键
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
-    public void resolveAlert(String alertKey) {
-        String sql = "update governance_alert_state set status='RESOLVED',resolved_at=? where alert_key=? and status='OPEN'";
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setLong(1, System.currentTimeMillis()); statement.setString(2, alertKey);
-            statement.executeUpdate();
-        } catch (SQLException exception) { throw failure("resolve alert", exception); }
-    }
-
-    /**
-     * 读取一个告警的当前持久化状态。
-     *
-     * @param alertKey 稳定告警键
-     * @return 可选告警状态
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
-    public Optional<GovernanceAlertState> alert(String alertKey) {
-        String sql = "select alert_key,status,first_fired_at,last_fired_at,last_value,resolved_at from governance_alert_state where alert_key=?";
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, alertKey);
-            try (ResultSet result = statement.executeQuery()) {
-                return result.next() ? Optional.of(alert(result)) : Optional.empty();
+        withMappers(mappers -> {
+            GovernanceCollectionGapEntity gap = mappers.gap().selectPage(Page.of(1, 1, false), new LambdaQueryWrapper<GovernanceCollectionGapEntity>()
+                    .eq(GovernanceCollectionGapEntity::getInstanceId, instanceId)
+                    .eq(GovernanceCollectionGapEntity::getRecoveryStatus, OPEN)
+                    .orderByDesc(GovernanceCollectionGapEntity::getId)).getRecords().stream().findFirst().orElse(null);
+            if (gap != null) {
+                gap.setRecoveryStatus(RECOVERED); mappers.gap().updateById(gap);
             }
-        } catch (SQLException exception) { throw failure("read alert", exception); }
+            return null;
+        });
     }
 
-    /**
-     * 返回全部持久化告警状态，供受保护的管理查询使用。
-     *
-     * @return 按告警键排序的告警状态
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
+    /** 创建或刷新一个开放告警，保留首次触发时间。 */
+    public void fireAlert(String alertKey, String value) {
+        withMappers(mappers -> {
+            GovernanceAlertStateEntity entity = mappers.alert().selectById(alertKey);
+            if (entity == null) {
+                mappers.alert().insert(alert(alertKey, value));
+            } else {
+                entity.setStatus(OPEN); entity.setLastFiredAt(System.currentTimeMillis());
+                entity.setLastValue(value); entity.setResolvedAt(null); mappers.alert().updateById(entity);
+            }
+            return null;
+        });
+    }
+
+    /** 将一个已恢复的告警标记为已解决。 */
+    public void resolveAlert(String alertKey) {
+        withMappers(mappers -> {
+            mappers.alert().update(null, new LambdaUpdateWrapper<GovernanceAlertStateEntity>()
+                    .eq(GovernanceAlertStateEntity::getAlertKey, alertKey)
+                    .eq(GovernanceAlertStateEntity::getStatus, OPEN)
+                    .set(GovernanceAlertStateEntity::getStatus, RESOLVED)
+                    .set(GovernanceAlertStateEntity::getResolvedAt, System.currentTimeMillis()));
+            return null;
+        });
+    }
+
+    /** 读取一个告警的当前持久化状态。 */
+    public Optional<GovernanceAlertState> alert(String alertKey) {
+        return withMappers(mappers -> Optional.ofNullable(mappers.alert().selectById(alertKey)).map(this::alert));
+    }
+
+    /** 返回全部持久化告警状态，供受保护的管理查询使用。 */
     public List<GovernanceAlertState> alerts() {
-        List<GovernanceAlertState> alerts = new ArrayList<>();
-        String sql = "select alert_key,status,first_fired_at,last_fired_at,last_value,resolved_at from governance_alert_state order by alert_key";
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql);
-             ResultSet result = statement.executeQuery()) {
-            while (result.next()) { alerts.add(alert(result)); }
-            return List.copyOf(alerts);
-        } catch (SQLException exception) { throw failure("list alerts", exception); }
+        return withMappers(mappers -> mappers.alert().selectList(new LambdaQueryWrapper<GovernanceAlertStateEntity>()
+                .orderByAsc(GovernanceAlertStateEntity::getAlertKey)).stream().map(this::alert).toList());
     }
 
-    private void initialize() {
-        execute("create table if not exists governance_instance(instance_id text primary key,base_url text not null,environment text not null,enabled integer not null,updated_at integer not null)");
-        execute("create table if not exists governance_cursor(instance_id text primary key,cursor text not null,updated_at integer not null)");
-        execute("create table if not exists governance_collection_gap(id integer primary key autoincrement,instance_id text not null,requested_cursor text,oldest_cursor text,detected_at integer not null,recovery_status text not null)");
-        execute("create table if not exists governance_alert_state(alert_key text primary key,status text not null,first_fired_at integer not null,last_fired_at integer not null,last_value text,resolved_at integer)");
+    /** 更新已有实例记录。 */
+    private void updateInstance(GovernanceInstanceEntity entity, String baseUrl, String environment, Mappers mappers) {
+        entity.setBaseUrl(baseUrl); entity.setEnvironment(environment); entity.setEnabled(true);
+        entity.setUpdatedAt(System.currentTimeMillis()); mappers.instance().updateById(entity);
     }
 
-    /**
-     * 从查询行构建不泄露控制面内部状态的实例投影。
-     *
-     * @param result SQLite 查询结果
-     * @return 实例投影
-     * @throws SQLException 读取结果失败
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
-    private GovernanceInstance instance(ResultSet result) throws SQLException {
-        return new GovernanceInstance(result.getString("instance_id"), result.getString("base_url"),
-                result.getString("environment"), result.getBoolean("enabled"), result.getLong("updated_at"));
+    /** 创建实例实体。 */
+    private GovernanceInstanceEntity instance(String instanceId, String baseUrl, String environment) {
+        GovernanceInstanceEntity entity = new GovernanceInstanceEntity();
+        entity.setInstanceId(instanceId); entity.setBaseUrl(baseUrl); entity.setEnvironment(environment);
+        entity.setEnabled(true); entity.setUpdatedAt(System.currentTimeMillis());
+        return entity;
     }
 
-    /**
-     * 从查询行构建采集缺口投影。
-     *
-     * @param result SQLite 查询结果
-     * @return 采集缺口投影
-     * @throws SQLException 读取结果失败
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
-    private GovernanceCollectionGap gap(ResultSet result) throws SQLException {
-        return new GovernanceCollectionGap(result.getLong("id"), result.getString("instance_id"),
-                result.getString("requested_cursor"), result.getString("oldest_cursor"),
-                result.getLong("detected_at"), result.getString("recovery_status"));
+    /** 创建 cursor 实体。 */
+    private GovernanceCursorEntity cursor(String instanceId, String cursor) {
+        GovernanceCursorEntity entity = new GovernanceCursorEntity();
+        entity.setInstanceId(instanceId); entity.setCursor(cursor); entity.setUpdatedAt(System.currentTimeMillis());
+        return entity;
     }
 
-    /**
-     * 从查询行构建告警状态投影。
-     *
-     * @param result SQLite 查询结果
-     * @return 告警状态投影
-     * @throws SQLException 读取结果失败
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-15
-     */
-    private GovernanceAlertState alert(ResultSet result) throws SQLException {
-        long resolvedAt = result.getLong("resolved_at");
-        Long resolved = result.wasNull() ? null : resolvedAt;
-        return new GovernanceAlertState(result.getString("alert_key"), result.getString("status"),
-                result.getLong("first_fired_at"), result.getLong("last_fired_at"),
-                result.getString("last_value"), resolved);
+    /** 创建开放告警实体。 */
+    private GovernanceAlertStateEntity alert(String alertKey, String value) {
+        long now = System.currentTimeMillis();
+        GovernanceAlertStateEntity entity = new GovernanceAlertStateEntity();
+        entity.setAlertKey(alertKey); entity.setStatus(OPEN); entity.setFirstFiredAt(now);
+        entity.setLastFiredAt(now); entity.setLastValue(value);
+        return entity;
     }
 
-    private void execute(String sql) {
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.execute();
-        } catch (SQLException exception) { throw failure("initialize governance database", exception); }
+    /** 将实例实体投影为公开状态。 */
+    private GovernanceInstance instance(GovernanceInstanceEntity entity) {
+        return new GovernanceInstance(entity.getInstanceId(), entity.getBaseUrl(), entity.getEnvironment(),
+                entity.getEnabled(), entity.getUpdatedAt());
     }
 
-    private Connection connection() throws SQLException {
-        Connection connection = DriverManager.getConnection(url);
-        try (PreparedStatement wal = connection.prepareStatement("pragma journal_mode=WAL");
-             PreparedStatement timeout = connection.prepareStatement("pragma busy_timeout=5000")) {
-            wal.execute(); timeout.execute();
+    /** 将缺口实体投影为公开状态。 */
+    private GovernanceCollectionGap gap(GovernanceCollectionGapEntity entity) {
+        return new GovernanceCollectionGap(entity.getId(), entity.getInstanceId(), entity.getRequestedCursor(),
+                entity.getOldestCursor(), entity.getDetectedAt(), entity.getRecoveryStatus());
+    }
+
+    /** 将告警实体投影为公开状态。 */
+    private GovernanceAlertState alert(GovernanceAlertStateEntity entity) {
+        return new GovernanceAlertState(entity.getAlertKey(), entity.getStatus(), entity.getFirstFiredAt(),
+                entity.getLastFiredAt(), entity.getLastValue(), entity.getResolvedAt());
+    }
+
+    /** 执行 MyBatis-Plus 操作并将同一会话作为事务边界。 */
+    private <T> T withMappers(MapperOperation<T> operation) {
+        try (SqlSession session = sessionFactory.openSession(false)) {
+            T result = operation.execute(new Mappers(session));
+            session.commit();
+            return result;
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("cannot access governance SQLite store", exception);
         }
-        return connection;
     }
 
+    /** 创建 SQLite 父目录。 */
     private void createParent(Path path) {
-        try { Files.createDirectories(path.toAbsolutePath().getParent()); }
-        catch (Exception exception) { throw new IllegalArgumentException("cannot create governance database directory", exception); }
+        try {
+            Files.createDirectories(path.toAbsolutePath().getParent());
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("cannot create governance database directory", exception);
+        }
     }
 
-    private IllegalStateException failure(String action, SQLException exception) {
-        return new IllegalStateException("cannot " + action, exception);
+    /** 总控 Mapper 会话视图。 */
+    private record Mappers(SqlSession session) {
+        /** @return 实例 Mapper */ GovernanceMappers.Instance instance() { return session.getMapper(GovernanceMappers.Instance.class); }
+        /** @return cursor Mapper */ GovernanceMappers.Cursor cursor() { return session.getMapper(GovernanceMappers.Cursor.class); }
+        /** @return 缺口 Mapper */ GovernanceMappers.Gap gap() { return session.getMapper(GovernanceMappers.Gap.class); }
+        /** @return 告警 Mapper */ GovernanceMappers.Alert alert() { return session.getMapper(GovernanceMappers.Alert.class); }
+    }
+
+    /** 总控 Mapper 操作函数。 */
+    @FunctionalInterface
+    private interface MapperOperation<T> {
+        /** 执行 Mapper 操作。 */ T execute(Mappers mappers);
     }
 }

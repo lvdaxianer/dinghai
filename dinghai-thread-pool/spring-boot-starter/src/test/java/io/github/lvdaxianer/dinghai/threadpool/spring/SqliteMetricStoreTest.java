@@ -45,13 +45,15 @@ public class SqliteMetricStoreTest {
         SqliteMetricStore store = new SqliteMetricStore(database, 10);
         store.append(metric("expired-work-h", 0));
         store.append(metric("expired-work-h", 0));
+        String expiredCursor = store.page(null, 1).nextCursor();
         store.purge(Duration.ofMillis(1));
         store.append(metric("expired-work-h", System.currentTimeMillis()));
 
         CursorExpiredException exception = assertThrows(CursorExpiredException.class,
-                () -> store.page("1", 10));
+                () -> store.page(expiredCursor, 10));
 
-        assertEquals("3", exception.oldestCursor());
+        assertFalse(exception.oldestCursor().matches("\\d+"));
+        assertThrows(IllegalArgumentException.class, () -> store.page("1", 10));
     }
 
     /** 采样器必须持久化受控执行器的真实任务计数。 */
@@ -86,6 +88,17 @@ public class SqliteMetricStoreTest {
             assertEquals(0D, registry.get("dinghai.thread.pool.active").tag("pool", "meter-work-h")
                     .gauge().value(), 0D);
         }
+    }
+
+    /** SQLite 指标持久化必须委托 MyBatis-Plus，禁止在存储类中直接使用 JDBC。 */
+    @Test
+    public void shouldDelegateSqlitePersistenceToMybatisPlus() throws Exception {
+        Path source = Path.of("src/main/java/io/github/lvdaxianer/dinghai/threadpool/spring/SqliteMetricStore.java");
+        String content = Files.readString(source);
+
+        assertFalse(content.contains("java.sql."));
+        assertFalse(content.contains("DriverManager"));
+        assertFalse(content.contains("PreparedStatement"));
     }
 
     private ThreadPoolMetric metric(String name) {
