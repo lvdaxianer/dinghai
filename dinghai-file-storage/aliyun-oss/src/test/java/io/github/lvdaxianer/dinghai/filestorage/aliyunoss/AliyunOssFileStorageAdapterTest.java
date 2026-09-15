@@ -5,12 +5,26 @@ import com.aliyun.sdk.service.oss2.PresignOptions;
 import com.aliyun.sdk.service.oss2.exceptions.ServiceException;
 import com.aliyun.sdk.service.oss2.models.GetObjectRequest;
 import com.aliyun.sdk.service.oss2.models.HeadObjectResult;
+import com.aliyun.sdk.service.oss2.models.CompleteMultipartUploadRequest;
+import com.aliyun.sdk.service.oss2.models.AbortMultipartUploadRequest;
+import com.aliyun.sdk.service.oss2.models.InitiateMultipartUploadRequest;
+import com.aliyun.sdk.service.oss2.models.InitiateMultipartUploadResult;
 import com.aliyun.sdk.service.oss2.models.ListObjectsV2Request;
+import com.aliyun.sdk.service.oss2.models.ListPartsRequest;
+import com.aliyun.sdk.service.oss2.models.ListPartsResult;
 import com.aliyun.sdk.service.oss2.models.PresignResult;
 import com.aliyun.sdk.service.oss2.models.PutObjectRequest;
+import com.aliyun.sdk.service.oss2.models.UploadPartRequest;
+import com.aliyun.sdk.service.oss2.models.UploadPartResult;
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartFileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartCompletion;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPart;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPartRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
@@ -21,6 +35,7 @@ import java.io.ByteArrayInputStream;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.List;
 import org.junit.Assume;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
@@ -182,9 +197,132 @@ public class AliyunOssFileStorageAdapterTest {
         }
     }
 
+    /** OSS multipart 初始化必须固定 bucket、对象元数据并返回原生 uploadId。 */
+    @Test
+    public void initiatesNativeMultipartUpload() {
+        OSSClient client = mock(OSSClient.class);
+        when(client.initiateMultipartUpload(any(InitiateMultipartUploadRequest.class))).thenReturn(
+                InitiateMultipartUploadResult.newBuilder().innerBody(
+                        com.aliyun.sdk.service.oss2.models.InitiateMultipartUpload.newBuilder()
+                                .uploadId("upload-id").build()).build());
+        MultipartUploadRequest request = multipartRequest();
+
+        MultipartUploadSession session = adapter(client).initiate(request);
+
+        assertEquals("upload-id", session.uploadId());
+        ArgumentCaptor<InitiateMultipartUploadRequest> captured = ArgumentCaptor.forClass(
+                InitiateMultipartUploadRequest.class);
+        verify(client).initiateMultipartUpload(captured.capture());
+        assertEquals("uploads", captured.getValue().bucket());
+        assertEquals("large.bin", captured.getValue().key());
+        assertEquals("application/octet-stream", captured.getValue().contentType());
+        assertEquals("private", captured.getValue().cacheControl());
+    }
+
+    /** OSS 分片预签名必须绑定会话、对象和分片号。 */
+    @Test
+    public void presignsNativeUploadPart() {
+        OSSClient client = mock(OSSClient.class);
+        when(client.presign(any(UploadPartRequest.class), any(PresignOptions.class))).thenReturn(
+                PresignResult.newBuilder().url("https://oss.example/part").method("PUT")
+                        .expiration(Instant.EPOCH).build());
+        MultipartUploadSession session = multipartSession();
+
+        PresignedUpload result = adapter(client).presignPart(session,
+                new MultipartPartRequest(session.uploadId(), 2, session.partCount()));
+
+        assertEquals("PUT", result.method());
+        ArgumentCaptor<UploadPartRequest> captured = ArgumentCaptor.forClass(UploadPartRequest.class);
+        verify(client).presign(captured.capture(), any(PresignOptions.class));
+        assertEquals("uploads", captured.getValue().bucket());
+        assertEquals("large.bin", captured.getValue().key());
+        assertEquals("upload-id", captured.getValue().uploadId());
+        assertEquals(Long.valueOf(2L), captured.getValue().partNumber());
+        assertTrue(adapter(client) instanceof MultipartFileStorage);
+    }
+
+    /** OSS 原生分片上传与断点查询必须保留远端确认的 ETag 和长度。 */
+    @Test
+    public void uploadsAndListsNativeMultipartParts() {
+        OSSClient client = mock(OSSClient.class);
+        when(client.uploadPart(any(UploadPartRequest.class))).thenReturn(UploadPartResult.newBuilder()
+                .headers(Map.of("ETag", "etag-2")).build());
+        com.aliyun.sdk.service.oss2.models.internal.ListPartResultXml listBody =
+                new com.aliyun.sdk.service.oss2.models.internal.ListPartResultXml();
+        listBody.parts = List.of(com.aliyun.sdk.service.oss2.models.Part.newBuilder().partNumber(2L)
+                .size(3L).eTag("etag-2").build());
+        when(client.listParts(any(ListPartsRequest.class))).thenReturn(ListPartsResult.newBuilder()
+                .innerBody(listBody).build());
+        MultipartUploadSession session = multipartSession();
+        MultipartPartRequest request = new MultipartPartRequest(session.uploadId(), 2, session.partCount());
+
+        var uploaded = adapter(client).uploadPart(session, request,
+                new ByteArrayInputStream(new byte[] {4, 5, 6}), 3L);
+        var parts = adapter(client).listParts(session);
+
+        assertEquals("etag-2", uploaded.etag());
+        assertEquals(3L, uploaded.size());
+        assertEquals(List.of(uploaded), parts);
+        ArgumentCaptor<UploadPartRequest> uploadedRequest = ArgumentCaptor.forClass(UploadPartRequest.class);
+        verify(client).uploadPart(uploadedRequest.capture());
+        assertEquals("upload-id", uploadedRequest.getValue().uploadId());
+        assertEquals(Long.valueOf(2L), uploadedRequest.getValue().partNumber());
+        verify(client).listParts(any(ListPartsRequest.class));
+    }
+
+    /** OSS 完成与取消请求必须绑定同一会话、对象和 ETag 清单。 */
+    @Test
+    public void completesAndAbortsNativeMultipartUpload() {
+        OSSClient client = mock(OSSClient.class);
+        MultipartUploadSession session = multipartSession();
+        MultipartCompletion completion = new MultipartCompletion(List.of(
+                new MultipartPart(1, 3L, "etag-1"), new MultipartPart(2, 3L, "etag-2")));
+        when(client.headObject(any())).thenReturn(metadata());
+
+        adapter(client).complete(session, completion);
+        adapter(client).abort(session);
+
+        ArgumentCaptor<CompleteMultipartUploadRequest> complete = ArgumentCaptor.forClass(
+                CompleteMultipartUploadRequest.class);
+        verify(client).completeMultipartUpload(complete.capture());
+        assertEquals("uploads", complete.getValue().bucket());
+        assertEquals("large.bin", complete.getValue().key());
+        assertEquals("upload-id", complete.getValue().uploadId());
+        assertEquals("etag-1", complete.getValue().completeMultipartUpload().parts().getFirst().eTag());
+        ArgumentCaptor<AbortMultipartUploadRequest> abort = ArgumentCaptor.forClass(
+                AbortMultipartUploadRequest.class);
+        verify(client).abortMultipartUpload(abort.capture());
+        assertEquals("uploads", abort.getValue().bucket());
+        assertEquals("large.bin", abort.getValue().key());
+        assertEquals("upload-id", abort.getValue().uploadId());
+    }
+
+    /** OSS 返回 NoSuchUpload 时取消必须仍保持幂等。 */
+    @Test
+    public void treatsMissingNativeMultipartUploadAsAlreadyAborted() {
+        OSSClient client = mock(OSSClient.class);
+        when(client.abortMultipartUpload(any(AbortMultipartUploadRequest.class)))
+                .thenThrow(serviceException("NoSuchUpload"));
+
+        adapter(client).abort(multipartSession());
+
+        verify(client).abortMultipartUpload(any(AbortMultipartUploadRequest.class));
+    }
+
     /** 创建固定 bucket 的 V2 适配器。 */
     private static AliyunOssFileStorageAdapter adapter(OSSClient client) {
         return new AliyunOssFileStorageAdapter(client, "uploads");
+    }
+
+    /** 创建测试 multipart 请求。 */
+    private static MultipartUploadRequest multipartRequest() {
+        return new MultipartUploadRequest(ObjectKey.of("large.bin"), 6L, 3L,
+                "application/octet-stream", new CacheControl("private"), Duration.ofMinutes(5));
+    }
+
+    /** 创建测试 multipart 会话。 */
+    private static MultipartUploadSession multipartSession() {
+        return new MultipartUploadSession("upload-id", multipartRequest(), Instant.now().plusSeconds(300));
     }
 
     /** 创建完整的 V2 HEAD 响应。 */

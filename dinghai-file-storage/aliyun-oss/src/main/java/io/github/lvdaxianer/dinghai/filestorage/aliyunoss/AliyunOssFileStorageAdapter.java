@@ -5,15 +5,28 @@ import com.aliyun.sdk.service.oss2.PresignOptions;
 import com.aliyun.sdk.service.oss2.models.GetObjectRequest;
 import com.aliyun.sdk.service.oss2.models.HeadObjectRequest;
 import com.aliyun.sdk.service.oss2.models.HeadObjectResult;
+import com.aliyun.sdk.service.oss2.models.InitiateMultipartUploadRequest;
 import com.aliyun.sdk.service.oss2.models.ListObjectsV2Request;
 import com.aliyun.sdk.service.oss2.models.ListObjectsV2Result;
+import com.aliyun.sdk.service.oss2.models.ListPartsRequest;
+import com.aliyun.sdk.service.oss2.models.Part;
+import com.aliyun.sdk.service.oss2.models.CompleteMultipartUpload;
+import com.aliyun.sdk.service.oss2.models.CompleteMultipartUploadRequest;
+import com.aliyun.sdk.service.oss2.models.AbortMultipartUploadRequest;
 import com.aliyun.sdk.service.oss2.models.PresignResult;
 import com.aliyun.sdk.service.oss2.models.PutObjectRequest;
+import com.aliyun.sdk.service.oss2.models.UploadPartRequest;
 import com.aliyun.sdk.service.oss2.transport.BinaryData;
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartCompletion;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartFileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPart;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPartRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
@@ -25,6 +38,8 @@ import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -41,9 +56,11 @@ import java.util.stream.StreamSupport;
  * @author lvdaxianer@yeah.net
  * @date 2026-09-14
  */
-public final class AliyunOssFileStorageAdapter implements FileStorage {
+public final class AliyunOssFileStorageAdapter implements FileStorage, MultipartFileStorage {
     /** 单次列举的最大对象数。 */
     private static final long LIST_PAGE_SIZE = 1_000L;
+    /** 单次查询 multipart 分片的最大数量。 */
+    private static final long LIST_PARTS_PAGE_SIZE = 1_000L;
     /** 上传预签名方法。 */
     private static final String PUT_METHOD = "PUT";
     /** 下载预签名方法。 */
@@ -150,6 +167,117 @@ public final class AliyunOssFileStorageAdapter implements FileStorage {
         PresignResult result = client.presign(signed, PresignOptions.newBuilder().expiration(expiresAt).build());
         return new PresignedDownload(result.url(), GET_METHOD, result.expiration().orElse(expiresAt),
                 request.disposition(), Map.of("Cache-Control", request.cacheControl().value()));
+    }
+
+    /** 创建固定 bucket 的 OSS multipart 会话。 */
+    @Override
+    public MultipartUploadSession initiate(MultipartUploadRequest request) {
+        try {
+            var result = client.initiateMultipartUpload(InitiateMultipartUploadRequest.newBuilder()
+                    .bucket(bucket).key(request.key().value()).contentType(request.contentType())
+                    .cacheControl(request.cacheControl().value()).build());
+            String uploadId = requireText(result.initiateMultipartUpload().uploadId(), "uploadId");
+            return new MultipartUploadSession(uploadId, request, Instant.now().plus(request.expiresIn()));
+        } catch (Exception exception) {
+            throw AliyunOssExceptionMapper.map(exception);
+        }
+    }
+
+    /** 生成绑定 OSS uploadId、对象 key 和分片号的原生上传 URL。 */
+    @Override
+    public PresignedUpload presignPart(MultipartUploadSession session, MultipartPartRequest request) {
+        Instant expiresAt = session.expiresAt();
+        try {
+            PresignResult result = client.presign(partRequest(session, request),
+                    PresignOptions.newBuilder().expiration(expiresAt).build());
+            return new PresignedUpload(result.url(), PUT_METHOD, result.expiration().orElse(expiresAt),
+                    result.signedHeaders().orElse(Map.of()), Map.of());
+        } catch (Exception exception) {
+            throw AliyunOssExceptionMapper.map(exception);
+        }
+    }
+
+    /** 通过 OSS multipart API 流式上传一个分片。 */
+    @Override
+    public MultipartPart uploadPart(MultipartUploadSession session, MultipartPartRequest request,
+                                    java.io.InputStream content, long contentLength) {
+        try {
+            String etag = requireText(client.uploadPart(partRequestBuilder(session, request)
+                    .body(BinaryData.fromStream(content, contentLength)).contentLength(contentLength).build()).eTag(),
+                    "etag");
+            return new MultipartPart(request.partNumber(), contentLength, etag);
+        } catch (Exception exception) {
+            throw AliyunOssExceptionMapper.map(exception);
+        }
+    }
+
+    /** 分页读取 OSS 已确认分片，返回升序快照。 */
+    @Override
+    public List<MultipartPart> listParts(MultipartUploadSession session) {
+        try {
+            List<MultipartPart> parts = new ArrayList<>();
+            Long marker = null;
+            boolean truncated;
+            do {
+                ListPartsRequest.Builder builder = ListPartsRequest.newBuilder().bucket(bucket)
+                        .key(session.key().value()).uploadId(session.uploadId()).maxParts(LIST_PARTS_PAGE_SIZE);
+                if (marker != null) {
+                    builder.partNumberMarker(marker);
+                }
+                var page = client.listParts(builder.build());
+                for (Part part : page.parts() == null ? List.<Part>of() : page.parts()) {
+                    parts.add(new MultipartPart(Math.toIntExact(part.partNumber()), part.size(), part.eTag()));
+                }
+                Long nextMarker = page.nextPartNumberMarker();
+                truncated = Boolean.TRUE.equals(page.isTruncated()) && nextMarker != null
+                        && !nextMarker.equals(marker);
+                marker = nextMarker;
+            } while (truncated);
+            return parts.stream().sorted(Comparator.comparingInt(MultipartPart::partNumber)).toList();
+        } catch (Exception exception) {
+            throw AliyunOssExceptionMapper.map(exception);
+        }
+    }
+
+    /** 使用客户端确认的 ETag 清单完成 OSS multipart 上传。 */
+    @Override
+    public ObjectMetadata complete(MultipartUploadSession session, MultipartCompletion completion) {
+        try {
+            List<Part> parts = completion.parts().stream().map(part -> Part.newBuilder()
+                    .partNumber((long) part.partNumber()).eTag(part.etag()).build()).toList();
+            client.completeMultipartUpload(CompleteMultipartUploadRequest.newBuilder().bucket(bucket)
+                    .key(session.key().value()).uploadId(session.uploadId())
+                    .completeMultipartUpload(CompleteMultipartUpload.newBuilder().parts(parts).build()).build());
+            return confirmedMetadata(session.key());
+        } catch (Exception exception) {
+            throw AliyunOssExceptionMapper.map(exception);
+        }
+    }
+
+    /** 取消 OSS multipart 会话；不存在的会话保持幂等。 */
+    @Override
+    public void abort(MultipartUploadSession session) {
+        try {
+            client.abortMultipartUpload(AbortMultipartUploadRequest.newBuilder().bucket(bucket)
+                    .key(session.key().value()).uploadId(session.uploadId()).build());
+        } catch (Exception exception) {
+            if (!AliyunOssExceptionMapper.isMissing(exception)) {
+                throw AliyunOssExceptionMapper.map(exception);
+            }
+        }
+    }
+
+    /** 构建绑定 OSS multipart 会话的 UploadPart 请求。 */
+    private UploadPartRequest.Builder partRequestBuilder(MultipartUploadSession session,
+                                                          MultipartPartRequest request) {
+        return UploadPartRequest.newBuilder().bucket(bucket)
+                .key(session.key().value()).uploadId(session.uploadId())
+                .partNumber((long) request.partNumber());
+    }
+
+    /** 构建不含请求体的 OSS 分片预签名请求。 */
+    private UploadPartRequest partRequest(MultipartUploadSession session, MultipartPartRequest request) {
+        return partRequestBuilder(session, request).build();
     }
 
     /** 上传对象到固定 bucket。 */

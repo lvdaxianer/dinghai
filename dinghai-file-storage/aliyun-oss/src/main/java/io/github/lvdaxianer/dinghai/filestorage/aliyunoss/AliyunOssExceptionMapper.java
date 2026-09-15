@@ -17,7 +17,7 @@ final class AliyunOssExceptionMapper {
     private static final Set<String> AUTHENTICATION_CODES = Set.of(
             "AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch",
             "InvalidSecurityToken", "SecurityTokenExpired");
-    private static final Set<String> MISSING_CODES = Set.of("NoSuchKey", "NoSuchObject");
+    private static final Set<String> MISSING_CODES = Set.of("NoSuchKey", "NoSuchObject", "NoSuchUpload");
 
     /**
      * 禁止实例化工具类。
