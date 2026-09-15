@@ -1,6 +1,11 @@
 package io.github.lvdaxianer.dinghai.filestorage.rustfs;
 
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartCompletion;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPart;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPartRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
@@ -24,6 +29,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -48,6 +54,8 @@ public class RustfsLifecycleIntegrationTest {
     private static final ObjectKey LIFECYCLE_KEY = ObjectKey.of("lifecycle/private.txt");
     /** 预签名上传对象 key。 */
     private static final ObjectKey PRESIGNED_KEY = ObjectKey.of("presigned/upload.txt");
+    /** multipart 生命周期测试对象 key。 */
+    private static final ObjectKey MULTIPART_KEY = ObjectKey.of("multipart/recovered.bin");
     /** 测试对象内容类型。 */
     private static final String CONTENT_TYPE = "text/plain";
     /** multipart 文件字段名称。 */
@@ -62,6 +70,8 @@ public class RustfsLifecycleIntegrationTest {
     private static final Duration HTTP_CONNECT_TIMEOUT = Duration.ofSeconds(10);
     /** 预签名有效期。 */
     private static final Duration PRESIGN_EXPIRY = Duration.ofMinutes(5);
+    /** S3 非末分片最小大小。 */
+    private static final int PART_SIZE = 5 * 1024 * 1024;
 
     /**
      * RustFS 私有 bucket 必须支持统一对象生命周期和原生预签名表单。
@@ -79,6 +89,7 @@ public class RustfsLifecycleIntegrationTest {
         try {
             verifyObjectLifecycle(storage(bucket));
             verifyNativePresigning(storage(bucket));
+            verifyMultipartRecovery(storage(bucket), bucket);
         } finally {
             removeTemporaryBucket(client, bucket);
         }
@@ -130,6 +141,55 @@ public class RustfsLifecycleIntegrationTest {
                 URI.create(downloadUrl)).GET().build(), HttpResponse.BodyHandlers.ofByteArray());
         assertEquals(HTTP_SUCCESS_MIN, downloadResponse.statusCode());
         assertArrayEquals(content, downloadResponse.body());
+    }
+
+    /** 验证 RustFS multipart 支持重试、适配器重建后的恢复和完成。 */
+    private void verifyMultipartRecovery(RustfsFileStorageAdapter first, String bucket) throws Exception {
+        MultipartUploadSession session = first.initiate(new MultipartUploadRequest(MULTIPART_KEY,
+                PART_SIZE * 2L, PART_SIZE, "application/octet-stream", CacheControl.privateNoCache(),
+                PRESIGN_EXPIRY));
+        try {
+            uploadPresignedPart(first, session, 1, (byte) 'a');
+            MultipartPart initial = first.listParts(session).getFirst();
+            uploadPresignedPart(first, session, 1, (byte) 'b');
+            MultipartPart retried = first.listParts(session).getFirst();
+            uploadPresignedPart(first, session, 2, (byte) 'c');
+            MultipartPart second = first.listParts(session).get(1);
+
+            RustfsFileStorageAdapter recovered = storage(bucket);
+            assertEquals(java.util.List.of(retried, second), recovered.listParts(session));
+            assertEquals(PART_SIZE * 2L, recovered.complete(session,
+                    new MultipartCompletion(java.util.List.of(retried, second))).contentLength());
+            try (var object = recovered.get(MULTIPART_KEY).orElseThrow()) {
+                assertEquals('b', object.stream().read());
+            }
+            assertNotEquals(initial.etag(), retried.etag());
+        } finally {
+            first.abort(session);
+        }
+    }
+
+    /** 创建绑定会话和总分片数的请求。 */
+    private MultipartPartRequest partRequest(MultipartUploadSession session, int partNumber) {
+        return new MultipartPartRequest(session.uploadId(), partNumber, session.partCount());
+    }
+
+    /** 使用 RustFS 签发的原生 URL 直接上传一个分片。 */
+    private void uploadPresignedPart(RustfsFileStorageAdapter storage, MultipartUploadSession session,
+                                     int partNumber, byte value) throws Exception {
+        PresignedUpload upload = storage.presignPart(session, partRequest(session, partNumber));
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(upload.uri()))
+                .PUT(HttpRequest.BodyPublishers.ofByteArray(content(value)));
+        upload.requiredHeaders().forEach(request::header);
+        HttpResponse<Void> response = httpClient().send(request.build(), HttpResponse.BodyHandlers.discarding());
+        assertTrue(response.statusCode() >= HTTP_SUCCESS_MIN && response.statusCode() < HTTP_SUCCESS_MAX_EXCLUSIVE);
+    }
+
+    /** 创建指定长度的固定分片内容。 */
+    private byte[] content(byte value) {
+        byte[] content = new byte[PART_SIZE];
+        java.util.Arrays.fill(content, value);
+        return content;
     }
 
     /**
@@ -261,6 +321,7 @@ public class RustfsLifecycleIntegrationTest {
     private void removeTemporaryBucket(MinioClient client, String bucket) throws Exception {
         removeObject(client, bucket, LIFECYCLE_KEY);
         removeObject(client, bucket, PRESIGNED_KEY);
+        removeObject(client, bucket, MULTIPART_KEY);
         client.removeBucket(RemoveBucketArgs.builder().bucket(bucket).build());
     }
 

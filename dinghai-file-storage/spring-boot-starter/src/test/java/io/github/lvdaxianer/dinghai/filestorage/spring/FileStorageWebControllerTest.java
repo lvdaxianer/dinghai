@@ -6,6 +6,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartCompletion;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartFileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPart;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
@@ -396,6 +397,53 @@ public class FileStorageWebControllerTest {
         mockMvc.perform(get("/files/multipart/" + uploadId + "/parts").principal(() -> "alice"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("MULTIPART_NOT_FOUND"));
+    }
+
+    /** 同一会话的并发完成请求必须只调用一次 provider complete。 */
+    @Test
+    public void shouldCompleteSameMultipartSessionOnlyOnceUnderConcurrentRequests() throws Exception {
+        MultipartFileStorage multipartStorage = multipartStorageMock();
+        MultipartUploadSession session = new MultipartUploadSession("concurrent-upload",
+                ObjectKey.of("uploads/concurrent.bin"), 10L * 1024L * 1024L, 10L * 1024L * 1024L,
+                "application/octet-stream", CacheControl.privateNoCache(), 1,
+                NOW.plus(Duration.ofMinutes(10L)), java.util.List.of());
+        MultipartPart part = new MultipartPart(1, 10L * 1024L * 1024L, "part-etag");
+        ObjectMetadata metadata = new ObjectMetadata(session.key(), part.size(), session.contentType(),
+                "object-etag", NOW, session.cacheControl());
+        CountDownLatch providerStarted = new CountDownLatch(1);
+        CountDownLatch providerReleased = new CountDownLatch(1);
+        when(multipartStorage.initiate(any(MultipartUploadRequest.class))).thenReturn(session);
+        when(multipartStorage.complete(any(), any())).thenAnswer(invocation -> {
+            providerStarted.countDown();
+            providerReleased.await(2L, TimeUnit.SECONDS);
+            return metadata;
+        });
+        MultipartUploadService service = new MultipartUploadService((FileStorage) multipartStorage,
+                (principal, key, operation) -> true, new FileStorageProperties(), Clock.fixed(NOW, ZoneOffset.UTC));
+        service.initiate(() -> "alice", new MultipartUploadRequest(session.key(), part.size(), part.size(),
+                session.contentType(), session.cacheControl(), Duration.ofMinutes(10L)));
+        AtomicReference<ObjectMetadata> first = new AtomicReference<>();
+        AtomicReference<ObjectMetadata> second = new AtomicReference<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        MultipartCompletion completion = new MultipartCompletion(java.util.List.of(part));
+        Thread firstRequest = completeInThread(service, session.uploadId(), completion, first, failure,
+                "multipart-first-complete-test");
+        Thread secondRequest = completeInThread(service, session.uploadId(), completion, second, failure,
+                "multipart-second-complete-test");
+
+        firstRequest.start();
+        assertTrue(providerStarted.await(2L, TimeUnit.SECONDS));
+        secondRequest.start();
+        providerReleased.countDown();
+        firstRequest.join(TimeUnit.SECONDS.toMillis(2L));
+        secondRequest.join(TimeUnit.SECONDS.toMillis(2L));
+
+        assertFalse(firstRequest.isAlive());
+        assertFalse(secondRequest.isAlive());
+        assertTrue(failure.get() == null);
+        assertEquals(metadata, first.get());
+        assertEquals(metadata, second.get());
+        verify(multipartStorage).complete(session, completion);
     }
 
     /**
@@ -968,6 +1016,19 @@ public class FileStorageWebControllerTest {
         } catch (Exception exception) {
             failure.set(exception);
         }
+    }
+
+    /** 在独立线程中提交同一个 multipart 完成请求。 */
+    private Thread completeInThread(MultipartUploadService service, String uploadId,
+                                    MultipartCompletion completion, AtomicReference<ObjectMetadata> result,
+                                    AtomicReference<Throwable> failure, String name) {
+        return new Thread(() -> {
+            try {
+                result.set(service.complete(() -> "alice", uploadId, completion));
+            } catch (Throwable throwable) {
+                failure.set(throwable);
+            }
+        }, name);
     }
 
     /**

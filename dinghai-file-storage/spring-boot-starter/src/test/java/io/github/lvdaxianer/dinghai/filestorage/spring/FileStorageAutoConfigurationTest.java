@@ -52,6 +52,8 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(context).hasSingleBean(FileStorage.class);
                     assertThat(context).hasSingleBean(LocalFileStorageAdapter.class);
                     assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(RustfsFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(AliyunOssFileStorageAdapter.class);
                 });
     }
 
@@ -91,6 +93,8 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(context).hasSingleBean(FileStorage.class);
                     assertThat(context).hasSingleBean(MinioFileStorageAdapter.class);
                     assertThat(context).doesNotHaveBean(LocalFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(RustfsFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(AliyunOssFileStorageAdapter.class);
                 });
     }
 
@@ -108,6 +112,7 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(context).hasSingleBean(RustfsFileStorageAdapter.class);
                     assertThat(context).doesNotHaveBean(LocalFileStorageAdapter.class);
                     assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(AliyunOssFileStorageAdapter.class);
                 });
     }
 

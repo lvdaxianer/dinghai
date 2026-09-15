@@ -1,6 +1,11 @@
 package io.github.lvdaxianer.dinghai.filestorage.aliyunoss;
 
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartCompletion;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPart;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPartRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
@@ -20,6 +25,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -50,6 +56,8 @@ public class AliyunOssLifecycleIntegrationTest {
     private static final int HTTP_SUCCESS_MIN = 200;
     /** HTTP 成功状态码上界（不包含）。 */
     private static final int HTTP_SUCCESS_MAX_EXCLUSIVE = 300;
+    /** OSS 非末分片最小大小。 */
+    private static final int PART_SIZE = 5 * 1024 * 1024;
 
     /**
      * 固定 bucket 必须支持完整对象生命周期和原生 PUT/GET 预签名。
@@ -64,15 +72,17 @@ public class AliyunOssLifecycleIntegrationTest {
         AliyunOssFileStorageAdapter storage = storage();
         ObjectKey lifecycleKey = randomKey("lifecycle");
         ObjectKey presignedKey = randomKey("presigned");
+        ObjectKey multipartKey = randomKey("multipart");
         Exception failure = null;
         try {
             verifyObjectLifecycle(storage, lifecycleKey);
             verifyNativePresigning(storage, presignedKey);
+            verifyMultipartRecovery(storage, multipartKey);
         } catch (Exception exception) {
             failure = exception;
             throw exception;
         } finally {
-            deleteAll(storage, failure, lifecycleKey, presignedKey);
+            deleteAll(storage, failure, lifecycleKey, presignedKey, multipartKey);
         }
     }
 
@@ -124,6 +134,52 @@ public class AliyunOssLifecycleIntegrationTest {
                 .GET().build(), HttpResponse.BodyHandlers.ofByteArray());
         assertEquals(HTTP_OK, downloadResponse.statusCode());
         assertArrayEquals(content, downloadResponse.body());
+    }
+
+    /** 验证 OSS multipart 支持重试、适配器重建后的恢复和完成。 */
+    private void verifyMultipartRecovery(AliyunOssFileStorageAdapter first, ObjectKey key) throws Exception {
+        MultipartUploadSession session = first.initiate(new MultipartUploadRequest(key, PART_SIZE * 2L, PART_SIZE,
+                "application/octet-stream", CACHE_CONTROL, PRESIGN_EXPIRY));
+        try {
+            uploadPresignedPart(first, session, 1, (byte) 'a');
+            MultipartPart initial = first.listParts(session).getFirst();
+            uploadPresignedPart(first, session, 1, (byte) 'b');
+            MultipartPart retried = first.listParts(session).getFirst();
+            uploadPresignedPart(first, session, 2, (byte) 'c');
+            MultipartPart second = first.listParts(session).get(1);
+
+            AliyunOssFileStorageAdapter recovered = storage();
+            assertEquals(java.util.List.of(retried, second), recovered.listParts(session));
+            assertEquals(PART_SIZE * 2L, recovered.complete(session,
+                    new MultipartCompletion(java.util.List.of(retried, second))).contentLength());
+            try (var object = recovered.get(key).orElseThrow()) {
+                assertEquals('b', object.stream().read());
+            }
+            assertNotEquals(initial.etag(), retried.etag());
+        } finally {
+            first.abort(session);
+        }
+    }
+
+    /** 创建绑定会话和总分片数的请求。 */
+    private MultipartPartRequest partRequest(MultipartUploadSession session, int partNumber) {
+        return new MultipartPartRequest(session.uploadId(), partNumber, session.partCount());
+    }
+
+    /** 使用 OSS 签发的原生 URL 直接上传一个分片。 */
+    private void uploadPresignedPart(AliyunOssFileStorageAdapter storage, MultipartUploadSession session,
+                                     int partNumber, byte value) throws Exception {
+        PresignedUpload upload = storage.presignPart(session, partRequest(session, partNumber));
+        HttpResponse<Void> response = httpClient().send(presignedPut(upload, content(value)),
+                HttpResponse.BodyHandlers.discarding());
+        assertTrue(response.statusCode() >= HTTP_SUCCESS_MIN && response.statusCode() < HTTP_SUCCESS_MAX_EXCLUSIVE);
+    }
+
+    /** 创建指定长度的固定分片内容。 */
+    private byte[] content(byte value) {
+        byte[] content = new byte[PART_SIZE];
+        java.util.Arrays.fill(content, value);
+        return content;
     }
 
     /**
