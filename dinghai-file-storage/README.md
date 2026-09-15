@@ -275,6 +275,112 @@ curl --request POST https://app.example/files/multipart/opaque-upload-id/complet
 
 在会话 TTL 内，同一会话的重复完成返回首次确认的对象元数据；重复取消也保持 `204` 成功语义。未完成会话会在过期后由清理任务回收，过期会话不能恢复，需重新创建。
 
+#### 前端接入示例
+
+下面是一个零依赖的浏览器上传函数，覆盖创建会话、并发分片上传、断点续传（以服务端清单为准）和完成，复制即用：
+
+```js
+/**
+ * 大文件分片上传（dinghai-file-storage）。
+ * 前提：页面已通过 Cookie 等方式携带应用登录凭证。
+ *
+ * @param {File} file 输入框选择的文件
+ * @param {string} key 对象 key，如 "uploads/video.mp4"
+ * @returns {Promise<object>} 完成后的对象元数据
+ */
+async function uploadLargeFile(file, key, {
+  baseUrl = '/files',                // 等于服务端 web.path-prefix
+  partSize = 10 * 1024 * 1024,       // 必须等于服务端 multipart.part-size
+  expiresIn = 'PT30M',               // 不得超过服务端 multipart.session-ttl
+  concurrency = 3,
+  resume = null,                     // 断点续传：{ uploadId, partSize, partCount }，见下方说明
+  onProgress,
+} = {}) {
+  async function request(path, init = {}) {
+    const response = await fetch(baseUrl + path, { credentials: 'same-origin', ...init });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(`${response.status} ${body.code ?? ''} ${body.message ?? ''}`);
+    }
+    return response;
+  }
+  const post = (path, body) => request(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  // 1. 创建会话；传入 resume 时改为拉取服务端已确认分片继续上传
+  const session = resume
+    ? {
+        uploadId: resume.uploadId,
+        partSize: resume.partSize,
+        partCount: resume.partCount,
+        parts: await (await request(`/multipart/${resume.uploadId}/parts`)).json(),
+      }
+    : await (await post('/multipart', {
+        key,
+        size: file.size,
+        partSize,
+        contentType: file.type || 'application/octet-stream',
+        expiresIn,
+      })).json();
+  const confirmed = new Map((session.parts ?? []).map((p) => [p.partNumber, p]));
+  let uploadedBytes = [...confirmed.values()].reduce((sum, p) => sum + p.size, 0);
+
+  // 2. 逐片 presign 后上传
+  async function uploadPart(partNumber) {
+    if (confirmed.has(partNumber)) return;
+    const start = (partNumber - 1) * session.partSize;
+    const blob = file.slice(start, Math.min(start + session.partSize, file.size));
+    const presign = await (await post(
+      `/multipart/${session.uploadId}/parts/${partNumber}/presign`)).json();
+
+    // presign.requiredHeaders 必须原样带回
+    const response = await fetch(presign.url, {
+      method: presign.method,
+      headers: presign.requiredHeaders ?? {},
+      body: blob,
+      credentials: 'same-origin',
+    });
+    if (!response.ok) throw new Error(`part ${partNumber} failed: ${response.status}`);
+
+    // Local 后端的 etag 在响应 JSON 中；MinIO/RustFS/OSS 的 etag 在 ETag 响应头中
+    const etagHeader = response.headers.get('ETag');
+    const part = etagHeader
+      ? { partNumber, size: blob.size, etag: etagHeader.replaceAll('"', '') }
+      : await response.json();
+    confirmed.set(partNumber, part);
+    uploadedBytes += part.size;
+    onProgress?.(uploadedBytes, file.size);
+  }
+  const queue = Array.from({ length: session.partCount }, (_, i) => i + 1);
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (queue.length > 0) await uploadPart(queue.shift());
+  }));
+
+  // 3. 提交服务端已确认的全部分片并完成
+  const parts = [...confirmed.values()].sort((a, b) => a.partNumber - b.partNumber);
+  return (await post(`/multipart/${session.uploadId}/complete`, { parts })).json();
+}
+```
+
+使用方式：
+
+```js
+const metadata = await uploadLargeFile(fileInput.files[0], 'uploads/video.mp4', {
+  onProgress: (done, total) => console.log(`${((done / total) * 100).toFixed(1)}%`),
+});
+console.log('上传完成', metadata.key.value, metadata.etag);
+```
+
+注意事项：
+
+- 分片失败时直接重试该 `partNumber` 即可（后一次覆盖前一次）。
+- 跨页面刷新断点续传：首次上传时在创建会话后把 `{ uploadId, partSize, partCount }` 存入 `localStorage`，下次以 `resume` 传入即可自动跳过已确认分片；以服务端 `GET /multipart/{uploadId}/parts` 清单为准，不要凭本地状态猜测。
+- 使用 MinIO / RustFS / 阿里云 OSS 时，分片由浏览器直传 provider，必须在 bucket 上配置 CORS：允许页面来源、`PUT` 方法和 `presign.requiredHeaders` 中出现的请求头，并将 `ETag` 加入暴露响应头（Expose-Headers），否则浏览器读不到 etag。
+- 任何一步返回 `429` 时按 `Retry-After` 提示等待后重试；`MULTIPART_EXPIRED`（410）说明会话已过期，需丢弃 `resume` 信息重新创建。
+
 迁移管理端点固定为 `POST /files/migration/export`、`POST /files/migration/import`（参数 `packageName`），不随 `web.path-prefix` 变化。
 
 `PUT /upload/{*key}` 成功后响应体与 SDK `FileStorage.put` 的 `ObjectMetadata` 字段保持一致，并额外返回 `previewUrl`：

@@ -275,6 +275,114 @@ curl --request POST https://app.example/files/multipart/opaque-upload-id/complet
 
 During the session TTL, repeating completion for the same session returns the first confirmed metadata; repeating abort also retains `204` success semantics. The scheduled cleanup reclaims incomplete sessions after expiry. An expired session cannot resume and must be created again.
 
+#### Frontend Integration Example
+
+The following zero-dependency browser function covers session creation, concurrent part uploads, resumability (authoritative server state), and completion. Copy and use it directly:
+
+```js
+/**
+ * Large-file multipart upload (dinghai-file-storage).
+ * Prerequisite: the page already carries the application's login
+ * credentials (for example, a Cookie).
+ *
+ * @param {File} file the file picked from an input element
+ * @param {string} key object key, such as "uploads/video.mp4"
+ * @returns {Promise<object>} confirmed object metadata
+ */
+async function uploadLargeFile(file, key, {
+  baseUrl = '/files',                // must equal the server web.path-prefix
+  partSize = 10 * 1024 * 1024,       // must equal the server multipart.part-size
+  expiresIn = 'PT30M',               // must not exceed the server multipart.session-ttl
+  concurrency = 3,
+  resume = null,                     // resume: { uploadId, partSize, partCount }; see notes below
+  onProgress,
+} = {}) {
+  async function request(path, init = {}) {
+    const response = await fetch(baseUrl + path, { credentials: 'same-origin', ...init });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(`${response.status} ${body.code ?? ''} ${body.message ?? ''}`);
+    }
+    return response;
+  }
+  const post = (path, body) => request(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  // 1. Create the session; with resume, pull the confirmed parts from the server instead
+  const session = resume
+    ? {
+        uploadId: resume.uploadId,
+        partSize: resume.partSize,
+        partCount: resume.partCount,
+        parts: await (await request(`/multipart/${resume.uploadId}/parts`)).json(),
+      }
+    : await (await post('/multipart', {
+        key,
+        size: file.size,
+        partSize,
+        contentType: file.type || 'application/octet-stream',
+        expiresIn,
+      })).json();
+  const confirmed = new Map((session.parts ?? []).map((p) => [p.partNumber, p]));
+  let uploadedBytes = [...confirmed.values()].reduce((sum, p) => sum + p.size, 0);
+
+  // 2. Presign and upload each part
+  async function uploadPart(partNumber) {
+    if (confirmed.has(partNumber)) return;
+    const start = (partNumber - 1) * session.partSize;
+    const blob = file.slice(start, Math.min(start + session.partSize, file.size));
+    const presign = await (await post(
+      `/multipart/${session.uploadId}/parts/${partNumber}/presign`)).json();
+
+    // presign.requiredHeaders must be echoed back verbatim
+    const response = await fetch(presign.url, {
+      method: presign.method,
+      headers: presign.requiredHeaders ?? {},
+      body: blob,
+      credentials: 'same-origin',
+    });
+    if (!response.ok) throw new Error(`part ${partNumber} failed: ${response.status}`);
+
+    // Local returns the etag in the response JSON; MinIO/RustFS/OSS return it
+    // in the ETag response header
+    const etagHeader = response.headers.get('ETag');
+    const part = etagHeader
+      ? { partNumber, size: blob.size, etag: etagHeader.replaceAll('"', '') }
+      : await response.json();
+    confirmed.set(partNumber, part);
+    uploadedBytes += part.size;
+    onProgress?.(uploadedBytes, file.size);
+  }
+  const queue = Array.from({ length: session.partCount }, (_, i) => i + 1);
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (queue.length > 0) await uploadPart(queue.shift());
+  }));
+
+  // 3. Submit every server-confirmed part and complete the upload
+  const parts = [...confirmed.values()].sort((a, b) => a.partNumber - b.partNumber);
+  return (await post(`/multipart/${session.uploadId}/complete`, { parts })).json();
+}
+```
+
+Usage:
+
+```js
+const metadata = await uploadLargeFile(fileInput.files[0], 'uploads/video.mp4', {
+  onProgress: (done, total) => console.log(`${((done / total) * 100).toFixed(1)}%`),
+});
+console.log('uploaded', metadata.key.value, metadata.etag);
+```
+
+Notes:
+
+- When a part fails, simply retry the same `partNumber`; the later upload replaces the earlier one.
+- To resume across page reloads, persist `{ uploadId, partSize, partCount }` (for example in `localStorage`) after session creation, then pass it as `resume` next time; confirmed parts are skipped automatically. Always trust the server `GET /multipart/{uploadId}/parts` list, never local client state.
+- With MinIO / RustFS / Aliyun OSS the browser uploads parts directly to the provider, so the bucket needs a CORS rule: allow the page origin, the `PUT` method, and every header appearing in `presign.requiredHeaders`, and expose `ETag` (Expose-Headers); otherwise the browser cannot read the etag.
+- When any step returns `429`, wait for the `Retry-After` interval and retry. `MULTIPART_EXPIRED` (410) means the session has expired: discard the `resume` data and create a new session.
+
 The migration management endpoints are fixed at `POST /files/migration/export` and `POST /files/migration/import` (parameter `packageName`) and do not follow `web.path-prefix`.
 
 A successful `PUT /upload/{*key}` response keeps the SDK `FileStorage.put` `ObjectMetadata` field names and adds `previewUrl`:
