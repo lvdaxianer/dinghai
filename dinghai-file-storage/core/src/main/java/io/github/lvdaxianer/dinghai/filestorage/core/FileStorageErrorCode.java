@@ -27,6 +27,14 @@ public enum FileStorageErrorCode {
     INVALID_CONFIGURATION,
     /** Web 资源并发达到上限。 */
     RATE_LIMITED,
+    /** 分片上传参数非法。 */
+    MULTIPART_INVALID,
+    /** 分片上传会话不存在。 */
+    MULTIPART_NOT_FOUND,
+    /** 分片上传会话已过期。 */
+    MULTIPART_EXPIRED,
+    /** 分片上传状态冲突。 */
+    MULTIPART_CONFLICT,
     /** 未分类故障。 */
     INTERNAL_ERROR
 }
