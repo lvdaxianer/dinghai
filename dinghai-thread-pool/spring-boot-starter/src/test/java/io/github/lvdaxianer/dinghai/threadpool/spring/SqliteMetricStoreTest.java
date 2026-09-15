@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.Test;
 
 /** 验证子控 SQLite 的 cursor 分页。 */
@@ -70,6 +71,20 @@ public class SqliteMetricStoreTest {
             ThreadPoolMetric metric = store.page(null, 10).metrics().getFirst();
             assertEquals(1, metric.submitted());
             assertEquals(1, metric.completed());
+        }
+    }
+
+    /** Micrometer 绑定器必须从运行快照读取最新受管池指标。 */
+    @Test
+    public void shouldBindManagedPoolMetrics() {
+        try (ThreadPoolGovernor governor = new ThreadPoolGovernor(1)) {
+            governor.register(new ThreadPoolDefinition("meter-work-h", 1, 1, 1,
+                    ThreadPoolDefinition.Priority.HIGH, ThreadPoolDefinition.Reliability.FAIL_FAST, 10));
+            SimpleMeterRegistry registry = new SimpleMeterRegistry();
+            new ThreadPoolMeterBinder(governor).bindTo(registry);
+
+            assertEquals(0D, registry.get("dinghai.thread.pool.active").tag("pool", "meter-work-h")
+                    .gauge().value(), 0D);
         }
     }
 

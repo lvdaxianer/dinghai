@@ -5,6 +5,7 @@ import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolDropNotifier;
 import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolRetryPersistence;
 import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolDefinition;
 import java.util.Optional;
+import io.micrometer.core.instrument.binder.MeterBinder;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -70,6 +71,20 @@ public class ThreadPoolAutoConfiguration {
     public ThreadPoolMetricsSampler threadPoolMetricsSampler(ThreadPoolGovernor governor, SqliteMetricStore store,
                                                               ThreadPoolProperties properties) {
         return new ThreadPoolMetricsSampler(governor, store, properties.getMetrics().getRetention());
+    }
+
+    /** 注册子控 Micrometer 指标。 */
+    @Bean
+    @ConditionalOnMissingBean(name = "dinghaiThreadPoolMeterBinder")
+    public MeterBinder dinghaiThreadPoolMeterBinder(ThreadPoolGovernor governor) {
+        return new ThreadPoolMeterBinder(governor);
+    }
+
+    /** 注册子控 SQLite 可读性健康检查。 */
+    @Bean(name = "dinghaiThreadPoolMetricStore")
+    @ConditionalOnMissingBean(name = "dinghaiThreadPoolMetricStore")
+    public ThreadPoolMetricStoreHealthIndicator threadPoolMetricStoreHealthIndicator(SqliteMetricStore store) {
+        return new ThreadPoolMetricStoreHealthIndicator(store);
     }
 
     /** 创建默认关闭的指标采集端点。 */
