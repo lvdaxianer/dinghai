@@ -4,6 +4,7 @@ import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolGovernor;
 import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolSnapshot;
 import io.github.lvdaxianer.dinghai.threadpool.governance.api.ThreadPoolMetric;
 import java.time.Duration;
+import java.util.List;
 import org.springframework.scheduling.annotation.Scheduled;
 
 /**
@@ -28,7 +29,8 @@ public final class ThreadPoolMetricsSampler {
     @Scheduled(fixedDelayString = "${dinghai.thread-pool.metrics.sample-interval:PT30S}")
     public void sample() {
         long now = System.currentTimeMillis();
-        governor.snapshots().forEach(snapshot -> store.append(metric(snapshot, now)));
+        List<ThreadPoolMetric> metrics = governor.snapshots().stream().map(snapshot -> metric(snapshot, now)).toList();
+        store.appendAll(metrics);
         store.purge(retention);
     }
 

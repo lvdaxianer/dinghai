@@ -23,7 +23,8 @@ public final class ThreadPoolRegistrar {
     private ThreadPoolDefinition definition(String name, ThreadPoolProperties.Pool pool) {
         return new ThreadPoolDefinition(name, pool.getMinimumSize(), pool.getMaximumSize(), pool.getWeight(),
                 ThreadPoolDefinition.Priority.valueOf(pool.getPriority()),
-                ThreadPoolDefinition.Reliability.valueOf(pool.getReliability()), pool.getQueueCapacity());
+                ThreadPoolDefinition.Reliability.valueOf(pool.getReliability()), pool.getQueueCapacity(),
+                pool.getOwner());
     }
 
     private Map<String, ThreadPoolDefinition> definitions(Map<String, ThreadPoolProperties.Pool> pools) {
@@ -46,6 +47,6 @@ public final class ThreadPoolRegistrar {
         int extra = (budget - minimum) * definition.weight() / weight;
         int maximum = Math.min(definition.maximumSize(), definition.minimumSize() + extra);
         return new ThreadPoolDefinition(definition.name(), definition.minimumSize(), maximum, definition.weight(),
-                definition.priority(), definition.reliability(), definition.queueCapacity());
+                definition.priority(), definition.reliability(), definition.queueCapacity(), definition.owner());
     }
 }

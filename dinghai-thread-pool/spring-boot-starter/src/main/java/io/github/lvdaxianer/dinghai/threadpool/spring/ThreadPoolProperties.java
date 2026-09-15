@@ -96,6 +96,7 @@ public class ThreadPoolProperties {
         private String priority = "MEDIUM";
         private String reliability = "FAIL_FAST";
         private int queueCapacity = 100;
+        private String owner;
 
         public int getMinimumSize() { return minimumSize; }
         public void setMinimumSize(int minimumSize) { this.minimumSize = minimumSize; }
@@ -109,5 +110,9 @@ public class ThreadPoolProperties {
         public void setReliability(String reliability) { this.reliability = reliability; }
         public int getQueueCapacity() { return queueCapacity; }
         public void setQueueCapacity(int queueCapacity) { this.queueCapacity = queueCapacity; }
+        /** @return BEST_EFFORT_DROP 任务的业务所有者 */
+        public String getOwner() { return owner; }
+        /** @param owner BEST_EFFORT_DROP 任务的业务所有者 */
+        public void setOwner(String owner) { this.owner = owner; }
     }
 }

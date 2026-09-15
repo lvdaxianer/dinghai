@@ -6,6 +6,7 @@ import static org.junit.Assert.assertThrows;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Test;
@@ -102,9 +103,75 @@ public class ThreadPoolGovernorTest {
         }
     }
 
+    /** FAIL_FAST 池过载时必须返回稳定的治理错误。 */
+    @Test
+    public void shouldFailFastWhenBoundedQueueIsFull() throws Exception {
+        try (ThreadPoolGovernor governor = new ThreadPoolGovernor(1)) {
+            ExecutorService executor = governor.register(definition("fast-work-h", 1,
+                    ThreadPoolDefinition.Reliability.FAIL_FAST, null));
+            CountDownLatch release = occupyWorker(executor);
+            executor.execute(() -> { });
+
+            assertThrows(ThreadPoolOverloadException.class, () -> executor.execute(() -> { }));
+            release.countDown();
+        }
+    }
+
+    /** PERSIST_FOR_RETRY 池过载时必须调用业务持久化端口。 */
+    @Test
+    public void shouldPersistRejectedTaskForRetry() throws Exception {
+        AtomicInteger persisted = new AtomicInteger();
+        try (ThreadPoolGovernor governor = new ThreadPoolGovernor(1,
+                (poolName, task) -> persisted.incrementAndGet(), (poolName, owner) -> { })) {
+            ExecutorService executor = governor.register(definition("retry-work-h", 1,
+                    ThreadPoolDefinition.Reliability.PERSIST_FOR_RETRY, null));
+            CountDownLatch release = occupyWorker(executor);
+            executor.execute(() -> { });
+
+            executor.execute(() -> { });
+            assertEquals(1, persisted.get());
+            release.countDown();
+        }
+    }
+
+    /** BEST_EFFORT_DROP 池必须要求 owner 并通知可归属丢弃事件。 */
+    @Test
+    public void shouldNotifyOwnerWhenBestEffortTaskIsDropped() throws Exception {
+        AtomicInteger dropped = new AtomicInteger();
+        try (ThreadPoolGovernor governor = new ThreadPoolGovernor(1, null,
+                (poolName, owner) -> dropped.incrementAndGet())) {
+            ExecutorService executor = governor.register(definition("drop-work-h", 1,
+                    ThreadPoolDefinition.Reliability.BEST_EFFORT_DROP, "file-storage"));
+            CountDownLatch release = occupyWorker(executor);
+            executor.execute(() -> { });
+
+            executor.execute(() -> { });
+            assertEquals(1, dropped.get());
+            release.countDown();
+        }
+    }
+
     private ThreadPoolDefinition definition(String name) {
+        return definition(name, 10, ThreadPoolDefinition.Reliability.FAIL_FAST, null);
+    }
+
+    /** 创建容量可用于拒绝测试的受管池定义。 */
+    private ThreadPoolDefinition definition(String name, int queueCapacity,
+                                            ThreadPoolDefinition.Reliability reliability, String owner) {
         return new ThreadPoolDefinition(name, 1, 1, 1, ThreadPoolDefinition.Priority.HIGH,
-                ThreadPoolDefinition.Reliability.FAIL_FAST, 10);
+                reliability, queueCapacity, owner);
+    }
+
+    /** 让唯一 worker 保持运行，确保后续任务进入有界队列。 */
+    private CountDownLatch occupyWorker(ExecutorService executor) throws InterruptedException {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        executor.execute(() -> {
+            started.countDown();
+            await(release);
+        });
+        assertTrue(started.await(2, TimeUnit.SECONDS));
+        return release;
     }
 
     private void runTask(AtomicInteger concurrent, AtomicInteger maximum, CountDownLatch started,

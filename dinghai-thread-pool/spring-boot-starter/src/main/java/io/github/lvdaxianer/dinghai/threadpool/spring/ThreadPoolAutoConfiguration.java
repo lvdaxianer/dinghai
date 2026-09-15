@@ -1,6 +1,10 @@
 package io.github.lvdaxianer.dinghai.threadpool.spring;
 
 import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolGovernor;
+import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolDropNotifier;
+import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolRetryPersistence;
+import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolDefinition;
+import java.util.Optional;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -24,10 +28,25 @@ public class ThreadPoolAutoConfiguration {
     /** 创建每个应用实例唯一的受管线程池治理器。 */
     @Bean(destroyMethod = "close")
     @ConditionalOnMissingBean
-    public ThreadPoolGovernor threadPoolGovernor(ThreadPoolProperties properties) {
-        ThreadPoolGovernor governor = new ThreadPoolGovernor(properties.getManagedWorkerBudget());
+    public ThreadPoolGovernor threadPoolGovernor(ThreadPoolProperties properties,
+                                                 Optional<ThreadPoolRetryPersistence> retryPersistence,
+                                                 Optional<ThreadPoolDropNotifier> dropNotifier) {
+        validateReliabilityPorts(properties, retryPersistence);
+        ThreadPoolGovernor governor = new ThreadPoolGovernor(properties.getManagedWorkerBudget(),
+                retryPersistence.orElse(null), dropNotifier.orElse((poolName, owner) -> { }));
         new ThreadPoolRegistrar().register(governor, properties.getPools());
         return governor;
+    }
+
+    /** 在容器启动时拒绝缺少业务重试端口的可靠性配置。 */
+    private void validateReliabilityPorts(ThreadPoolProperties properties,
+                                          Optional<ThreadPoolRetryPersistence> retryPersistence) {
+        boolean needsRetry = properties.getPools().values().stream()
+                .anyMatch(pool -> ThreadPoolDefinition.Reliability.PERSIST_FOR_RETRY.name()
+                        .equals(pool.getReliability()));
+        if (needsRetry && retryPersistence.isEmpty()) {
+            throw new IllegalArgumentException("PERSIST_FOR_RETRY requires ThreadPoolRetryPersistence bean");
+        }
     }
 
     /** 创建默认的 MDC 任务装饰器。 */

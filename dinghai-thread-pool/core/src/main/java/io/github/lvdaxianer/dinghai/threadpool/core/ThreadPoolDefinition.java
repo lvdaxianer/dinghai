@@ -9,7 +9,25 @@ import java.util.Objects;
  * @date 2026-09-15
  */
 public record ThreadPoolDefinition(String name, int minimumSize, int maximumSize, int weight,
-                                   Priority priority, Reliability reliability, int queueCapacity) {
+                                   Priority priority, Reliability reliability, int queueCapacity, String owner) {
+
+    /**
+     * 创建未指定业务所有者的兼容线程池定义。
+     *
+     * @param name 池名称
+     * @param minimumSize 保底线程数
+     * @param maximumSize 最大线程数
+     * @param weight 弹性配额权重
+     * @param priority 过载优先级
+     * @param reliability 可靠性策略
+     * @param queueCapacity 有界队列容量
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public ThreadPoolDefinition(String name, int minimumSize, int maximumSize, int weight,
+                                Priority priority, Reliability reliability, int queueCapacity) {
+        this(name, minimumSize, maximumSize, weight, priority, reliability, queueCapacity, null);
+    }
 
     /**
      * 创建并校验线程池定义。
@@ -29,6 +47,9 @@ public record ThreadPoolDefinition(String name, int minimumSize, int maximumSize
         validateNumbers(minimumSize, maximumSize, weight, queueCapacity);
         Objects.requireNonNull(priority, "priority");
         Objects.requireNonNull(reliability, "reliability");
+        if (reliability == Reliability.BEST_EFFORT_DROP && (owner == null || owner.isBlank())) {
+            throw new IllegalArgumentException("best-effort-drop thread pool requires an owner");
+        }
     }
 
     /**

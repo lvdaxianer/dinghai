@@ -34,10 +34,26 @@ public final class SqliteMetricStore {
 
     /** 持久化一个采样指标。 */
     public void append(ThreadPoolMetric metric) {
+        appendAll(List.of(metric));
+    }
+
+    /**
+     * 在同一 SQLite 事务中批量持久化一个采样周期的全部指标。
+     *
+     * @param metrics 同一采样时刻的指标集合
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-15
+     */
+    public void appendAll(List<ThreadPoolMetric> metrics) {
+        if (metrics == null || metrics.isEmpty()) {
+            return;
+        }
         String sql = "insert into thread_pool_metric(sampled_at,pool_name,active,pool_size,queue_size,actual_max,submitted,completed,rejected,failed,wait_ms,execution_ms,priority,reliability) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            bindMetric(statement, metric);
-            statement.executeUpdate();
+            connection.setAutoCommit(false);
+            metrics.forEach(metric -> addMetric(statement, metric));
+            statement.executeBatch();
+            connection.commit();
         } catch (SQLException exception) {
             throw new IllegalStateException("cannot persist thread pool metric", exception);
         }
@@ -127,6 +143,16 @@ public final class SqliteMetricStore {
         statement.setLong(9, metric.rejected()); statement.setLong(10, metric.failed());
         statement.setLong(11, metric.waitMillis()); statement.setLong(12, metric.executionMillis());
         statement.setString(13, metric.priority()); statement.setString(14, metric.reliability());
+    }
+
+    /** 绑定并追加单条批量写入参数。 */
+    private void addMetric(PreparedStatement statement, ThreadPoolMetric metric) {
+        try {
+            bindMetric(statement, metric);
+            statement.addBatch();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("cannot prepare thread pool metric batch", exception);
+        }
     }
 
     private ThreadPoolMetric metric(ResultSet result) throws SQLException {

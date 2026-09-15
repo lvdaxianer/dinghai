@@ -51,7 +51,6 @@ final class PermitExecutorService extends AbstractExecutorService {
         try {
             delegate.execute(() -> PermitTaskRunner.run(permits, command, submittedAt, statistics));
         } catch (RejectedExecutionException exception) {
-            statistics.rejected();
             throw exception;
         }
     }
