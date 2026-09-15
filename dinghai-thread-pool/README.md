@@ -50,13 +50,14 @@ SQLite 是本地文件型数据库，`metrics.sqlite-path` 必须位于持久卷
 
 ## 总控
 
-`dinghai-thread-pool-governance-server` 使用单实例 SQLite 保存实例、cursor 和采集缺口，
+`dinghai-thread-pool-governance-server` 使用单实例 SQLite 保存实例、版本、cursor 和采集缺口，
 不提供高可用。原始时序指标由应用的 Micrometer/Prometheus 体系保存。
 
 总控只在指标页成功被实时聚合后提交 `nextCursor`。因此失败会幂等重拉，不会跳过数据。
 cursor 过期会记录 gap、触发告警并使用子控快照恢复。SQLite 文件路径必须挂载持久卷；总控不
 保存原始高频指标、访问 Token、mTLS 私钥或业务任务内容。子控注册仅接受 HTTPS 地址，服务
-认证可使用部署注入且可轮换的 Token，TLS/mTLS 由运行环境配置。
+认证可使用部署注入且可轮换的 Token，TLS/mTLS 由运行环境配置。注册版本变化代表子控本地
+SQLite 可能已重建，总控会清除旧 cursor 并从新的增量窗口恢复采集。
 
 总控管理 API 默认拒绝访问。宿主提供 `GovernanceAccessPolicy` 后可使用实例注册与查询 API，
 以及 `GET /governance/gaps?instanceId=`、`GET /governance/alerts` 查询持久化恢复状态。

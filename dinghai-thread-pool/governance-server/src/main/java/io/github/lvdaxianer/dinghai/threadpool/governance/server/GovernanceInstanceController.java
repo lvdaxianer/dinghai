@@ -48,7 +48,7 @@ public class GovernanceInstanceController {
     public ResponseEntity<Void> register(@RequestBody InstanceRegistrationRequest request) {
         rejectUnauthorizedRequest();
         validate(request);
-        store.register(request.instanceId(), request.baseUrl(), request.environment());
+        store.register(request.instanceId(), request.baseUrl(), request.environment(), request.version());
         return ResponseEntity.noContent().build();
     }
 
@@ -85,8 +85,8 @@ public class GovernanceInstanceController {
      * @date 2026-09-15
      */
     private void validate(InstanceRegistrationRequest request) {
-        if (request == null || isBlank(request.instanceId()) || isBlank(request.environment())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "instanceId and environment are required");
+        if (request == null || isBlank(request.instanceId()) || isBlank(request.environment()) || isBlank(request.version())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "instanceId, environment and version are required");
         }
         if (isInvalidHttpsUrl(request.baseUrl())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "baseUrl must be an HTTPS endpoint");

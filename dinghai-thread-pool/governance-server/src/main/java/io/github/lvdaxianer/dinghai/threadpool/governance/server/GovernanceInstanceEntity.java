@@ -10,6 +10,7 @@ public class GovernanceInstanceEntity {
     private String baseUrl;
     private String environment;
     private Boolean enabled;
+    private String version;
     private Long updatedAt;
     /** @return 实例标识 */ public String getInstanceId() { return instanceId; }
     /** @param instanceId 实例标识 */ public void setInstanceId(String instanceId) { this.instanceId = instanceId; }
@@ -19,6 +20,8 @@ public class GovernanceInstanceEntity {
     /** @param environment 运行环境 */ public void setEnvironment(String environment) { this.environment = environment; }
     /** @return 是否启用 */ public Boolean getEnabled() { return enabled; }
     /** @param enabled 是否启用 */ public void setEnabled(Boolean enabled) { this.enabled = enabled; }
+    /** @return 子控实例世代版本 */ public String getVersion() { return version; }
+    /** @param version 子控实例世代版本 */ public void setVersion(String version) { this.version = version; }
     /** @return 更新时间 */ public Long getUpdatedAt() { return updatedAt; }
     /** @param updatedAt 更新时间 */ public void setUpdatedAt(Long updatedAt) { this.updatedAt = updatedAt; }
 }

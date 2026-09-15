@@ -3,6 +3,7 @@ create table if not exists governance_instance (
     base_url text not null,
     environment text not null,
     enabled integer not null,
+    version text not null default '',
     updated_at integer not null
 );
 create table if not exists governance_cursor (

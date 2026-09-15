@@ -1,6 +1,7 @@
 package io.github.lvdaxianer.dinghai.threadpool.governance.server;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,6 +23,20 @@ public class GovernanceStoreTest {
         first.commitCursor("app-1", "12");
         GovernanceStore restarted = new GovernanceStore(database);
         assertEquals("12", restarted.cursor("app-1").orElseThrow());
+    }
+
+    /** 子控本地 SQLite 重建后必须以新实例版本清除旧 cursor。 */
+    @Test
+    public void shouldResetCursorWhenInstanceVersionChanges() throws Exception {
+        Path database = Files.createTempDirectory("governance-generation").resolve("governance.db");
+        GovernanceStore store = new GovernanceStore(database);
+        store.register("app-1", "https://localhost:8080", "test", "generation-1");
+        store.commitCursor("app-1", "12");
+
+        store.register("app-1", "https://localhost:8080", "test", "generation-2");
+
+        assertFalse(store.cursor("app-1").isPresent());
+        assertEquals("generation-2", store.instances().getFirst().version());
     }
 
     /** 聚合失败时不得推进 cursor。 */

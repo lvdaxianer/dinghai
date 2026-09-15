@@ -32,12 +32,17 @@ public final class GovernanceStore {
 
     /** 注册或更新一个子控实例。 */
     public void register(String instanceId, String baseUrl, String environment) {
+        register(instanceId, baseUrl, environment, "legacy");
+    }
+
+    /** 注册或更新带实例世代的子控，并在世代变化时丢弃旧 cursor。 */
+    public void register(String instanceId, String baseUrl, String environment, String version) {
         withMappers(mappers -> {
             GovernanceInstanceEntity entity = mappers.instance().selectById(instanceId);
             if (entity == null) {
-                mappers.instance().insert(instance(instanceId, baseUrl, environment));
+                mappers.instance().insert(instance(instanceId, baseUrl, environment, version));
             } else {
-                updateInstance(entity, baseUrl, environment, mappers);
+                updateInstance(entity, baseUrl, environment, version, mappers);
             }
             return null;
         });
@@ -139,16 +144,20 @@ public final class GovernanceStore {
     }
 
     /** 更新已有实例记录。 */
-    private void updateInstance(GovernanceInstanceEntity entity, String baseUrl, String environment, Mappers mappers) {
+    private void updateInstance(GovernanceInstanceEntity entity, String baseUrl, String environment, String version, Mappers mappers) {
+        if (!Objects.equals(entity.getVersion(), version)) {
+            mappers.cursor().deleteById(entity.getInstanceId());
+        }
         entity.setBaseUrl(baseUrl); entity.setEnvironment(environment); entity.setEnabled(true);
+        entity.setVersion(version);
         entity.setUpdatedAt(System.currentTimeMillis()); mappers.instance().updateById(entity);
     }
 
     /** 创建实例实体。 */
-    private GovernanceInstanceEntity instance(String instanceId, String baseUrl, String environment) {
+    private GovernanceInstanceEntity instance(String instanceId, String baseUrl, String environment, String version) {
         GovernanceInstanceEntity entity = new GovernanceInstanceEntity();
         entity.setInstanceId(instanceId); entity.setBaseUrl(baseUrl); entity.setEnvironment(environment);
-        entity.setEnabled(true); entity.setUpdatedAt(System.currentTimeMillis());
+        entity.setEnabled(true); entity.setVersion(version); entity.setUpdatedAt(System.currentTimeMillis());
         return entity;
     }
 
@@ -171,7 +180,7 @@ public final class GovernanceStore {
     /** 将实例实体投影为公开状态。 */
     private GovernanceInstance instance(GovernanceInstanceEntity entity) {
         return new GovernanceInstance(entity.getInstanceId(), entity.getBaseUrl(), entity.getEnvironment(),
-                entity.getEnabled(), entity.getUpdatedAt());
+                entity.getEnabled(), entity.getVersion(), entity.getUpdatedAt());
     }
 
     /** 将缺口实体投影为公开状态。 */

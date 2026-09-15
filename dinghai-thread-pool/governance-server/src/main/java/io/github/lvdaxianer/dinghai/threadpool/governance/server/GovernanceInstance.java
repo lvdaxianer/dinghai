@@ -7,5 +7,5 @@ package io.github.lvdaxianer.dinghai.threadpool.governance.server;
  * @date 2026-09-15
  */
 public record GovernanceInstance(String instanceId, String baseUrl, String environment,
-                                 boolean enabled, long updatedAt) {
+                                 boolean enabled, String version, long updatedAt) {
 }
