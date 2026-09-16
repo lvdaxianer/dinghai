@@ -89,4 +89,49 @@ public interface KnowledgeStore {
      * @date 2026-09-16
      */
     void updateVectorJobStatus(long jobId, String status, String errorMessage) throws SQLException;
+
+    /**
+     * 按稳定章节 ID 读取当前章节。
+     *
+     * @param sectionId 稳定章节 ID
+     * @return 当前章节；不存在时为空
+     * @throws SQLException SQLite 查询失败
+     */
+    Optional<SectionRecord> findSectionById(String sectionId) throws SQLException;
+
+    /**
+     * 按稳定文档 ID 读取当前文档。
+     *
+     * @param documentId 稳定文档 ID
+     * @return 当前文档；不存在时为空
+     * @throws SQLException SQLite 查询失败
+     */
+    Optional<DocumentRecord> findDocumentById(String documentId) throws SQLException;
+
+    /**
+     * 按概念 ID 读取其关系边。
+     *
+     * @param conceptId 出边起点概念 ID
+     * @return 按关系 ID 排序的关系
+     * @throws SQLException SQLite 查询失败
+     */
+    List<RelationRecord> findRelationsFromConcept(String conceptId) throws SQLException;
+
+    /**
+     * 按章节读取其关联概念 ID。
+     *
+     * @param sectionId 章节 ID
+     * @return 关联概念 ID
+     * @throws SQLException SQLite 查询失败
+     */
+    List<String> findConceptIdsBySectionId(String sectionId) throws SQLException;
+
+    /**
+     * 按概念读取当前章节。
+     *
+     * @param conceptId 概念 ID
+     * @return 关联章节
+     * @throws SQLException SQLite 查询失败
+     */
+    List<SectionRecord> findSectionsByConceptId(String conceptId) throws SQLException;
 }
