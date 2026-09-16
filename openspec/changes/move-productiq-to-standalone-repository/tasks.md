@@ -2,7 +2,7 @@
 
 - [x] 1.1 将 `dinghai-productiq/` 以保留目录提交历史的方式发布到空的 Gitee
   `product-iq` 仓库，并克隆为独立本地工作区
-- [ ] 1.2 在独立克隆中校验根 tree、后端、插件、验收基线和 Compose 配置
+- [x] 1.2 在独立克隆中校验根 tree、后端、插件、验收基线和 Compose 配置
 
 ## 2. 移除 monorepo 副本
 
