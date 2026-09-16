@@ -77,4 +77,16 @@ public interface KnowledgeStore {
      * @date 2026-09-16
      */
     List<VectorIndexJobRecord> findPendingVectorJobs(int limit) throws SQLException;
+
+    /**
+     * 更新索引任务状态和失败信息。
+     *
+     * @param jobId 任务 ID
+     * @param status 新状态
+     * @param errorMessage 失败信息，无错误时为空
+     * @throws SQLException SQLite 更新失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    void updateVectorJobStatus(long jobId, String status, String errorMessage) throws SQLException;
 }

@@ -305,6 +305,21 @@ public final class SqliteKnowledgeStore implements KnowledgeStore {
         }
         return jobs;
     }
+
+    /** 更新索引任务状态并在失败时增加重试次数。 */
+    @Override
+    public void updateVectorJobStatus(long jobId, String status, String errorMessage) throws SQLException {
+        String sql = "UPDATE vector_index_jobs SET status = ?, error_message = ?, "
+                + "retry_count = CASE WHEN ? = 'failed' THEN retry_count + 1 ELSE retry_count END "
+                + "WHERE job_id = ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, status);
+            statement.setString(2, errorMessage);
+            statement.setString(3, status);
+            statement.setLong(4, jobId);
+            statement.executeUpdate();
+        }
+    }
     private void validateOperation(String operation) {
         if (!INDEX_OPERATIONS.contains(operation)) throw new IllegalArgumentException("不支持的索引操作: " + operation);
     }
