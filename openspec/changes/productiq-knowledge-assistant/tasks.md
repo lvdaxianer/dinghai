@@ -1,7 +1,7 @@
 ## 1. 工程骨架与协议基线
 
 - [x] 1.1 创建 `dinghai-productiq` 顶层布局、独立 Spring Boot Maven 后端、根包入口、基础配置和构建测试基线
-- [ ] 1.2 实现知识包/Checker Schema 校验、哈希与证据规则，并补齐四个离线 Skill 模板与协议资源
+- [x] 1.2 实现知识包/Checker Schema 校验、哈希与证据规则，并补齐四个离线 Skill 模板与协议资源
 
 ## 2. 知识事实与导入
 

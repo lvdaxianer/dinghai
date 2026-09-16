@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "1.0",
+  "source": {
+    "key": "team.md",
+    "hash": "sha256:3abd3d3ca3b5fd895423ed057a659f18f85743fb18b818b0b23601962d6bcd29",
+    "title": "团队成员管理",
+    "language": "zh-CN"
+  },
+  "document": {
+    "id": "team_member_management",
+    "summary": "成员邀请和邀请链接规则。"
+  },
+  "sections": [
+    {
+      "id": "team_member_management.invitation_link_expired",
+      "headingPath": ["团队成员管理", "邀请链接失效"],
+      "summary": "邀请链接有效期规则。",
+      "content": "邀请链接有效期为 72 小时。",
+      "conceptIds": ["member_invitation", "invitation_link_expired"],
+      "sourceAnchor": {"startLine": 3, "endLine": 3}
+    }
+  ],
+  "concepts": [
+    {
+      "id": "member_invitation",
+      "name": "成员邀请",
+      "type": "feature",
+      "definition": "管理员邀请用户加入团队的产品能力。",
+      "canonicalAliases": ["邀请链接"],
+      "queryAliases": ["加人"],
+      "evidenceSectionIds": ["team_member_management.invitation_link_expired"]
+    },
+    {
+      "id": "invitation_link_expired",
+      "name": "邀请链接有效期",
+      "type": "state",
+      "definition": "邀请链接在指定时间后失效的状态。",
+      "canonicalAliases": ["有效期"],
+      "queryAliases": ["过期"],
+      "evidenceSectionIds": ["team_member_management.invitation_link_expired"]
+    }
+  ],
+  "relations": [
+    {
+      "operation": "add",
+      "from": "member_invitation",
+      "type": "requires",
+      "to": "invitation_link_expired",
+      "evidence": {
+        "sectionId": "team_member_management.invitation_link_expired",
+        "quote": "邀请链接可以重新发送。"
+      }
+    }
+  ]
+}
