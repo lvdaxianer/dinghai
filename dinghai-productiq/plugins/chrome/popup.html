@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>产品知识问答</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="popup-shell">
+    <h1>产品知识问答</h1>
+    <form id="question-form">
+      <label for="question">问题</label>
+      <textarea id="question" name="question" rows="4" maxlength="1000" required
+        placeholder="输入产品问题"></textarea>
+      <div class="form-actions">
+        <button id="submit-button" type="submit">提问</button>
+        <button id="cancel-button" type="button" class="secondary" hidden>取消</button>
+        <a href="options.html" target="_blank" rel="noopener">设置</a>
+      </div>
+    </form>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <section aria-labelledby="answer-heading">
+      <h2 id="answer-heading">回答</h2>
+      <p id="answer" class="answer"></p>
+    </section>
+    <section aria-labelledby="sources-heading">
+      <h2 id="sources-heading">参考</h2>
+      <ul id="sources" class="sources"></ul>
+    </section>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

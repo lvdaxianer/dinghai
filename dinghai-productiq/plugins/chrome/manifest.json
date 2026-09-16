@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "定海产品知识问答",
+  "description": "通过受限 HTTP/SSE 合同查询产品知识。",
+  "version": "1.0.0",
+  "permissions": ["storage"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "action": {
+    "default_title": "产品知识问答",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
