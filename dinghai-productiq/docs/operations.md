@@ -2,7 +2,8 @@
 
 ## 本地启动
 
-先构建后端 jar，再复制 `.env.example` 为部署侧 `.env`，至少注入管理密钥和真实模型网关配置：
+先构建后端 jar，再复制 `.env.example` 为部署侧 `.env`。生产环境固定使用
+`PRODUCTIQ_RUNTIME_MODE=remote`，并注入管理密钥和完整模型网关配置：
 
 ```bash
 cd dinghai-productiq/backend
@@ -16,8 +17,18 @@ SQLite、可信知识目录和 Qdrant 数据分别挂载在 `productiq-data`、
 `productiq-knowledge`、`productiq-qdrant` 卷中。`.env` 只存在于部署环境，模型密钥
 不能写入插件、知识包或 Qdrant payload。
 
-Compose 会将 `PRODUCTIQ_SQLITE_PATH`、`PRODUCTIQ_TRUSTED_DIRECTORY` 和
-`PRODUCTIQ_CHAT_TIMEOUT` 映射到后端实际配置；`PRODUCTIQ_ADMIN_KEY` 用于保护管理 API。
+Compose 会将 `PRODUCTIQ_SQLITE_PATH`、`PRODUCTIQ_TRUSTED_DIRECTORY`、
+`PRODUCTIQ_CHAT_TIMEOUT`、模型网关、Qdrant 和索引 worker 配置映射到后端实际配置；
+`PRODUCTIQ_ADMIN_KEY` 用于保护管理 API。remote 配置中下列任何必填项为空都会 fail-fast：
+
+| 分组 | 必填变量 |
+| --- | --- |
+| 运行模式 | `PRODUCTIQ_RUNTIME_MODE=remote` |
+| 模型网关 | `PRODUCTIQ_GATEWAY_BASE_URL`、`PRODUCTIQ_GATEWAY_API_KEY`、`PRODUCTIQ_EMBEDDING_MODEL`、`PRODUCTIQ_RERANK_MODEL`、`PRODUCTIQ_ANSWER_MODEL`、`PRODUCTIQ_EMBEDDING_DIMENSIONS` |
+| 向量索引 | `PRODUCTIQ_QDRANT_URL`、`PRODUCTIQ_QDRANT_COLLECTION` |
+
+`PRODUCTIQ_GATEWAY_BASE_URL` 是网关根路径，例如 `https://gateway.example.internal/v1/`；后端分别
+追加 `embeddings` 和 `chat/completions`。不要配置为某个完整 API 端点。
 
 ## 配置和超时
 
@@ -26,10 +37,14 @@ collection，完成重建和验收后再切换 `PRODUCTIQ_QDRANT_COLLECTION`。�
 
 | 调用 | 连接 | 读取 | 重试 |
 | --- | ---: | ---: | ---: |
-| Embedding | 3s | 15s | 2 次 |
-| Rerank | 3s | 20s | 1 次 |
+| Embedding | 受 JDK HttpClient 限制 | `PRODUCTIQ_EMBEDDING_TIMEOUT=15s` | 索引任务后续重试 |
+| Rerank | 受 JDK HttpClient 限制 | `PRODUCTIQ_RERANK_TIMEOUT=20s` | 当前请求不自动重排 |
 | Answer SSE | 3s | 90s 总时限 | 不自动重生成 |
-| Qdrant | 2s | 5s | 由索引任务退避重试 |
+| Qdrant | 受 JDK HttpClient 限制 | `PRODUCTIQ_QDRANT_TIMEOUT=5s` | 由索引任务后续重试 |
+
+索引 worker 使用 `PRODUCTIQ_INDEX_WORKER_BATCH_SIZE=20` 和
+`PRODUCTIQ_INDEX_WORKER_INTERVAL=10s`。batch size 必须在 1-1000，interval 至少为 1ms；只要
+SQLite 中有 pending、processing 或 failed 任务，查询都返回 `knowledge_updating`，不会使用旧向量。
 
 阻塞模型调用使用专用有界线程池。客户端断开后由 SSE 控制器取消下游 Future；日志
 只记录 requestId、traceId、状态、耗时、模型标识和来源数量，不记录问题全文、证据
@@ -39,7 +54,7 @@ collection，完成重建和验收后再切换 `PRODUCTIQ_QDRANT_COLLECTION`。�
 
 1. 暂停新的知识导入，创建与目标 Embedding 模型匹配的新 collection。
 2. 从 SQLite 当前 `sections` 读取正文，使用当前 Embedding 模型写入新 collection。
-3. 运行 `node acceptance/run.mjs`，确认 Top-20、Top-3、拒答和来源一致性均无解释外失败。
+3. 运行 `npm test` 和 `node run.mjs --output reports/latest.json`，确认 Top-20、Top-3、拒答和来源一致性均无解释外失败。
 4. 原子切换 `PRODUCTIQ_QDRANT_COLLECTION`，保留旧 collection 直到回滚窗口结束。
 
 不得把不同模型的向量写入同一 collection，也不得把 Qdrant 当作事实源。
