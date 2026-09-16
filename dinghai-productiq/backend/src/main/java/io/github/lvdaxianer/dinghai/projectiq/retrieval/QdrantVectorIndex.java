@@ -82,7 +82,6 @@ public final class QdrantVectorIndex implements VectorIndex {
         payload.put("documentId", point.documentId());
         payload.put("sourceKey", point.sourceKey());
         payload.put("sourceHash", point.sourceHash());
-        payload.put("text", point.text());
         return Map.of("id", UUID.nameUUIDFromBytes(point.sectionId().getBytes()).toString(),
                 "vector", point.vector(), "payload", payload);
     }

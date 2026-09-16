@@ -13,6 +13,7 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -124,6 +125,37 @@ class VectorIndexTest {
                     URI.create("http://localhost:" + server.getAddress().getPort() + "/"), "product",
                     new ObjectMapper(), java.time.Duration.ofSeconds(2));
             assertThat(index.search(List.of(1.0f), 1)).extracting(VectorMatch::sectionId).containsExactly("s1");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /**
+     * Qdrant 仅可保存检索定位元数据，正文仍必须以 SQLite 为权威来源。
+     *
+     * @throws Exception 本地 HTTP 服务调用失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Test
+    void qdrantUpsertDoesNotPersistSectionTextInPayload() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/collections/product/points", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes()));
+            exchange.sendResponseHeaders(200, 0);
+            exchange.close();
+        });
+        server.start();
+        try {
+            QdrantVectorIndex index = new QdrantVectorIndex(
+                    URI.create("http://localhost:" + server.getAddress().getPort() + "/"), "product",
+                    new ObjectMapper(), java.time.Duration.ofSeconds(2));
+            index.upsert(List.of(new VectorPoint("section", "document", "team.md", "sha256:abc",
+                    List.of(1.0f), "不得写入 Qdrant 的正文")));
+
+            assertThat(requestBody.get()).doesNotContain("不得写入 Qdrant 的正文");
+            assertThat(requestBody.get()).contains("sectionId", "sourceHash");
         } finally {
             server.stop(0);
         }
