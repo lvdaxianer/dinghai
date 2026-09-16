@@ -1,0 +1,42 @@
+{
+  "knowledge": {
+    "hash": "sha256:productiq-fixture-v1",
+    "embeddingModel": "deterministic-embedding-v1",
+    "embeddingDimensions": 32,
+    "rerankModel": "deterministic-rerank-v1",
+    "answerModel": "deterministic-answer-v1"
+  },
+  "cases": [
+    {"id":"direct-01","category":"direct","question":"邀请链接过期怎么办？","expectedSectionIds":["team.invitation_expired"],"expectedConceptIds":["invitation_link_expired"],"mustNotUseSectionIds":["team.member_role"]},
+    {"id":"direct-02","category":"direct","question":"邀请链接有效期是多久？","expectedSectionIds":["team.invitation_expired"],"expectedConceptIds":["invitation_link_expired"],"mustNotUseSectionIds":[]},
+    {"id":"direct-03","category":"direct","question":"如何邀请新成员？","expectedSectionIds":["team.invite"],"expectedConceptIds":["member_invitation"],"mustNotUseSectionIds":[]},
+    {"id":"direct-04","category":"direct","question":"成员角色在哪里设置？","expectedSectionIds":["team.member_role"],"expectedConceptIds":["member_role"],"mustNotUseSectionIds":[]},
+    {"id":"direct-05","category":"direct","question":"团队成员管理支持什么操作？","expectedSectionIds":["team.overview"],"expectedConceptIds":["team_member_management"],"mustNotUseSectionIds":[]},
+    {"id":"direct-06","category":"direct","question":"待接受邀请是什么状态？","expectedSectionIds":["billing.pending_invite"],"expectedConceptIds":["pending_invitation"],"mustNotUseSectionIds":[]},
+    {"id":"direct-07","category":"direct","question":"席位限制在哪里查看？","expectedSectionIds":["billing.seat_limit"],"expectedConceptIds":["seat_limit"],"mustNotUseSectionIds":[]},
+    {"id":"direct-08","category":"direct","question":"怎样取消成员邀请？","expectedSectionIds":["team.cancel_invite"],"expectedConceptIds":["member_invitation"],"mustNotUseSectionIds":[]},
+    {"id":"direct-09","category":"direct","question":"计费周期如何计算？","expectedSectionIds":["billing.cycle"],"expectedConceptIds":["billing_cycle"],"mustNotUseSectionIds":[]},
+    {"id":"direct-10","category":"direct","question":"管理员能否移除成员？","expectedSectionIds":["team.remove_member"],"expectedConceptIds":["member_role"],"mustNotUseSectionIds":[]},
+    {"id":"colloquial-01","category":"colloquial","question":"同事的加人地址打不开了。","expectedSectionIds":["team.invitation_expired"],"expectedConceptIds":["invitation_link_expired"],"mustNotUseSectionIds":["team.member_role"]},
+    {"id":"colloquial-02","category":"colloquial","question":"邀请网址过几天失效怎么办？","expectedSectionIds":["team.invitation_expired"],"expectedConceptIds":["invitation_link_expired"],"mustNotUseSectionIds":[]},
+    {"id":"colloquial-03","category":"colloquial","question":"加人链接不能用了。","expectedSectionIds":["team.invitation_expired"],"expectedConceptIds":["invitation_link_expired"],"mustNotUseSectionIds":[]},
+    {"id":"colloquial-04","category":"colloquial","question":"给同事发邀请怎么弄？","expectedSectionIds":["team.invite"],"expectedConceptIds":["member_invitation"],"mustNotUseSectionIds":[]},
+    {"id":"colloquial-05","category":"colloquial","question":"人满了还能加人吗？","expectedSectionIds":["billing.seat_limit"],"expectedConceptIds":["seat_limit"],"mustNotUseSectionIds":[]},
+    {"id":"cross-01","category":"cross_document","question":"重新邀请会不会扣席位？","expectedSectionIds":["team.reinvite","billing.pending_invite"],"expectedConceptIds":["member_invitation","pending_invitation"],"mustNotUseSectionIds":[]},
+    {"id":"cross-02","category":"cross_document","question":"邀请过期后重发是否占用席位？","expectedSectionIds":["team.invitation_expired","billing.pending_invite"],"expectedConceptIds":["invitation_link_expired","pending_invitation"],"mustNotUseSectionIds":[]},
+    {"id":"cross-03","category":"cross_document","question":"成员状态和计费规则有什么关系？","expectedSectionIds":["team.member_status","billing.pending_invite"],"expectedConceptIds":["pending_invitation","seat_limit"],"mustNotUseSectionIds":[]},
+    {"id":"cross-04","category":"cross_document","question":"席位已满时邀请流程怎么处理？","expectedSectionIds":["team.invite","billing.seat_limit"],"expectedConceptIds":["member_invitation","seat_limit"],"mustNotUseSectionIds":[]},
+    {"id":"cross-05","category":"cross_document","question":"管理员邀请成员需要什么计费前提？","expectedSectionIds":["team.invite","billing.cycle"],"expectedConceptIds":["member_invitation","billing_cycle"],"mustNotUseSectionIds":[]},
+    {"id":"override-01","category":"overrides","question":"旧版邀请限制还有效吗？","expectedSectionIds":["team.invitation_policy_v2"],"expectedConceptIds":["invitation_policy"],"mustNotUseSectionIds":["team.invitation_policy_v1"]},
+    {"id":"override-02","category":"overrides","question":"当前邀请有效期按哪个版本？","expectedSectionIds":["team.invitation_policy_v2"],"expectedConceptIds":["invitation_policy"],"mustNotUseSectionIds":["team.invitation_policy_v1"]},
+    {"id":"override-03","category":"overrides","question":"旧席位规则是否被新规则覆盖？","expectedSectionIds":["billing.seat_policy_v2"],"expectedConceptIds":["seat_limit"],"mustNotUseSectionIds":["billing.seat_policy_v1"]},
+    {"id":"refusal-01","category":"refusal","question":"怎么申请采购合同？","expectedSectionIds":[],"expectedConceptIds":[],"mustNotUseSectionIds":[],"expectedError":"no_knowledge"},
+    {"id":"refusal-02","category":"refusal","question":"如何配置财务发票？","expectedSectionIds":[],"expectedConceptIds":[],"mustNotUseSectionIds":[],"expectedError":"no_relevant_knowledge"},
+    {"id":"refusal-03","category":"refusal","question":"能否导出全部客户名单？","expectedSectionIds":[],"expectedConceptIds":[],"mustNotUseSectionIds":[],"expectedError":"no_knowledge"},
+    {"id":"refusal-04","category":"refusal","question":"产品支持哪些采购审批？","expectedSectionIds":[],"expectedConceptIds":[],"mustNotUseSectionIds":[],"expectedError":"no_relevant_knowledge"},
+    {"id":"update-01","category":"source_replacement","question":"替换团队文档后旧邀请规则是否消失？","expectedSectionIds":["team.invitation_policy_v2"],"expectedConceptIds":["invitation_policy"],"mustNotUseSectionIds":["team.invitation_policy_v1"]},
+    {"id":"update-02","category":"source_replacement","question":"更新计费文档后席位规则还能检索吗？","expectedSectionIds":["billing.seat_policy_v2"],"expectedConceptIds":["seat_limit"],"mustNotUseSectionIds":["billing.seat_policy_v1"]},
+    {"id":"recovery-01","category":"vector_recovery","question":"Qdrant 清空后邀请链接还能查询吗？","expectedSectionIds":["team.invitation_expired"],"expectedConceptIds":["invitation_link_expired"],"mustNotUseSectionIds":[]},
+    {"id":"recovery-02","category":"vector_recovery","question":"重建索引后席位限制是否恢复？","expectedSectionIds":["billing.seat_limit"],"expectedConceptIds":["seat_limit"],"mustNotUseSectionIds":[]}
+  ]
+}
