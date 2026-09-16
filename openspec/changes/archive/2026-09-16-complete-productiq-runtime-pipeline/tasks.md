@@ -12,4 +12,4 @@
 
 - [x] 3.1 对齐 Compose、环境变量和运维文档中的 runtime 配置、超时和模型约束
 - [x] 3.2 增加 SQLite + 内存向量 + SSE 端到端测试，执行后端、插件、验收、OpenSpec 与构建校验
-- [ ] 3.3 完成计划一致性与代码审查，归档 OpenSpec change 并确认所有任务合并回 `main`
+- [x] 3.3 完成计划一致性与代码审查，归档 OpenSpec change 并确认所有任务合并回 `main`
