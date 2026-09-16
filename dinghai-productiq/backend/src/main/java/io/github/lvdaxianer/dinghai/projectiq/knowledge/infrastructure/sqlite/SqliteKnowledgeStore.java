@@ -16,7 +16,10 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 /**
@@ -29,6 +32,7 @@ public final class SqliteKnowledgeStore implements KnowledgeStore {
     private static final String SCHEMA_RESOURCE = "/db/migration/V1__knowledge_schema.sql";
     private static final int SECTION_QUERY_LIMIT = 10_000;
     private static final int JOB_QUERY_LIMIT = 1_000;
+    private static final int BATCH_QUERY_LIMIT = 900;
     private static final List<String> INDEX_OPERATIONS = List.of("upsert", "delete");
     private final DataSource dataSource;
     /**
@@ -260,6 +264,22 @@ public final class SqliteKnowledgeStore implements KnowledgeStore {
             }
         }
     }
+
+    /**
+     * 使用有界 exists 查询判断是否已有可检索的当前知识。
+     *
+     * @return 至少存在一份文档时为 true
+     * @throws SQLException SQLite 查询失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Override
+    public boolean hasDocuments() throws SQLException {
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(
+                "SELECT EXISTS(SELECT 1 FROM documents LIMIT 1)"); ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() && resultSet.getInt(1) == 1;
+        }
+    }
     @Override
     public List<SectionRecord> findSectionsBySourceKey(String sourceKey) throws SQLException {
         String sql = "SELECT s.section_id, s.document_id, s.heading_path_json, s.summary, s.content, "
@@ -357,6 +377,83 @@ public final class SqliteKnowledgeStore implements KnowledgeStore {
         }
     }
 
+    /**
+     * 使用参数化 IN 查询批量回查当前章节。
+     *
+     * @param sectionIds 稳定章节 ID
+     * @return 当前章节映射
+     * @throws SQLException SQLite 查询失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Override
+    public Map<String, SectionRecord> findSectionsByIds(List<String> sectionIds) throws SQLException {
+        List<String> ids = boundedIds(sectionIds);
+        if (ids.isEmpty()) return Map.of();
+        String sql = "SELECT section_id, document_id, heading_path_json, summary, content, source_start_line, "
+                + "source_end_line FROM sections WHERE section_id IN (" + placeholders(ids.size()) + ")";
+        Map<String, SectionRecord> sections = new LinkedHashMap<>(ids.size());
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            bindIds(statement, ids);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                SectionRowMapper mapper = new SectionRowMapper();
+                while (resultSet.next()) addSection(sections, mapper.mapRow(resultSet, sections.size() + 1));
+            }
+        }
+        return Collections.unmodifiableMap(sections);
+    }
+
+    /**
+     * 使用参数化 IN 查询批量回查当前文档。
+     *
+     * @param documentIds 稳定文档 ID
+     * @return 当前文档映射
+     * @throws SQLException SQLite 查询失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Override
+    public Map<String, DocumentRecord> findDocumentsByIds(List<String> documentIds) throws SQLException {
+        List<String> ids = boundedIds(documentIds);
+        if (ids.isEmpty()) return Map.of();
+        String sql = "SELECT document_id, source_key, title, content_hash, updated_at FROM documents "
+                + "WHERE document_id IN (" + placeholders(ids.size()) + ")";
+        Map<String, DocumentRecord> documents = new LinkedHashMap<>(ids.size());
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            bindIds(statement, ids);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                DocumentRowMapper mapper = new DocumentRowMapper();
+                while (resultSet.next()) addDocument(documents, mapper.mapRow(resultSet, documents.size() + 1));
+            }
+        }
+        return Collections.unmodifiableMap(documents);
+    }
+
+    /**
+     * 使用参数化 IN 查询批量回查章节关联概念。
+     *
+     * @param sectionIds 稳定章节 ID
+     * @return 有序概念映射
+     * @throws SQLException SQLite 查询失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Override
+    public Map<String, List<String>> findConceptIdsBySectionIds(List<String> sectionIds) throws SQLException {
+        List<String> ids = boundedIds(sectionIds);
+        if (ids.isEmpty()) return Map.of();
+        Map<String, List<String>> concepts = initializeConcepts(ids);
+        String sql = "SELECT section_id, concept_id FROM section_concepts WHERE section_id IN ("
+                + placeholders(ids.size()) + ") ORDER BY section_id, concept_id";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            bindIds(statement, ids);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) concepts.get(resultSet.getString(1)).add(resultSet.getString(2));
+            }
+        }
+        return immutableConcepts(concepts);
+    }
+
     /** 按章节 ID 查询当前章节。 */
     @Override
     public Optional<SectionRecord> findSectionById(String sectionId) throws SQLException {
@@ -430,6 +527,83 @@ public final class SqliteKnowledgeStore implements KnowledgeStore {
             }
         }
         return sections;
+    }
+
+    /**
+     * 对批量 ID 去重并限制 SQLite 参数数量。
+     *
+     * @param ids 待查询 ID
+     * @return 有界且去重后的 ID
+     */
+    private List<String> boundedIds(List<String> ids) {
+        Objects.requireNonNull(ids, "ids 不能为空");
+        return ids.stream().filter(Objects::nonNull).filter(id -> !id.isBlank()).distinct()
+                .limit(BATCH_QUERY_LIMIT).toList();
+    }
+
+    /**
+     * 创建指定数量的参数化占位符。
+     *
+     * @param size 占位符数量
+     * @return SQL 占位符片段
+     */
+    private String placeholders(int size) {
+        return String.join(",", Collections.nCopies(size, "?"));
+    }
+
+    /**
+     * 绑定批量查询 ID。
+     *
+     * @param statement SQL 预编译语句
+     * @param ids 待绑定 ID
+     * @throws SQLException 参数绑定失败
+     */
+    private void bindIds(PreparedStatement statement, List<String> ids) throws SQLException {
+        for (int index = 0; index < ids.size(); index++) statement.setString(index + 1, ids.get(index));
+    }
+
+    /**
+     * 保存一个章节读取结果。
+     *
+     * @param sections 当前章节映射
+     * @param section 当前章节
+     */
+    private void addSection(Map<String, SectionRecord> sections, SectionRecord section) {
+        sections.put(section.sectionId(), section);
+    }
+
+    /**
+     * 保存一个文档读取结果。
+     *
+     * @param documents 当前文档映射
+     * @param document 当前文档
+     */
+    private void addDocument(Map<String, DocumentRecord> documents, DocumentRecord document) {
+        documents.put(document.documentId(), document);
+    }
+
+    /**
+     * 创建每个请求章节的概念容器。
+     *
+     * @param sectionIds 请求章节 ID
+     * @return 可填充概念映射
+     */
+    private Map<String, List<String>> initializeConcepts(List<String> sectionIds) {
+        Map<String, List<String>> concepts = new LinkedHashMap<>(sectionIds.size());
+        for (String sectionId : sectionIds) concepts.put(sectionId, new ArrayList<>());
+        return concepts;
+    }
+
+    /**
+     * 冻结批量概念查询结果。
+     *
+     * @param concepts 可变概念映射
+     * @return 不可变概念映射
+     */
+    private Map<String, List<String>> immutableConcepts(Map<String, List<String>> concepts) {
+        Map<String, List<String>> immutable = new LinkedHashMap<>(concepts.size());
+        concepts.forEach((sectionId, conceptIds) -> immutable.put(sectionId, List.copyOf(conceptIds)));
+        return Collections.unmodifiableMap(immutable);
     }
     private void validateOperation(String operation) {
         if (!INDEX_OPERATIONS.contains(operation)) throw new IllegalArgumentException("不支持的索引操作: " + operation);
