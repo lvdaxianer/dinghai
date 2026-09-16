@@ -20,7 +20,7 @@
 
 ## 5. 浏览器交付与运行
 
-- [ ] 5.1 实现 Manifest V3 Chrome 插件 Popup、Options、Service Worker 的提问/流式/取消/来源交互
+- [x] 5.1 实现 Manifest V3 Chrome 插件 Popup、Options、Service Worker 的提问/流式/取消/来源交互
 - [ ] 5.2 提供 Docker Compose、配置样例、运维/重建/回滚文档和 30~50 题验收基线工具
 
 ## 6. 集成验收
