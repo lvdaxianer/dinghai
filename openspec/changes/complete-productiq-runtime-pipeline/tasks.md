@@ -6,7 +6,7 @@
 ## 2. 检索问答闭环
 
 - [x] 2.1 实现运行时 ChatAnswerGateway，将嵌入、向量召回、当前性水合、本体扩展、重排和证据回答连接起来
-- [ ] 2.2 装配 deterministic/remote 模式的完整 Spring Bean，并验证无知识、更新中和过期向量拒答边界
+- [x] 2.2 装配 deterministic/remote 模式的完整 Spring Bean，并验证无知识、更新中和过期向量拒答边界
 
 ## 3. 可运行交付与验收
 
