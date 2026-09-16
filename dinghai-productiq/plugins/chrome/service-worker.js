@@ -35,28 +35,44 @@ chrome.runtime.onMessage.addListener((message, sendResponse) => {
  * @returns {Promise<void>} 流完成结果
  */
 async function startStream(streamId, question) {
-  const normalizedId = String(streamId || "").trim();
-  const normalizedQuestion = String(question || "").trim();
-  if (!normalizedId || !normalizedQuestion || activeStreams.has(normalizedId)) {
-    postEvent(normalizedId, { name: "error", data: { code: "answer_failed" } });
+  const request = normalizeStartRequest(streamId, question);
+  if (!request) {
+    postEvent(String(streamId || "").trim(), { name: "error", data: { code: "answer_failed" } });
     return;
   }
   const controller = new AbortController();
-  activeStreams.set(normalizedId, controller);
+  activeStreams.set(request.streamId, controller);
   try {
     const settings = await loadSettings();
-    const response = await fetch(buildStreamUrl(settings.baseUrl), requestOptions(settings, normalizedQuestion, controller));
-    if (!response.ok || !response.body) {
-      throw new Error(`聊天服务 HTTP ${response.status}`);
-    }
-    await readStream(normalizedId, response.body, controller.signal);
+    const response = await fetchStream(settings, request, controller);
+    await readStream(request.streamId, response.body, controller.signal);
   } catch (error) {
     if (!controller.signal.aborted) {
-      postEvent(normalizedId, { name: "error", data: { code: "answer_failed" } });
+      postEvent(request.streamId, { name: "error", data: { code: "answer_failed" } });
     }
   } finally {
-    activeStreams.delete(normalizedId);
+    activeStreams.delete(request.streamId);
   }
+}
+
+/** 规范化启动消息并阻止重复流。 */
+function normalizeStartRequest(streamId, question) {
+  const normalizedId = String(streamId || "").trim();
+  const normalizedQuestion = String(question || "").trim();
+  if (!normalizedId || !normalizedQuestion || activeStreams.has(normalizedId)) {
+    return undefined;
+  }
+  return { streamId: normalizedId, question: normalizedQuestion };
+}
+
+/** 请求聊天 SSE，并要求响应具有可读取的流体。 */
+async function fetchStream(settings, request, controller) {
+  const response = await fetch(buildStreamUrl(settings.baseUrl),
+    requestOptions(settings, request.question, controller));
+  if (!response.ok || !response.body) {
+    throw new Error(`聊天服务 HTTP ${response.status}`);
+  }
+  return response;
 }
 
 /**

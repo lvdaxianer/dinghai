@@ -15,7 +15,7 @@
 
 ## 4. 回答与观测
 
-- [ ] 4.1 实现结构化 Reranker、证据上下文限制、OpenAI 兼容 Answerer 和拒答状态
+- [x] 4.1 实现结构化 Reranker、证据上下文限制、OpenAI 兼容 Answerer 和拒答状态
 - [x] 4.2 实现 `/api/chat/stream` SSE、请求校验、取消传播、requestId/traceId/MDC 和敏感日志边界
 
 ## 5. 浏览器交付与运行

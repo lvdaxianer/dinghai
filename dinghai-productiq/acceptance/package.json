@@ -1,0 +1,9 @@
+{
+  "name": "dinghai-productiq-acceptance",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/acceptance.test.js",
+    "run": "node run.mjs --output reports/latest.json"
+  }
+}
