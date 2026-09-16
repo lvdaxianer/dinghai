@@ -307,6 +307,41 @@ public final class SqliteKnowledgeStore implements KnowledgeStore {
         return jobs;
     }
 
+    /**
+     * 使用有界 exists 查询检查是否存在尚未完成的向量同步。
+     *
+     * @return 存在 pending、processing 或 failed 任务时为 true
+     * @throws SQLException SQLite 查询失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Override
+    public boolean hasIncompleteVectorJobs() throws SQLException {
+        String sql = "SELECT EXISTS(SELECT 1 FROM vector_index_jobs "
+                + "WHERE status IN ('pending', 'processing', 'failed') LIMIT 1)";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() && resultSet.getInt(1) == 1;
+        }
+    }
+
+    /**
+     * 将遗留 processing 任务变更为可被下个批次领取的失败任务。
+     *
+     * @throws SQLException SQLite 更新失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Override
+    public void recoverProcessingVectorJobs() throws SQLException {
+        String sql = "UPDATE vector_index_jobs SET status = 'failed', error_message = ?, "
+                + "retry_count = retry_count + 1 WHERE status = 'processing'";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, "索引任务在上次运行中断后等待重试");
+            statement.executeUpdate();
+        }
+    }
+
     /** 更新索引任务状态并在失败时增加重试次数。 */
     @Override
     public void updateVectorJobStatus(long jobId, String status, String errorMessage) throws SQLException {

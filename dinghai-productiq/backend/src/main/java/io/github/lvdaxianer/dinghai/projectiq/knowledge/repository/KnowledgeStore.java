@@ -79,6 +79,25 @@ public interface KnowledgeStore {
     List<VectorIndexJobRecord> findPendingVectorJobs(int limit) throws SQLException;
 
     /**
+     * 判断是否仍有会使向量结果不可信的未完成任务。
+     *
+     * @return 存在 pending、processing 或 failed 任务时为 true
+     * @throws SQLException SQLite 查询失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    boolean hasIncompleteVectorJobs() throws SQLException;
+
+    /**
+     * 将进程中断遗留的 processing 任务转为可重试的失败状态。
+     *
+     * @throws SQLException SQLite 更新失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    void recoverProcessingVectorJobs() throws SQLException;
+
+    /**
      * 更新索引任务状态和失败信息。
      *
      * @param jobId 任务 ID
