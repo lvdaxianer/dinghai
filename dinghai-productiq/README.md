@@ -17,7 +17,7 @@ dinghai-productiq/
 ## 后端构建
 
 后端使用 Maven 坐标 `io.github.lvdaxianer.dinghai:knowledge-assistant`，Java 根包为
-`io.github.lvdaxianer.projectiq`。根 Maven 聚合不会自动引入本产品模块；请在后端目录
+`io.github.lvdaxianer.dinghai.projectiq`。根 Maven 聚合不会自动引入本产品模块；请在后端目录
 执行构建：
 
 ```bash
