@@ -6,7 +6,7 @@
 
 ## 2. 移除 monorepo 副本
 
-- [ ] 2.1 在已验证目标仓库后，从 dinghai 删除 `dinghai-productiq/` 并保留迁移 OpenSpec 记录
+- [x] 2.1 在已验证目标仓库后，从 dinghai 删除 `dinghai-productiq/` 并保留迁移 OpenSpec 记录
 
 ## 3. 最终验收
 
