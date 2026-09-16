@@ -6,7 +6,7 @@ import io.github.lvdaxianer.dinghai.projectiq.knowledge.repository.SectionRecord
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -15,9 +15,9 @@ class CurrentHydrationTest {
     @Test
     void discardsMissingAndStaleVectorHits() throws Exception {
         KnowledgeStore store = mock(KnowledgeStore.class);
-        when(store.findSectionById("current")).thenReturn(Optional.of(
+        when(store.findSectionsByIds(List.of("current", "stale"))).thenReturn(Map.of("current",
                 new SectionRecord("current", "doc", "[]", "摘要", "当前正文", 1, 1)));
-        when(store.findDocumentById("doc")).thenReturn(Optional.of(
+        when(store.findDocumentsByIds(List.of("doc"))).thenReturn(Map.of("doc",
                 new io.github.lvdaxianer.dinghai.projectiq.knowledge.repository.DocumentRecord(
                         "doc", "team.md", "团队", "sha256:new", java.time.Instant.now())));
 
@@ -26,14 +26,16 @@ class CurrentHydrationTest {
                 new VectorMatch("stale", "doc", "team.md", "sha256:old", 0.8f)));
 
         assertThat(candidates).extracting(HydratedCandidate::sectionId).containsExactly("current");
+        verify(store).findSectionsByIds(List.of("current", "stale"));
+        verify(store).findDocumentsByIds(List.of("doc"));
     }
 
     @Test
     void discardsVectorHitWhoseDocumentIdDoesNotOwnSection() throws Exception {
         KnowledgeStore store = mock(KnowledgeStore.class);
-        when(store.findSectionById("current")).thenReturn(Optional.of(
+        when(store.findSectionsByIds(List.of("current"))).thenReturn(Map.of("current",
                 new SectionRecord("current", "doc", "[]", "摘要", "当前正文", 1, 1)));
-        when(store.findDocumentById("doc")).thenReturn(Optional.of(
+        when(store.findDocumentsByIds(List.of("doc"))).thenReturn(Map.of("doc",
                 new io.github.lvdaxianer.dinghai.projectiq.knowledge.repository.DocumentRecord(
                         "doc", "team.md", "团队", "sha256:new", java.time.Instant.now())));
 

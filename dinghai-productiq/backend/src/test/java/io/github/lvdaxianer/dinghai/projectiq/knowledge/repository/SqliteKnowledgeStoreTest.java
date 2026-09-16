@@ -19,6 +19,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.nio.file.Files;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -131,6 +132,33 @@ class SqliteKnowledgeStoreTest {
         assertThat(store.hasIncompleteVectorJobs()).isTrue();
         store.updateVectorJobStatus(store.findPendingVectorJobs(1).getFirst().jobId(), "succeeded", null);
         assertThat(store.hasIncompleteVectorJobs()).isFalse();
+    }
+
+    /**
+     * 批量读取只返回当前存在的文档、章节和章节概念，并保持输入边界内的确定性结果。
+     *
+     * @throws Exception SQLite 操作失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Test
+    void batchesCurrentEvidenceMetadata() throws Exception {
+        SqliteKnowledgeStore store = new SqliteKnowledgeStore(dataSource());
+        store.replaceSource(knowledge("team.md",
+                "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                "doc_team", "team_section"), Instant.now());
+
+        Map<String, DocumentRecord> documents = store.findDocumentsByIds(List.of("doc_team", "missing"));
+        Map<String, SectionRecord> sections = store.findSectionsByIds(List.of("team_section", "missing"));
+        Map<String, List<String>> concepts = store.findConceptIdsBySectionIds(List.of("team_section", "missing"));
+
+        assertThat(documents).containsOnlyKeys("doc_team");
+        assertThat(sections).containsOnlyKeys("team_section");
+        assertThat(concepts).containsEntry("team_section", List.of("member_invitation", "pending_invitation"));
+        assertThatThrownBy(() -> documents.put("another", documents.get("doc_team")))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> concepts.get("team_section").add("another"))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     private static SQLiteDataSource dataSource() {

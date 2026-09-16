@@ -4,6 +4,7 @@ import io.github.lvdaxianer.dinghai.projectiq.knowledge.domain.KnowledgePackage;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -44,6 +45,16 @@ public interface KnowledgeStore {
      * @date 2026-09-16
      */
     Optional<DocumentRecord> findDocumentBySourceKey(String sourceKey) throws SQLException;
+
+    /**
+     * 判断 SQLite 是否已有任何当前知识文档。
+     *
+     * @return 至少存在一份文档时为 true
+     * @throws SQLException SQLite 查询失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    boolean hasDocuments() throws SQLException;
 
     /**
      * 按来源读取当前章节。
@@ -108,6 +119,39 @@ public interface KnowledgeStore {
      * @date 2026-09-16
      */
     void updateVectorJobStatus(long jobId, String status, String errorMessage) throws SQLException;
+
+    /**
+     * 按稳定章节 ID 批量读取当前章节。
+     *
+     * @param sectionIds 稳定章节 ID
+     * @return 以章节 ID 为键的当前章节，不存在的 ID 不返回
+     * @throws SQLException SQLite 查询失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    Map<String, SectionRecord> findSectionsByIds(List<String> sectionIds) throws SQLException;
+
+    /**
+     * 按稳定文档 ID 批量读取当前文档。
+     *
+     * @param documentIds 稳定文档 ID
+     * @return 以文档 ID 为键的当前文档，不存在的 ID 不返回
+     * @throws SQLException SQLite 查询失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    Map<String, DocumentRecord> findDocumentsByIds(List<String> documentIds) throws SQLException;
+
+    /**
+     * 按章节批量读取关联概念 ID。
+     *
+     * @param sectionIds 章节 ID
+     * @return 以章节 ID 为键的有序概念 ID，不存在概念的章节返回空列表
+     * @throws SQLException SQLite 查询失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    Map<String, List<String>> findConceptIdsBySectionIds(List<String> sectionIds) throws SQLException;
 
     /**
      * 按稳定章节 ID 读取当前章节。
