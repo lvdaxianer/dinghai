@@ -3,6 +3,7 @@ import io.github.lvdaxianer.projectiq.knowledge.domain.KnowledgePackage;
 import io.github.lvdaxianer.projectiq.knowledge.repository.DocumentRecord;
 import io.github.lvdaxianer.projectiq.knowledge.repository.KnowledgeStore;
 import io.github.lvdaxianer.projectiq.knowledge.repository.SectionRecord;
+import io.github.lvdaxianer.projectiq.knowledge.repository.RelationRecord;
 import io.github.lvdaxianer.projectiq.knowledge.repository.VectorIndexJobRecord;
 import javax.sql.DataSource;
 import java.io.IOException;
@@ -319,6 +320,81 @@ public final class SqliteKnowledgeStore implements KnowledgeStore {
             statement.setLong(4, jobId);
             statement.executeUpdate();
         }
+    }
+
+    /** 按章节 ID 查询当前章节。 */
+    @Override
+    public Optional<SectionRecord> findSectionById(String sectionId) throws SQLException {
+        String sql = "SELECT section_id, document_id, heading_path_json, summary, content, source_start_line, "
+                + "source_end_line FROM sections WHERE section_id = ? LIMIT 1";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sectionId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? Optional.of(new SectionRowMapper().mapRow(resultSet, 1)) : Optional.empty();
+            }
+        }
+    }
+
+    /** 按文档 ID 查询当前文档。 */
+    @Override
+    public Optional<DocumentRecord> findDocumentById(String documentId) throws SQLException {
+        String sql = "SELECT document_id, source_key, title, content_hash, updated_at FROM documents "
+                + "WHERE document_id = ? LIMIT 1";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, documentId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? Optional.of(new DocumentRowMapper().mapRow(resultSet, 1)) : Optional.empty();
+            }
+        }
+    }
+
+    /** 按概念 ID 查询出边关系。 */
+    @Override
+    public List<RelationRecord> findRelationsFromConcept(String conceptId) throws SQLException {
+        String sql = "SELECT relation_id, from_concept_id, relation_type, to_concept_id FROM relations "
+                + "WHERE from_concept_id = ? ORDER BY relation_id LIMIT 1000";
+        List<RelationRecord> relations = new ArrayList<>();
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, conceptId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    relations.add(new RelationRecord(resultSet.getLong(1), resultSet.getString(2),
+                            resultSet.getString(3), resultSet.getString(4)));
+                }
+            }
+        }
+        return relations;
+    }
+
+    /** 按章节查询关联概念 ID。 */
+    @Override
+    public List<String> findConceptIdsBySectionId(String sectionId) throws SQLException {
+        String sql = "SELECT concept_id FROM section_concepts WHERE section_id = ? ORDER BY concept_id LIMIT 1000";
+        List<String> conceptIds = new ArrayList<>();
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sectionId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) conceptIds.add(resultSet.getString(1));
+            }
+        }
+        return conceptIds;
+    }
+
+    /** 按概念查询当前章节。 */
+    @Override
+    public List<SectionRecord> findSectionsByConceptId(String conceptId) throws SQLException {
+        String sql = "SELECT s.section_id, s.document_id, s.heading_path_json, s.summary, s.content, "
+                + "s.source_start_line, s.source_end_line FROM sections s JOIN section_concepts sc "
+                + "ON sc.section_id = s.section_id WHERE sc.concept_id = ? ORDER BY s.section_id LIMIT 1000";
+        List<SectionRecord> sections = new ArrayList<>();
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, conceptId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                SectionRowMapper mapper = new SectionRowMapper();
+                while (resultSet.next()) sections.add(mapper.mapRow(resultSet, sections.size() + 1));
+            }
+        }
+        return sections;
     }
     private void validateOperation(String operation) {
         if (!INDEX_OPERATIONS.contains(operation)) throw new IllegalArgumentException("不支持的索引操作: " + operation);
