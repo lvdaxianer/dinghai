@@ -63,6 +63,52 @@ class VectorIndexTest {
         verify(store).updateVectorJobStatus(1, "succeeded", null);
     }
 
+    /**
+     * 前次失败的任务在依赖恢复后必须能够再次执行并成功完成。
+     *
+     * @throws Exception 索引执行失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Test
+    void runnerRetriesFailedJobsAfterTheDependencyRecovers() throws Exception {
+        KnowledgeStore store = mock(KnowledgeStore.class);
+        VectorIndex index = new InMemoryVectorIndex();
+        VectorIndexJobRecord failedJob = new VectorIndexJobRecord(1, "team.md", "upsert", "failed", 1, "timeout");
+        when(store.findPendingVectorJobs(10)).thenReturn(List.of(failedJob));
+        when(store.findDocumentBySourceKey("team.md")).thenReturn(Optional.of(
+                new DocumentRecord("doc", "team.md", "团队", "sha256:abc", Instant.now())));
+        when(store.findSectionsBySourceKey("team.md")).thenReturn(List.of(
+                new SectionRecord("section", "doc", "[]", "摘要", "邀请成员", 1, 1)));
+
+        IndexJobRunner.ExecutionResult result = new IndexJobRunner(store,
+                new DeterministicEmbeddingClient(), index).executePending(10);
+
+        assertThat(result).isEqualTo(new IndexJobRunner.ExecutionResult(1, 0));
+        verify(store).recoverProcessingVectorJobs();
+        verify(store).updateVectorJobStatus(1, "processing", null);
+        verify(store).updateVectorJobStatus(1, "succeeded", null);
+    }
+
+    /**
+     * 同一 runner 仅在首次批次前回收异常中断遗留的 processing 状态。
+     *
+     * @throws Exception 索引执行失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Test
+    void runnerRecoversInterruptedJobsOnlyBeforeItsFirstBatch() throws Exception {
+        KnowledgeStore store = mock(KnowledgeStore.class);
+        when(store.findPendingVectorJobs(10)).thenReturn(List.of());
+        IndexJobRunner runner = new IndexJobRunner(store, new DeterministicEmbeddingClient(), new InMemoryVectorIndex());
+
+        runner.executePending(10);
+        runner.executePending(10);
+
+        verify(store).recoverProcessingVectorJobs();
+    }
+
     @Test
     void qdrantAdapterMapsSearchPayload() throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);

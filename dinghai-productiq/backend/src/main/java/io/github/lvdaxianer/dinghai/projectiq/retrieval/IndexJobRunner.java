@@ -23,6 +23,7 @@ public final class IndexJobRunner {
     private final KnowledgeStore store;
     private final EmbeddingClient embeddingClient;
     private final VectorIndex vectorIndex;
+    private boolean processingJobsRecovered;
 
     /** 创建索引任务执行器。 */
     public IndexJobRunner(KnowledgeStore store, EmbeddingClient embeddingClient, VectorIndex vectorIndex) {
@@ -31,8 +32,17 @@ public final class IndexJobRunner {
         this.vectorIndex = vectorIndex;
     }
 
-    /** 执行一批待处理任务，并返回成功和失败数量。 */
+    /**
+     * 执行一批待处理任务，并返回成功和失败数量。
+     *
+     * @param limit 最大处理任务数
+     * @return 执行汇总结果
+     * @throws SQLException SQLite 操作失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
     public ExecutionResult executePending(int limit) throws SQLException {
+        recoverInterruptedJobs();
         int succeeded = 0;
         int failed = 0;
         for (VectorIndexJobRecord job : store.findPendingVectorJobs(limit)) {
@@ -43,6 +53,20 @@ public final class IndexJobRunner {
             }
         }
         return new ExecutionResult(succeeded, failed);
+    }
+
+    /**
+     * 仅在 runner 首次执行前回收上次进程中断遗留的任务。
+     *
+     * @throws SQLException SQLite 更新失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    private synchronized void recoverInterruptedJobs() throws SQLException {
+        if (!processingJobsRecovered) {
+            store.recoverProcessingVectorJobs();
+            processingJobsRecovered = true;
+        }
     }
 
     /** 执行一个任务并把失败记录回 SQLite。 */

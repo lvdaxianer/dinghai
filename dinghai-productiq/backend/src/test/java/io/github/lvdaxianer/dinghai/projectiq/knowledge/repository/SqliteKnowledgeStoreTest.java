@@ -110,6 +110,29 @@ class SqliteKnowledgeStoreTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    /**
+     * 未完成、执行中和失败任务均应阻止查询使用可能过期的向量。
+     *
+     * @throws Exception SQLite 操作失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-16
+     */
+    @Test
+    void reportsEveryIncompleteVectorJobState() throws Exception {
+        SqliteKnowledgeStore store = new SqliteKnowledgeStore(dataSource());
+        store.enqueueVectorJob("team.md", "delete");
+
+        assertThat(store.hasIncompleteVectorJobs()).isTrue();
+        store.updateVectorJobStatus(store.findPendingVectorJobs(1).getFirst().jobId(), "processing", null);
+        assertThat(store.hasIncompleteVectorJobs()).isTrue();
+        store.recoverProcessingVectorJobs();
+        assertThat(store.findPendingVectorJobs(1)).singleElement().extracting(VectorIndexJobRecord::status)
+                .isEqualTo("failed");
+        assertThat(store.hasIncompleteVectorJobs()).isTrue();
+        store.updateVectorJobStatus(store.findPendingVectorJobs(1).getFirst().jobId(), "succeeded", null);
+        assertThat(store.hasIncompleteVectorJobs()).isFalse();
+    }
+
     private static SQLiteDataSource dataSource() {
         SQLiteDataSource dataSource = new SQLiteDataSource();
         dataSource.setUrl("jdbc:sqlite:" + tempDb());
