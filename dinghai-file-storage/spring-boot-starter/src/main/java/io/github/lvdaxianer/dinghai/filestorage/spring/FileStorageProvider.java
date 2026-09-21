@@ -14,5 +14,7 @@ public enum FileStorageProvider {
     /** RustFS 对象存储后端。 */
     RUSTFS,
     /** 阿里云 OSS 对象存储后端。 */
-    ALIYUN_OSS
+    ALIYUN_OSS,
+    /** 华为云 OBS 对象存储后端。 */
+    HUAWEICLOUD_OBS
 }
