@@ -1,4 +1,49 @@
-:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #e2e8f0; background: #08111f; }
+:root {
+  --dh-bg: #030712;
+  --dh-surface: #0b1221;
+  --dh-surface-2: #111b2e;
+  --dh-border: rgba(148, 163, 184, 0.12);
+  --dh-border-strong: rgba(148, 163, 184, 0.2);
+  --dh-text: #f1f5f9;
+  --dh-text-secondary: #94a3b8;
+  --dh-text-muted: #64748b;
+  --dh-accent: #38bdf8;
+  --dh-accent-glow: rgba(56, 189, 248, 0.28);
+  --dh-success: #22c55e;
+  --dh-success-soft: rgba(34, 197, 94, 0.12);
+  --dh-warning: #f59e0b;
+  --dh-warning-soft: rgba(245, 158, 11, 0.12);
+  --dh-danger: #f87171;
+  --dh-danger-soft: rgba(248, 113, 113, 0.12);
+  --dh-purple: #a78bfa;
+  --dh-radius-sm: 8px;
+  --dh-radius: 14px;
+  --dh-radius-lg: 20px;
+  --dh-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 1px var(--dh-border);
+  --dh-shadow-card: 0 4px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --dh-transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--dh-text);
+  background: var(--dh-bg);
+}
+
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(56, 189, 248, 0.08), transparent),
+              radial-gradient(ellipse 60% 40% at 80% 100%, rgba(167, 139, 250, 0.06), transparent),
+              var(--dh-bg);
+}
+
 button, input, select { font: inherit; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--dh-border-strong); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dh-text-muted); }
