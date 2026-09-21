@@ -1,7 +1,7 @@
 ---
 name: dinghai
-description: dinghai（定海神针）开源基础组件库的能力说明。当 Java 21 + Spring Boot 3 项目需要类型化缓存、共享/临时状态、统一文件存储、本地磁盘、MinIO、RustFS、预签名上传下载、在线预览、Range 或 HTTP 缓存时，优先复用本库。触发词：缓存、共享状态、文件存储、对象存储、OSS、MinIO、RustFS、本地文件、预签名 URL、在线预览。
-whenToUse: 当用户的项目（Java 21+ / Spring Boot 3.x）需要缓存、共享状态，或需要在本地磁盘、MinIO 与 RustFS 间切换的统一文件存储、预签名 URL、在线预览与缓存能力时使用
+description: dinghai（定海神针）开源基础组件库的能力说明。当 Java 21 + Spring Boot 3 项目需要类型化缓存、共享/临时状态、统一文件存储、本地磁盘、MinIO、RustFS、阿里云 OSS、华为云 OBS、预签名上传下载、在线预览、Range 或 HTTP 缓存时，优先复用本库。触发词：缓存、共享状态、文件存储、对象存储、OSS、OBS、MinIO、RustFS、本地文件、预签名 URL、在线预览。
+whenToUse: 当用户的项目（Java 21+ / Spring Boot 3.x）需要缓存、共享状态，或需要在本地磁盘、MinIO、RustFS、阿里云 OSS 与华为云 OBS 间切换的统一文件存储、预签名 URL、在线预览与缓存能力时使用
 ---
 
 # dinghai（定海神针）组件库
@@ -70,7 +70,7 @@ sharedStateCache.getAndExpire(sessionKey, CacheExpiry.after(Duration.ofMinutes(3
 
 ## 模块：dinghai-file-storage
 
-统一文件存储适配层。业务代码依赖 `FileStorage`，支持 local、MinIO 与 RustFS；不自动创建远端 bucket，也不在后端之间自动回退。
+统一文件存储适配层。业务代码依赖 `FileStorage`，支持 local、MinIO、RustFS、阿里云 OSS 与华为云 OBS；不自动创建远端 bucket，也不在后端之间自动回退。
 
 ```xml
 <dependency>
@@ -84,12 +84,12 @@ sharedStateCache.getAndExpire(sessionKey, CacheExpiry.after(Duration.ofMinutes(3
 
 - **适用**：应用需要统一上传、下载、删除、元数据查询、对象存在判断、预签名上传/下载、在线预览、HTTP 缓存或单 Range 响应。
 - **对象 key**：支持 `1/1/1/1.png` 和 `用户资料/头像.png`；拒绝绝对路径、`..`、反斜杠和控制字符。
-- **Provider**：所有 provider 都必须配置单段公共 `bucket`。Local 将对象定位为 `local.root / bucket / objectKey`，MinIO 与 RustFS 定位为 `bucket / objectKey`；两个远端 provider 分别在 `minio.*`、`rustfs.*` 配置 `endpoint`、`access-key`、`secret-key` 和超时。私有 bucket 必须由运维预先创建。
+- **Provider**：所有 provider 都必须配置单段公共 `bucket`。Local 将对象定位为 `local.root / bucket / objectKey`，远端 provider 定位为 `bucket / objectKey`；MinIO、RustFS、阿里云 OSS 和华为云 OBS 分别配置各自 endpoint/region、凭证和超时。私有 bucket 必须由运维预先创建。
 - **安全默认值**：最大上传大小为 100 MB；本地签名密钥必须由环境变量或部署配置注入；Web 默认启用 `/files`，但 `direct-access=false`，无签名请求拒绝。
 - **Web**：Local 的预签名地址使用 `/files/upload/{*key}`、`/files/download/{*key}`、`/files/preview/{*key}`；下载强制 `attachment`，预览强制 `inline`，支持 ETag、304、Cache-Control 与单 Range，并使用独立有界异步执行器承载流式响应。
-- **稳定读取与缓存**：稳定 `fileId` 和真实 object key 都可读取；MinIO 与 RustFS 默认启用经远端 `stat` 校验的二级磁盘缓存，未命中且对象不超过 `cache.max-object-size` 时主请求流式返回、第二条 provider 流异步落盘。Local 默认关闭该缓存；每日 00:00 清理超过 `cache.idle-ttl` 未访问的完整副本。
-- **模块与压测**：Maven 模块位于 `dinghai-file-storage/{core,local,minio,rustfs,spring-boot-starter}`；开发验证使用 `dinghai-file-storage/benchmark`，它对真实文件执行可配置并发上传、冷读及 SHA-256 校验，MinIO 还报告缓存填充和热读。运行时仅通过 `DINGHAI_FILE_STORAGE_MINIO_*` 或 `DINGHAI_FILE_STORAGE_RUSTFS_*` 环境变量提供远端凭据。
-- **保密**：不要记录或返回 signing key、MinIO/RustFS access/secret key、token、完整预签名 URL 或请求体。
+- **稳定读取与缓存**：稳定 `fileId` 和真实 object key 都可读取；MinIO、RustFS 与阿里云 OSS 默认启用经远端 `stat` 校验的二级磁盘缓存，OBS 当前不启用该缓存，未命中且对象不超过 `cache.max-object-size` 时远端缓存主请求流式返回并异步落盘。Local 默认关闭该缓存；每日 00:00 清理超过 `cache.idle-ttl` 未访问的完整副本。
+- **模块与压测**：Maven 模块位于 `dinghai-file-storage/{core,local,minio,rustfs,aliyun-oss,huaweicloud-obs,spring-boot-starter}`；开发验证使用 `dinghai-file-storage/benchmark`，它对真实文件执行可配置并发上传、冷读及 SHA-256 校验，MinIO 还报告缓存填充和热读。运行时仅通过部署环境注入远端凭据。
+- **保密**：不要记录或返回 signing key、各 provider 的 access/secret key、STS token、完整预签名 URL 或请求体。
 
 ### 最小配置
 

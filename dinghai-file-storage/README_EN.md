@@ -2,7 +2,7 @@
 
 English | [中文](README.md)
 
-A unified file storage adapter layer: business code depends only on the `FileStorage` contract and can switch between local disk, MinIO, RustFS, and Alibaba Cloud OSS backends. Local supports object keys such as `1/1/1/1.png` and CJK directory names, and avoids loading whole files into memory through temporary files and streaming I/O.
+A unified file storage adapter layer: business code depends only on the `FileStorage` contract and can switch between local disk, MinIO, RustFS, Alibaba Cloud OSS, and Huawei Cloud OBS backends. Local supports object keys such as `1/1/1/1.png` and CJK directory names, and avoids loading whole files into memory through temporary files and streaming I/O.
 
 Requirements: Java 21+, Spring Boot 3.x.
 
@@ -15,6 +15,7 @@ Requirements: Java 21+, Spring Boot 3.x.
 | `dinghai-file-storage-minio` | Fixed-bucket MinIO adapter with native presign capability |
 | `dinghai-file-storage-rustfs` | Fixed-bucket RustFS S3-compatible adapter with native presign capability |
 | `dinghai-file-storage-aliyun-oss` | Fixed-bucket Alibaba Cloud OSS V2 SDK adapter with native presign capability |
+| `dinghai-file-storage-huaweicloud-obs` | Fixed-bucket Huawei Cloud OBS adapter with native presigning and multipart support |
 | `dinghai-file-storage-spring-boot-starter` | Auto-wires file storage by provider and provides local web presign endpoints |
 
 The `benchmark` module is for development verification only and is not published (see "Benchmark" at the end).
@@ -56,7 +57,7 @@ The configuration prefix is `dinghai.file-storage`. All validation is implemente
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `provider` | `local` / `minio` / `rustfs` / `aliyun-oss` | none (required) | Storage backend, one of four choices. Missing, illegal, or legacy `oss` values fail startup directly; **no automatic detection, fallback, or compatibility alias** |
+| `provider` | `local` / `minio` / `rustfs` / `aliyun-oss` / `huaweicloud-obs` | none (required) | Storage backend, one of five choices. Missing, illegal, or legacy `oss` values fail startup directly; **no automatic detection, fallback, or compatibility alias** |
 | `bucket` | `String` | none (required) | Logical bucket name shared by all backends. Must not contain `.`, `..`, `/`, `\`, or control characters; under Local it maps to a single-level directory `root/<bucket>/` |
 | `storage-alias` | `String` | none (required) | Logical storage alias that does not change with the physical backend; it participates in stable file ID computation and cache file name digests. Keep the alias unchanged when migrating from Local to MinIO, RustFS, or Alibaba Cloud OSS so that already-issued stable IDs remain valid |
 
@@ -103,11 +104,27 @@ RustFS uses its S3-compatible API. Its bucket should remain private and must be 
 
 Alibaba Cloud OSS uses `com.aliyun:alibabacloud-oss-v2:0.5.1`. Its bucket should remain private and must be pre-created by operations. The adapter **does not create buckets or change ACL, CORS, or bucket policy**; uploads use native `PUT` presigning and downloads use native `GET` presigning. AccessKey values are read only from `OSS_ACCESS_KEY_ID` and `OSS_ACCESS_KEY_SECRET`; **STS temporary credentials are not supported**.
 
+### huaweicloud-obs (Huawei Cloud OBS Backend)
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `huaweicloud-obs.endpoint` | `String` | none (required) | OBS service endpoint, for example `https://obs.cn-north-4.myhuaweicloud.com` |
+| `huaweicloud-obs.region` | `String` | none (required) | OBS region, for example `cn-north-4` |
+| `huaweicloud-obs.credential-mode` | `static` / `sts` / `provider` | `static` | Credential source; `provider` requires an application `IObsCredentialsProvider` Bean |
+| `huaweicloud-obs.access-key` | `String` | none (required for static/sts) | AK, preferably injected by the deployment environment |
+| `huaweicloud-obs.secret-key` | `String` | none (required for static/sts) | SK, preferably injected by the deployment environment |
+| `huaweicloud-obs.security-token` | `String` | none (required for sts) | STS security token; used only with `credential-mode=sts` |
+| `huaweicloud-obs.connect-timeout` | `Duration` | `10s` | SDK connect timeout; must be positive |
+| `huaweicloud-obs.read-timeout` | `Duration` | `10s` | SDK read timeout; must be positive |
+| `huaweicloud-obs.write-timeout` | `Duration` | `10s` | SDK write timeout; must be positive |
+
+OBS uses `com.huaweicloud:esdk-obs-java:3.26.6`, not Huawei Cloud SDK Bundle. The bucket must be pre-created by operations; the adapter does not create or modify the bucket, ACL, CORS, lifecycle, or policy. Object access uses native `PUT`/`GET` presigning, and multipart uses OBS initiate, part upload, listing, completion, and abort APIs for large-file direct upload and resume.
+
 ### security (Security)
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `security.signing-key` | `String` | none (required only when provider=local) | HMAC-SHA-256 key for local presigned URLs, used directly as UTF-8 bytes; missing value fails startup. Not used by the MinIO, RustFS, or Alibaba Cloud OSS backends, which use native presigning |
+| `security.signing-key` | `String` | none (required only when provider=local) | HMAC-SHA-256 key for local presigned URLs, used directly as UTF-8 bytes; missing value fails startup. Remote providers do not use it because they use native presigning |
 | `security.stable-id-key` | `String` | none (**required for all backends**) | Key material for stable file IDs; at least 32 bytes after UTF-8 encoding, derived via SHA-512 into a 64-byte AES-SIV key. Missing or too-short values fail startup. Rotating this key invalidates all previously issued stable IDs |
 | `security.maximum-presign-expiry` | `Duration` | `1h` | Maximum validity period of local presigned URLs; enforced at both signing and verification time; must be positive |
 
@@ -128,7 +145,7 @@ Alibaba Cloud OSS uses `com.aliyun:alibabacloud-oss-v2:0.5.1`. Its bucket should
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `cache.enabled` | `boolean` | see description | Enabled by default for MinIO, RustFS, and Alibaba Cloud OSS; set it to `false` to disable. Local does not use a second-level cache, and explicit `true` fails startup (remove the old setting) |
+| `cache.enabled` | `boolean` | see description | Enabled by default for MinIO, RustFS, and Alibaba Cloud OSS; OBS currently does not use this application-level cache. Set it to `false` to disable existing remote caches. Local does not use a second-level cache, and explicit `true` fails startup (remove the old setting) |
 | `cache.root` | `Path` | `${java.io.tmpdir}/dinghai-file-storage-cache` | Cache root directory; null or creation failure fails startup. **Production deployments should explicitly configure a persistent directory** — the default location sits under the system temp directory and may be cleaned up by the OS |
 | `cache.max-object-size` | `long` (bytes) | `50MB` | Objects larger than this are not asynchronously persisted to disk; read requests pass through to the remote directly |
 | `cache.idle-ttl` | `Duration` | `7d` | How long an idle replica is retained, judged by the last-access time recorded in each replica's sidecar file |
@@ -256,7 +273,7 @@ A typical creation response contains the following fields (`uploadId` is opaque)
 ```
 
 - **Local**: optionally call `POST /multipart/opaque-upload-id/parts/1/presign` to obtain the application-declared `PUT` method, expiry, and required headers, then stream the part to `PUT /files/multipart/opaque-upload-id/parts/1`. Every part must have exactly its expected length. The application limits these writes with `multipart.max-concurrent-uploads`; exhaustion returns `429` with `Retry-After: 1` before the body is read.
-- **MinIO / RustFS / Alibaba Cloud OSS**: after calling the same `presign` endpoint, the client must perform the provider-native `PUT` directly using the returned `url`, `method`, and `requiredHeaders`; part content does not pass through the application. Never log, cache, or commit a complete presigned URL.
+- **MinIO / RustFS / Alibaba Cloud OSS / Huawei Cloud OBS**: after calling the same `presign` endpoint, the client must perform the provider-native `PUT` directly using the returned `url`, `method`, and `requiredHeaders`; part content does not pass through the application. Never log, cache, or commit a complete presigned URL.
 - For a failed part or network interruption, upload the **same partNumber** again; the later upload replaces the earlier one. Before resuming, call `GET /multipart/{uploadId}/parts` and build completion only from its `partNumber`, `size`, and `etag` values. Do not infer state from a local client cache.
 
 Completion must contain every provider-confirmed part. `idempotencyKey` is optional and can be used for client-side call tracking:
@@ -406,7 +423,7 @@ Preview/download supports `Content-Type`, ETag, Last-Modified, Cache-Control, Ex
 ## Presigning and Access Authorization
 
 - **Local backend**: the component implements its own HMAC-SHA-256 presigning. Signed URLs carry query parameters such as `expires` (Unix seconds) and `signature` (Base64URL); upload signatures can additionally bind `contentType`, `maxSize`, and `cacheControl`, while download signatures bind the `inline` or `attachment` response mode. The validity period is limited by `security.maximum-presign-expiry`.
-- **MinIO / RustFS backends**: use each S3-compatible service's native presigning (PostPolicy for uploads, `getPresignedObjectUrl` for downloads). Local signature verification is only supported by the Local adapter; presenting a local-style signed URL to a non-Local backend throws `INVALID_PRESIGN`.
+- **MinIO / RustFS / Alibaba Cloud OSS / Huawei Cloud OBS backends**: use each service's native presigning. Local signature verification is only supported by the Local adapter; presenting a local-style signed URL to a non-Local backend throws `INVALID_PRESIGN`.
 - **Alibaba Cloud OSS backend**: uses V2 native presigning (`PUT` uploads with `requiredHeaders` and `GET` downloads). It supports only fixed AccessKey values injected through `OSS_ACCESS_KEY_ID` and `OSS_ACCESS_KEY_SECRET`, not STS temporary credentials. Local signature verification is only supported by the Local adapter; presenting a local-style signed URL to Alibaba Cloud OSS throws `INVALID_PRESIGN`.
 - **Direct upload**: unsigned uploads are denied by default; they require both `web.direct-access=true` and a host-provided `FileStorageAccessPolicy` Bean that allows UPLOAD. Web downloads, previews, and reads do not require component credentials, but remain protected by read concurrency limits.
 - All Beans carry `@ConditionalOnMissingBean`, so the host can replace any default implementation (including `FileStorage` itself).
@@ -428,13 +445,13 @@ The component does not derive a key from IP addresses, JWTs, cookies, forwarded 
 
 A stable ID is the persistent read address of a private object (the `/files/read/v1/{id}` family). The ID is produced by deterministic authenticated encryption of the length-prefixed `storage-alias + object key` using AES-SIV (Tink), output as a Base64URL string with a `v1.` prefix. Therefore:
 
-- The ID of the same object stays unchanged after migration across Local / MinIO / RustFS / Alibaba Cloud OSS (provided `storage-alias` is unchanged);
+- The ID of the same object stays unchanged after migration across Local / MinIO / RustFS / Alibaba Cloud OSS / Huawei Cloud OBS (provided `storage-alias` is unchanged);
 - Rotating `security.stable-id-key` invalidates all previously issued IDs;
 - This route **does not perform component-internal user authentication** — the embedding application is responsible for access control in front of the browser.
 
 ## Read Cache Behavior
 
-MinIO, RustFS, and Alibaba Cloud OSS enable by default a two-level disk read cache validated against remote `stat`; Local creates neither a second-level cache nor a cleaner:
+MinIO, RustFS, and Alibaba Cloud OSS enable by default a two-level disk read cache validated against remote `stat`; Huawei Cloud OBS currently creates no second-level cache; Local creates neither a second-level cache nor a cleaner:
 
 1. Every read first `stat`s the remote metadata; a local replica only hits when its ETag / length / modification time all match the remote, and on hit the last-access time is refreshed;
 2. On a miss, when the object does not exceed `cache.max-object-size`, the current request streams directly from the remote while a second stream asynchronously persists to disk (temporary file + atomic move to publish);
@@ -521,3 +538,5 @@ export OSS_ACCESS_KEY_ID=CHANGE_ME
 export OSS_ACCESS_KEY_SECRET=CHANGE_ME
 mvn -pl aliyun-oss -am -Dtest=AliyunOssLifecycleIntegrationTest test
 ```
+
+Huawei Cloud OBS defaults to unit and auto-configuration tests without external network access. For real acceptance, use a dedicated test account, a pre-created bucket, and temporary credentials in a controlled integration test; never log or commit AK/SK, security tokens, or complete presigned URLs.

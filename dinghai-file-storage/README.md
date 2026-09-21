@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 中文
 
-统一文件存储适配层，业务代码只依赖 `FileStorage` 契约即可切换本地磁盘、MinIO、RustFS 与阿里云 OSS 后端。Local 支持 `1/1/1/1.png`、中文目录等对象 key，并通过临时文件和流式读写避免把文件整体载入内存。
+统一文件存储适配层，业务代码只依赖 `FileStorage` 契约即可切换本地磁盘、MinIO、RustFS、阿里云 OSS 与华为云 OBS 后端。Local 支持 `1/1/1/1.png`、中文目录等对象 key，并通过临时文件和流式读写避免把文件整体载入内存。
 
 要求：Java 21+，Spring Boot 3.x。
 
@@ -15,6 +15,7 @@
 | `dinghai-file-storage-minio` | 固定 bucket 的 MinIO 适配器与原生预签名能力 |
 | `dinghai-file-storage-rustfs` | 固定 bucket 的 RustFS S3 兼容适配器与原生预签名能力 |
 | `dinghai-file-storage-aliyun-oss` | 固定 bucket 的阿里云 OSS V2 SDK 适配器与原生预签名能力 |
+| `dinghai-file-storage-huaweicloud-obs` | 固定 bucket 的华为云 OBS 专用 SDK 适配器、原生预签名与 multipart 能力 |
 | `dinghai-file-storage-spring-boot-starter` | 按 provider 自动装配文件存储，并提供本地 Web 预签名端点 |
 
 `benchmark` 模块仅用于开发验证，不发布（见文末「基准测试」）。
@@ -56,7 +57,7 @@ dinghai:
 
 | 配置键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `provider` | `local` / `minio` / `rustfs` / `aliyun-oss` | 无（必填） | 存储后端，四选一。缺失、非法或旧值 `oss` 直接启动失败，**不做任何自动探测、回退或兼容别名** |
+| `provider` | `local` / `minio` / `rustfs` / `aliyun-oss` / `huaweicloud-obs` | 无（必填） | 存储后端，五选一。缺失、非法或旧值 `oss` 直接启动失败，**不做任何自动探测、回退或兼容别名** |
 | `bucket` | `String` | 无（必填） | 所有后端共用的逻辑桶名。不允许 `.`、`..`、`/`、`\` 和控制字符；Local 下映射为 `root/<bucket>/` 单层目录 |
 | `storage-alias` | `String` | 无（必填） | 不随物理后端变动的逻辑存储别名，参与稳定文件 ID 计算和缓存文件名摘要。从 Local 迁移到 MinIO、RustFS 或阿里云 OSS 时保持别名不变，已签发的稳定 ID 才能继续有效 |
 
@@ -103,11 +104,27 @@ RustFS 使用 S3 兼容 API；其 bucket 应保持私有并由运维预先创建
 
 阿里云 OSS 使用 `com.aliyun:alibabacloud-oss-v2:0.5.1`；bucket 应保持私有并由运维预先创建。适配器**不会创建 bucket，也不会修改 ACL、CORS 或 bucket policy**；上传使用原生 `PUT` 预签名，下载使用原生 `GET` 预签名。AccessKey 仅从 `OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` 环境变量读取；本次**不支持 STS 临时凭证**。
 
+### huaweicloud-obs（华为云 OBS 后端）
+
+| 配置键 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `huaweicloud-obs.endpoint` | `String` | 无（必填） | OBS 服务 endpoint，例如 `https://obs.cn-north-4.myhuaweicloud.com` |
+| `huaweicloud-obs.region` | `String` | 无（必填） | OBS 地域，例如 `cn-north-4` |
+| `huaweicloud-obs.credential-mode` | `static` / `sts` / `provider` | `static` | 凭证来源；`provider` 要求宿主提供 `IObsCredentialsProvider` Bean |
+| `huaweicloud-obs.access-key` | `String` | 无（static/sts 必填） | AK，建议由部署环境注入 |
+| `huaweicloud-obs.secret-key` | `String` | 无（static/sts 必填） | SK，建议由部署环境注入 |
+| `huaweicloud-obs.security-token` | `String` | 无（sts 必填） | STS Security Token；仅 `credential-mode=sts` 使用 |
+| `huaweicloud-obs.connect-timeout` | `Duration` | `10s` | SDK 连接超时，必须为正 |
+| `huaweicloud-obs.read-timeout` | `Duration` | `10s` | SDK 读取超时，必须为正 |
+| `huaweicloud-obs.write-timeout` | `Duration` | `10s` | SDK 写入超时，必须为正 |
+
+OBS 使用 `com.huaweicloud:esdk-obs-java:3.26.6`，不使用 Huawei Cloud SDK Bundle。bucket 必须由运维预先创建；适配器不会创建或修改 bucket、ACL、CORS、生命周期和 policy。普通上传/下载使用原生 `PUT`/`GET` 预签名，multipart 使用 OBS 原生 initiate、分片上传、列举、complete、abort 生命周期，适合大文件直传和断点续传。
+
 ### security（安全）
 
 | 配置键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `security.signing-key` | `String` | 无（仅 provider=local 时必填） | 本地预签名 URL 的 HMAC-SHA-256 密钥，按 UTF-8 字节直接使用，缺失时启动失败。MinIO、RustFS 与阿里云 OSS 后端不使用（走原生预签名） |
+| `security.signing-key` | `String` | 无（仅 provider=local 时必填） | 本地预签名 URL 的 HMAC-SHA-256 密钥，按 UTF-8 字节直接使用，缺失时启动失败。远端 provider 不使用（走原生预签名） |
 | `security.stable-id-key` | `String` | 无（**所有后端必填**） | 稳定文件 ID 的密钥材料，UTF-8 编码后至少 32 字节；经 SHA-512 派生为 64 字节 AES-SIV 密钥。缺失或过短时启动失败。轮换该密钥会使全部旧稳定 ID 失效 |
 | `security.maximum-presign-expiry` | `Duration` | `1h` | 本地预签名 URL 的最大有效期，签发与校验都强制执行，必须为正 |
 
@@ -128,7 +145,7 @@ RustFS 使用 S3 兼容 API；其 bucket 应保持私有并由运维预先创建
 
 | 配置键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `cache.enabled` | `boolean` | 见说明 | MinIO、RustFS 与阿里云 OSS 后端缺省开启，显式 `false` 关闭；Local 后端不使用二级缓存，显式 `true` 会在启动时失败（请删除旧配置） |
+| `cache.enabled` | `boolean` | 见说明 | MinIO、RustFS 与阿里云 OSS 后端缺省开启；OBS 当前不启用该应用层二级缓存；显式 `false` 可关闭已有远端缓存；Local 后端不使用二级缓存，显式 `true` 会在启动时失败（请删除旧配置） |
 | `cache.root` | `Path` | `${java.io.tmpdir}/dinghai-file-storage-cache` | 缓存根目录，为 null 或创建失败时启动失败。**生产环境应显式配置持久目录**，默认位置在系统临时目录下，可能被操作系统清理 |
 | `cache.max-object-size` | `long`（字节） | `50MB` | 超过该大小的对象不做异步落盘，读请求直接直通远端 |
 | `cache.idle-ttl` | `Duration` | `7d` | 空闲副本保留时长，按每个副本 sidecar 文件记录的最近访问时间判定 |
@@ -256,7 +273,7 @@ curl --request POST https://app.example/files/multipart \
 ```
 
 - **Local**：可先调用 `POST /multipart/opaque-upload-id/parts/1/presign` 获取由应用声明的 `PUT` 方法、过期时间与必需头，再向 `PUT /files/multipart/opaque-upload-id/parts/1` 流式发送该片；每片必须恰好等于期望长度。应用以 `multipart.max-concurrent-uploads` 限制此类写入，额度耗尽时在读取请求体前返回 `429` 和 `Retry-After: 1`。
-- **MinIO / RustFS / 阿里云 OSS**：调用同一 `presign` 端点后，客户端必须按响应的 `url`、`method`、`requiredHeaders` 直接执行 provider 原生 `PUT`；分片内容不经过应用。不得记录、缓存或提交完整预签名 URL。
+- **MinIO / RustFS / 阿里云 OSS / 华为云 OBS**：调用同一 `presign` 端点后，客户端必须按响应的 `url`、`method`、`requiredHeaders` 直接执行 provider 原生 `PUT`；分片内容不经过应用。不得记录、缓存或提交完整预签名 URL。
 - 分片失败或网络中断时，可对**同一 partNumber** 重新上传，后一次会替换前一次。恢复前先 `GET /multipart/{uploadId}/parts`，仅按该清单中的 `partNumber`、`size`、`etag` 组装完成请求；不要猜测本地状态。
 
 完成请求必须提交服务端已确认的所有分片，`idempotencyKey` 可由客户端携带用于调用侧追踪：
@@ -378,7 +395,7 @@ console.log('上传完成', metadata.key.value, metadata.etag);
 
 - 分片失败时直接重试该 `partNumber` 即可（后一次覆盖前一次）。
 - 跨页面刷新断点续传：首次上传时在创建会话后把 `{ uploadId, partSize, partCount }` 存入 `localStorage`，下次以 `resume` 传入即可自动跳过已确认分片；以服务端 `GET /multipart/{uploadId}/parts` 清单为准，不要凭本地状态猜测。
-- 使用 MinIO / RustFS / 阿里云 OSS 时，分片由浏览器直传 provider，必须在 bucket 上配置 CORS：允许页面来源、`PUT` 方法和 `presign.requiredHeaders` 中出现的请求头，并将 `ETag` 加入暴露响应头（Expose-Headers），否则浏览器读不到 etag。
+- 使用 MinIO / RustFS / 阿里云 OSS / 华为云 OBS 时，分片由浏览器直传 provider，必须在 bucket 上配置 CORS：允许页面来源、`PUT` 方法和 `presign.requiredHeaders` 中出现的请求头，并将 `ETag` 加入暴露响应头（Expose-Headers），否则浏览器读不到 etag。
 - 任何一步返回 `429` 时按 `Retry-After` 提示等待后重试；`MULTIPART_EXPIRED`（410）说明会话已过期，需丢弃 `resume` 信息重新创建。
 
 迁移管理端点固定为 `POST /files/migration/export`、`POST /files/migration/import`（参数 `packageName`），不随 `web.path-prefix` 变化。
@@ -404,7 +421,7 @@ console.log('上传完成', metadata.key.value, metadata.etag);
 ## 预签名与访问授权
 
 - **Local 后端**：组件自实现的 HMAC-SHA-256 预签名。签名 URL 携带 `expires`（Unix 秒）、`signature`（Base64URL）等查询参数，上传签名还可绑定 `contentType`、`maxSize`、`cacheControl`；下载签名绑定 `inline` 或 `attachment` 响应模式。有效期受 `security.maximum-presign-expiry` 限制。
-- **MinIO / RustFS 后端**：使用各自 S3 兼容服务原生预签名（PostPolicy 上传、`getPresignedObjectUrl` 下载）。本地签名校验仅 Local 适配器支持，对非 Local 后端走本地签名 URL 会抛 `INVALID_PRESIGN`。
+- **MinIO / RustFS / 阿里云 OSS / 华为云 OBS 后端**：使用各自服务原生预签名。Local 签名校验仅 Local 适配器支持，对非 Local 后端走本地签名 URL 会抛 `INVALID_PRESIGN`。
 - **阿里云 OSS 后端**：使用 V2 原生预签名（带 `requiredHeaders` 的 `PUT` 上传、`GET` 预签名下载）；仅支持由 `OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` 注入的固定 AccessKey，不支持 STS 临时凭证。本地签名校验仅 Local 适配器支持，对阿里云 OSS 走本地签名 URL 会抛 `INVALID_PRESIGN`。
 - **直接上传**：无签名上传默认拒绝；必须同时满足 `web.direct-access=true` 且宿主提供 `FileStorageAccessPolicy` Bean 并对 UPLOAD 返回允许。Web 下载、预览和读取不要求组件凭证，但受读取并发限制保护。
 - 所有 Bean 均带 `@ConditionalOnMissingBean`，宿主可替换默认实现（包括 `FileStorage` 本身）。
@@ -426,13 +443,13 @@ WebTransferRateLimitKeyResolver webTransferRateLimitKeyResolver() {
 
 稳定 ID 是私有对象的持久读取地址（`/files/read/v1/{id}` 系列）。ID 由 AES-SIV（Tink）对长度前缀的 `storage-alias + object key` 做确定性认证加密得到，输出 `v1.` 前缀的 Base64URL 字符串。因此：
 
-- 同一对象跨 Local / MinIO / RustFS / 阿里云 OSS 迁移后 ID 不变（前提：`storage-alias` 不变）；
+- 同一对象跨 Local / MinIO / RustFS / 阿里云 OSS / 华为云 OBS 迁移后 ID 不变（前提：`storage-alias` 不变）；
 - 轮换 `security.stable-id-key` 会使全部旧 ID 失效；
 - 该路由**不执行组件内用户鉴权**，嵌入方负责浏览器前的权限控制。
 
 ## 读取缓存行为
 
-MinIO、RustFS 与阿里云 OSS 默认启用经远端 `stat` 校验的二级磁盘读取缓存；Local 不创建二级缓存或清理器：
+MinIO、RustFS 与阿里云 OSS 默认启用经远端 `stat` 校验的二级磁盘读取缓存；华为云 OBS 当前不创建二级缓存；Local 也不创建二级缓存或清理器：
 
 1. 每次读先 `stat` 远端元数据；本地副本的 ETag / 长度 / 修改时间与远端一致才命中，命中后刷新最近访问时间；
 2. 未命中且对象不超过 `cache.max-object-size` 时，当前请求直接流式读取远端，另开第二条流异步落盘（临时文件 + 原子移动发布）；
@@ -518,3 +535,5 @@ export OSS_ACCESS_KEY_ID=CHANGE_ME
 export OSS_ACCESS_KEY_SECRET=CHANGE_ME
 mvn -pl aliyun-oss -am -Dtest=AliyunOssLifecycleIntegrationTest test
 ```
+
+华为云 OBS 默认只执行无外部网络的单元和自动装配测试；需要真实验收时，应在专用测试账号、预创建 bucket 和临时凭证下增加受控集成测试，不要把 AK/SK、Security Token 或完整预签名 URL 写入日志或仓库。
