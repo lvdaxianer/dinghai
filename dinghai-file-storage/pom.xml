@@ -13,7 +13,7 @@
     <artifactId>dinghai-file-storage</artifactId>
     <packaging>pom</packaging>
     <name>dinghai-file-storage</name>
-    <description>统一文件存储适配层聚合模块（core / local / minio / spring-boot-starter / benchmark）</description>
+    <description>统一文件存储适配层聚合模块（core / local / minio / rustfs / aliyun-oss / huaweicloud-obs / spring-boot-starter / benchmark）</description>
 
     <modules>
         <module>core</module>
@@ -21,6 +21,7 @@
         <module>minio</module>
         <module>rustfs</module>
         <module>aliyun-oss</module>
+        <module>huaweicloud-obs</module>
         <module>spring-boot-starter</module>
         <module>benchmark</module>
     </modules>
