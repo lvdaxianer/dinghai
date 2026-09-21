@@ -4,7 +4,7 @@
 
 ## 2. Spring Boot integration
 
-- [ ] 2.1 [Task boundary: module-oriented `HuaweiObsStarterAgent`; owns `dinghai-file-storage/spring-boot-starter/**` and provider module dependency wiring; out of scope: OBS SDK adapter internals and documentation; dependency: task 1 merged into `main`; focused verification: `mvn -pl dinghai-file-storage/spring-boot-starter -am test`; broader verification: `mvn -pl dinghai-file-storage/spring-boot-starter -am verify`; handoff evidence: auto-configuration and invalid-configuration tests green, provider isolation verified. Direct main-agent execution is selected because starter properties, conditional beans, and existing provider tests share the same files.`
+- [x] 2.1 [Task boundary: module-oriented `HuaweiObsStarterAgent`; owns `dinghai-file-storage/spring-boot-starter/**` and provider module dependency wiring; out of scope: OBS SDK adapter internals and documentation; dependency: task 1 merged into `main`; focused verification: `mvn -pl dinghai-file-storage/spring-boot-starter -am test`; broader verification: `mvn -pl dinghai-file-storage/spring-boot-starter -am verify`; handoff evidence: auto-configuration and invalid-configuration tests green, provider isolation verified. Direct main-agent execution is selected because starter properties, conditional beans, and existing provider tests share the same files.`
 
 ## 3. Documentation and final verification
 

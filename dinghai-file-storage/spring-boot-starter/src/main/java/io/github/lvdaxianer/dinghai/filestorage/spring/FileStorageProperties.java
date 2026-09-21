@@ -1,6 +1,7 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.huaweicloudobs.HuaweiObsCredentialMode;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -32,6 +33,8 @@ public class FileStorageProperties {
     private final Rustfs rustfs = new Rustfs();
     /** 阿里云 OSS 后端配置。 */
     private final AliyunOss aliyunOss = new AliyunOss();
+    /** 华为云 OBS 后端配置。 */
+    private final HuaweiCloudObs huaweicloudObs = new HuaweiCloudObs();
     /** 上传策略配置。 */
     private final Upload upload = new Upload();
     /** 大文件分片上传配置。 */
@@ -153,6 +156,11 @@ public class FileStorageProperties {
      */
     public AliyunOss getAliyunOss() {
         return aliyunOss;
+    }
+
+    /** 获取华为云 OBS 后端配置。 */
+    public HuaweiCloudObs getHuaweicloudObs() {
+        return huaweicloudObs;
     }
 
     /**
@@ -519,6 +527,67 @@ public class FileStorageProperties {
         public void setWriteTimeout(Duration writeTimeout) {
             this.writeTimeout = writeTimeout;
         }
+    }
+
+    /** 华为云 OBS 后端属性，凭证可使用静态值、STS 或宿主 Provider。 */
+    public static class HuaweiCloudObs {
+        /** OBS 服务 endpoint。 */
+        private String endpoint;
+        /** OBS 地域标识。 */
+        private String region;
+        /** 凭证来源模式。 */
+        private HuaweiObsCredentialMode credentialMode = HuaweiObsCredentialMode.STATIC;
+        /** 访问密钥。 */
+        private String accessKey;
+        /** 私密访问密钥。 */
+        private String secretKey;
+        /** STS 安全令牌。 */
+        private String securityToken;
+        /** 连接超时。 */
+        private Duration connectTimeout = Duration.ofSeconds(10L);
+        /** 读取超时。 */
+        private Duration readTimeout = Duration.ofSeconds(10L);
+        /** 写入超时。 */
+        private Duration writeTimeout = Duration.ofSeconds(10L);
+
+        /** 获取 OBS endpoint。 */
+        public String getEndpoint() { return endpoint; }
+        /** 设置 OBS endpoint。 */
+        public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
+        /** 获取 OBS 地域。 */
+        public String getRegion() { return region; }
+        /** 设置 OBS 地域。 */
+        public void setRegion(String region) { this.region = region; }
+        /** 获取凭证来源模式。 */
+        public HuaweiObsCredentialMode getCredentialMode() { return credentialMode; }
+        /** 设置凭证来源模式。 */
+        public void setCredentialMode(HuaweiObsCredentialMode credentialMode) {
+            this.credentialMode = credentialMode;
+        }
+        /** 获取访问密钥。 */
+        public String getAccessKey() { return accessKey; }
+        /** 设置访问密钥。 */
+        public void setAccessKey(String accessKey) { this.accessKey = accessKey; }
+        /** 获取私密访问密钥。 */
+        public String getSecretKey() { return secretKey; }
+        /** 设置私密访问密钥。 */
+        public void setSecretKey(String secretKey) { this.secretKey = secretKey; }
+        /** 获取 STS 安全令牌。 */
+        public String getSecurityToken() { return securityToken; }
+        /** 设置 STS 安全令牌。 */
+        public void setSecurityToken(String securityToken) { this.securityToken = securityToken; }
+        /** 获取连接超时。 */
+        public Duration getConnectTimeout() { return connectTimeout; }
+        /** 设置连接超时。 */
+        public void setConnectTimeout(Duration connectTimeout) { this.connectTimeout = connectTimeout; }
+        /** 获取读取超时。 */
+        public Duration getReadTimeout() { return readTimeout; }
+        /** 设置读取超时。 */
+        public void setReadTimeout(Duration readTimeout) { this.readTimeout = readTimeout; }
+        /** 获取写入超时。 */
+        public Duration getWriteTimeout() { return writeTimeout; }
+        /** 设置写入超时。 */
+        public void setWriteTimeout(Duration writeTimeout) { this.writeTimeout = writeTimeout; }
     }
 
     /**

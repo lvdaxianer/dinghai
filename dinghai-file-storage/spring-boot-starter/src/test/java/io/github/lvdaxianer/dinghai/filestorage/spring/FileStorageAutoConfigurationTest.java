@@ -1,6 +1,9 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
 import com.aliyun.sdk.service.oss2.OSSClient;
+import com.obs.services.IObsCredentialsProvider;
+import com.obs.services.BasicObsCredentialsProvider;
+import com.obs.services.ObsClient;
 import io.github.lvdaxianer.dinghai.filestorage.aliyunoss.AliyunOssFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
@@ -8,6 +11,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
+import io.github.lvdaxianer.dinghai.filestorage.huaweicloudobs.HuaweiObsFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolGovernor;
 import io.github.lvdaxianer.dinghai.threadpool.spring.ThreadPoolAutoConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -139,6 +143,51 @@ public class FileStorageAutoConfigurationTest {
                     assertThat(context).doesNotHaveBean(LocalFileStorageAdapter.class);
                     assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
                     assertThat(context).doesNotHaveBean(RustfsFileStorageAdapter.class);
+        });
+    }
+
+    /** huaweicloud-obs provider 应注册 OBS 适配器与受 Spring 管理的 SDK client。 */
+    @Test
+    public void shouldRegisterOnlyHuaweiObsFileStorageForHuaweiObsProvider() {
+        contextRunner.withBean(ObsClient.class, () -> mock(ObsClient.class))
+                .withPropertyValues(huaweiObsProperties())
+                .run(context -> {
+                    assertThat(context).hasSingleBean(FileStorage.class);
+                    assertThat(context).hasSingleBean(HuaweiObsFileStorageAdapter.class);
+                    assertThat(context).hasSingleBean(ObsClient.class);
+                    assertThat(context).doesNotHaveBean(LocalFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(RustfsFileStorageAdapter.class);
+                    assertThat(context).doesNotHaveBean(AliyunOssFileStorageAdapter.class);
+                });
+    }
+
+    /** OBS 缺失 endpoint 时必须在启动期失败且不回退到其他 provider。 */
+    @Test
+    public void shouldRejectIncompleteHuaweiObsConfiguration() {
+        contextRunner.withBean(ObsClient.class, () -> mock(ObsClient.class))
+                .withPropertyValues(huaweiObsProperties())
+                .withPropertyValues("dinghai.file-storage.huaweicloud-obs.endpoint=")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining(
+                            "huaweicloud obs configuration is incomplete");
+                });
+    }
+
+    /** OBS PROVIDER 模式应要求宿主提供可刷新凭证 Bean。 */
+    @Test
+    public void shouldCreateHuaweiObsClientFromApplicationCredentialProvider() {
+        contextRunner.withBean(IObsCredentialsProvider.class,
+                        () -> new BasicObsCredentialsProvider("provider-access-key", "provider-secret-key"))
+                .withPropertyValues(huaweiObsProperties())
+                .withPropertyValues(
+                        "dinghai.file-storage.huaweicloud-obs.credential-mode=provider",
+                        "dinghai.file-storage.huaweicloud-obs.access-key=",
+                        "dinghai.file-storage.huaweicloud-obs.secret-key=")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(FileStorage.class);
+                    assertThat(context).hasSingleBean(ObsClient.class);
                 });
     }
 
@@ -772,6 +821,24 @@ public class FileStorageAutoConfigurationTest {
                 "dinghai.file-storage.provider=aliyun-oss",
                 "dinghai.file-storage.bucket=test-bucket",
                 "dinghai.file-storage.aliyun-oss.region=oss-cn-beijing",
+                "dinghai.file-storage.storage-alias=documents",
+                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
+                "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
+                "dinghai.file-storage.migration.import-root=" + migrationRoot("import"),
+                "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
+                "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
+        };
+    }
+
+    /** 返回 OBS provider 所需的完整静态凭证属性。 */
+    private String[] huaweiObsProperties() {
+        return new String[]{
+                "dinghai.file-storage.provider=huaweicloud-obs",
+                "dinghai.file-storage.bucket=test-bucket",
+                "dinghai.file-storage.huaweicloud-obs.endpoint=https://obs.cn-north-4.myhuaweicloud.com",
+                "dinghai.file-storage.huaweicloud-obs.region=cn-north-4",
+                "dinghai.file-storage.huaweicloud-obs.access-key=test-access-key",
+                "dinghai.file-storage.huaweicloud-obs.secret-key=test-secret-key",
                 "dinghai.file-storage.storage-alias=documents",
                 "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
                 "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),

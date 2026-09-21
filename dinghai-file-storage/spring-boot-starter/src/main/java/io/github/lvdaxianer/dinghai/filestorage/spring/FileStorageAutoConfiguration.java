@@ -2,6 +2,8 @@ package io.github.lvdaxianer.dinghai.filestorage.spring;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.aliyun.sdk.service.oss2.OSSClient;
+import com.obs.services.IObsCredentialsProvider;
+import com.obs.services.ObsClient;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
@@ -13,6 +15,10 @@ import io.github.lvdaxianer.dinghai.filestorage.aliyunoss.AliyunOssFileStorageAd
 import io.github.lvdaxianer.dinghai.filestorage.aliyunoss.AliyunOssStorageConfiguration;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsStorageConfiguration;
+import io.github.lvdaxianer.dinghai.filestorage.huaweicloudobs.HuaweiObsClientFactory;
+import io.github.lvdaxianer.dinghai.filestorage.huaweicloudobs.HuaweiObsCredentialMode;
+import io.github.lvdaxianer.dinghai.filestorage.huaweicloudobs.HuaweiObsFileStorageAdapter;
+import io.github.lvdaxianer.dinghai.filestorage.huaweicloudobs.HuaweiObsStorageConfiguration;
 import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolGovernor;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -66,11 +72,13 @@ public class FileStorageAutoConfiguration {
     @Primary
     @ConditionalOnMissingBean(FileStorage.class)
     public FileStorage fileStorage(FileStorageProperties properties, Environment environment,
-                                   Optional<OSSClient> aliyunOssClient) {
+                                   Optional<OSSClient> aliyunOssClient,
+                                   Optional<ObsClient> huaweicloudObsClient) {
         validateWebPathPrefix(properties.getWeb().getPathPrefix());
         validateMultipartProperties(properties.getMultipart());
         String bucket = validateBucket(properties.getBucket());
-        return selectedFileStorage(properties, environment, bucket, aliyunOssClient);
+        return selectedFileStorage(properties, environment, bucket, aliyunOssClient,
+                huaweicloudObsClient);
     }
 
     /**
@@ -85,13 +93,14 @@ public class FileStorageAutoConfiguration {
      * @date 2026-09-14
      */
     private FileStorage selectedFileStorage(FileStorageProperties properties, Environment environment,
-                                            String bucket, Optional<OSSClient> aliyunOssClient) {
+                                            String bucket, Optional<OSSClient> aliyunOssClient,
+                                            Optional<ObsClient> huaweicloudObsClient) {
         // Local 需要额外校验缓存与主数据根目录不会重叠。
         if (properties.getProvider() == FileStorageProvider.LOCAL) {
             validateLocalCacheConfiguration(properties, environment, bucket);
             return localStorage(properties, bucket);
         }
-        return remoteFileStorage(properties, bucket, aliyunOssClient);
+        return remoteFileStorage(properties, bucket, aliyunOssClient, huaweicloudObsClient);
     }
 
     /**
@@ -105,7 +114,8 @@ public class FileStorageAutoConfiguration {
      * @date 2026-09-14
      */
     private FileStorage remoteFileStorage(FileStorageProperties properties, String bucket,
-                                          Optional<OSSClient> aliyunOssClient) {
+                                          Optional<OSSClient> aliyunOssClient,
+                                          Optional<ObsClient> huaweicloudObsClient) {
         // MinIO 使用其 S3 兼容客户端。
         if (properties.getProvider() == FileStorageProvider.MINIO) {
             return minioStorage(properties, bucket);
@@ -118,6 +128,10 @@ public class FileStorageAutoConfiguration {
         if (properties.getProvider() == FileStorageProvider.ALIYUN_OSS) {
             return aliyunOssStorage(properties, bucket, aliyunOssClient.orElseThrow(
                     () -> invalidConfiguration("aliyun oss client is required", null)));
+        }
+        if (properties.getProvider() == FileStorageProvider.HUAWEICLOUD_OBS) {
+            return huaweicloudObsStorage(properties, bucket, huaweicloudObsClient.orElseThrow(
+                    () -> invalidConfiguration("huaweicloud obs client is required", null)));
         }
         throw invalidConfiguration("file storage provider is required or invalid", null);
     }
@@ -138,6 +152,24 @@ public class FileStorageAutoConfiguration {
             return AliyunOssClientFactory.create(aliyunOssConfiguration(properties));
         } catch (IllegalArgumentException exception) {
             throw invalidConfiguration("aliyun oss configuration is incomplete", exception);
+        }
+    }
+
+    /** 创建仅在 OBS provider 被选中时存在的受管 OBS SDK client。 */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnMissingBean(ObsClient.class)
+    @ConditionalOnExpression("'${dinghai.file-storage.provider:}' == 'huaweicloud-obs'")
+    public ObsClient huaweicloudObsClient(FileStorageProperties properties,
+                                          Optional<IObsCredentialsProvider> provider) {
+        try {
+            HuaweiObsStorageConfiguration configuration = huaweicloudObsConfiguration(properties);
+            if (configuration.credentialMode() == HuaweiObsCredentialMode.PROVIDER) {
+                return HuaweiObsClientFactory.create(configuration, provider.orElseThrow(
+                        () -> new IllegalArgumentException("OBS credentials provider is required")));
+            }
+            return HuaweiObsClientFactory.create(configuration);
+        } catch (IllegalArgumentException exception) {
+            throw invalidConfiguration("huaweicloud obs configuration is incomplete", exception);
         }
     }
 
@@ -527,6 +559,28 @@ public class FileStorageAutoConfiguration {
         return new AliyunOssStorageConfiguration(aliyunOss.getRegion(), properties.getBucket(),
                 aliyunOss.getConnectTimeout(), aliyunOss.getReadTimeout(),
                 aliyunOss.getWriteTimeout());
+    }
+
+    /** 将 Starter 属性转换为已校验的 OBS 连接配置。 */
+    private HuaweiObsStorageConfiguration huaweicloudObsConfiguration(
+            FileStorageProperties properties) {
+        FileStorageProperties.HuaweiCloudObs obs = properties.getHuaweicloudObs();
+        return new HuaweiObsStorageConfiguration(obs.getEndpoint(), obs.getRegion(),
+                properties.getBucket(), obs.getCredentialMode(), obs.getAccessKey(),
+                obs.getSecretKey(), obs.getSecurityToken(), obs.getConnectTimeout(),
+                obs.getReadTimeout(), obs.getWriteTimeout());
+    }
+
+    /** 创建使用 Spring 管理生命周期的 OBS client 的固定 bucket 适配器。 */
+    private FileStorage huaweicloudObsStorage(FileStorageProperties properties, String bucket,
+                                              ObsClient client) {
+        FileStorageProperties.HuaweiCloudObs obs = properties.getHuaweicloudObs();
+        try {
+            huaweicloudObsConfiguration(properties);
+            return new HuaweiObsFileStorageAdapter(client, bucket, obs.getEndpoint());
+        } catch (IllegalArgumentException exception) {
+            throw invalidConfiguration("huaweicloud obs configuration is incomplete", exception);
+        }
     }
 
     /**
