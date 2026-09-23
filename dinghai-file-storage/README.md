@@ -133,7 +133,14 @@ OBS 使用 `com.huaweicloud:esdk-obs-java:3.26.6`，不使用 Huawei Cloud SDK B
 | 配置键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `web.enabled` | `boolean` | `true` | 是否注册文件 Web 端点、异步执行器和 MVC 配置 |
-| `web.path-prefix` | `String` | `/files` | 文件端点路径前缀，同时作为本地预签名 URL 的前缀。必须非空、以 `/` 开头、不含 `?`、`#`、`\r`、`\n`。注意：迁移管理端点固定为 `/files/migration/*`，**不随该前缀变化** |
+| `web.path-prefix` | `String` | `/files` | 文件端点路径前缀，同时作为本地预签名 URL 的前缀。允许省略前导 `/`、重复 `/`、尾随 `/` 或使用根路径；启动时统一规范化。不允许 `?`、`#`、`\\`、`\r`、`\n`。注意：迁移管理端点固定为 `/files/migration/*`，**不随该前缀变化** |
+| `web.upload-path` | `String` | `/upload` | 上传端点相对于 `path-prefix` 的路径；本地预签名上传 URL 同步使用该路径 |
+| `web.download-path` | `String` | `/download` | 下载端点相对于 `path-prefix` 的路径；本地预签名下载 URL 同步使用该路径 |
+| `web.preview-path` | `String` | `/preview` | 预览端点相对于 `path-prefix` 的路径；本地预签名预览 URL 同步使用该路径 |
+| `web.read-path` | `String` | `/read/key` | 真实 object key 读取、预览和下载端点相对于 `path-prefix` 的基础路径 |
+| `web.stable-read-path` | `String` | `/read` | 稳定文件 ID 读取、预览和下载端点相对于 `path-prefix` 的基础路径 |
+| `web.legacy-read-enabled` | `boolean` | `false` | 是否额外注册历史真实 object key 直读路由 |
+| `web.legacy-read-path` | `String` | `/` | 历史直读路由相对于 `path-prefix` 的基础路径；仅在 `legacy-read-enabled=true` 时生效 |
 | `web.direct-access` | `boolean` | `false` | 是否允许无预签名凭据的 Web 上传。即使开启，仍需宿主提供 `FileStorageAccessPolicy` Bean 且其返回允许；Web 读取不要求组件凭证，但受读取并发上限保护 |
 | `web.sendfile-binary-content-types-enabled` | `boolean` | `true` | gzip 等压缩协商存在时，是否允许已确认的标准二进制 MIME 类型继续使用 Tomcat `sendfile`。文本、SVG、未知或非法 MIME 始终流式传输；宿主对二进制内容配置了自定义压缩时设为 `false` |
 | `web.read-buffer-size` | `DataSize` | `128KB` | 单个响应流的复制缓冲区大小，是单次复制缓冲而非整文件内存；必须为正且不超过 `Integer.MAX_VALUE` |
@@ -197,6 +204,13 @@ dinghai:
     web:
       enabled: true
       path-prefix: /files
+      upload-path: /upload
+      download-path: /download
+      preview-path: /preview
+      read-path: /read/key
+      stable-read-path: /read
+      legacy-read-enabled: false
+      legacy-read-path: /
       direct-access: false
       sendfile-binary-content-types-enabled: true
       read-buffer-size: 128KB
@@ -221,15 +235,34 @@ dinghai:
 
 ## Web 端点
 
-`web.enabled=true` 时注册以下端点（前缀默认为 `/files`，随 `web.path-prefix` 变化）：
+`web.enabled=true` 时注册以下端点。所有路径均由启动期已规范化的 `web.path-prefix` 与对应操作路径组合；默认组合保持原有 `/files/**` 地址不变：
 
 | 端点 | 说明 |
 | --- | --- |
-| `PUT /upload/{*key}` | 本地预签名上传（HMAC）；无签名时走直接上传授权，并受 `web.max-concurrent-uploads` 限制。成功返回 `201 Created`、`Location` 和已确认的对象元数据 |
-| `GET /download/{*key}` | 下载，强制 `attachment` 响应模式，受 `web.max-concurrent-reads` 限制 |
-| `GET /preview/{*key}` | 预览，强制 `inline` 响应模式，受 `web.max-concurrent-reads` 限制 |
-| `GET /read/key/{*key}` 及 `/read/key/preview/{*key}`、`/read/key/download/{*key}` | 按真实 object key 匿名直读，不要求组件读取凭证；受 `web.max-concurrent-reads` 限制 |
-| `GET /read/v1/{id}` 及 `/read/v1/preview/{id}`、`/read/v1/download/{id}` | 按稳定文件 ID 匿名读取，不做用户鉴权也不需要签名（见下节） |
+| `PUT {prefix}{upload-path}/{*key}` | 默认 `PUT /files/upload/{*key}`。本地预签名上传（HMAC）；无签名时走直接上传授权，并受 `web.max-concurrent-uploads` 限制 |
+| `GET {prefix}{download-path}/{*key}` | 默认 `GET /files/download/{*key}`。下载，强制 `attachment` 响应模式 |
+| `GET {prefix}{preview-path}/{*key}` | 默认 `GET /files/preview/{*key}`。预览，强制 `inline` 响应模式 |
+| `GET {prefix}{read-path}/{*key}` 及 `/preview/{*key}`、`/download/{*key}` | 默认 `GET /files/read/key/{*key}` 及其预览、下载变体；按真实 object key 匿名读取 |
+| `GET {prefix}{stable-read-path}/{id}` 及 `/v1/{id}`、预览、下载变体 | 默认 `/files/read/{id}` 和 `/files/read/v1/{id}` 系列；按稳定文件 ID 匿名读取（见下节） |
+| `GET {prefix}{legacy-read-path}/{*key}` | 仅 `web.legacy-read-enabled=true` 时注册；默认即 `GET /files/{*key}`，用于兼容历史真实 key 地址 |
+
+例如，下列配置将上传和读取地址迁移到 `/rsm` 下：
+
+```yaml
+dinghai:
+  file-storage:
+    web:
+      path-prefix: rsm
+      upload-path: upload-file
+      download-path: download-file
+      preview-path: preview-file
+      read-path: read
+      stable-read-path: read
+      legacy-read-enabled: true
+      legacy-read-path: /
+```
+
+它会生成 `/rsm/upload-file/{*key}`、`/rsm/download-file/{*key}`、`/rsm/preview-file/{*key}`、`/rsm/read/{*key}`、`/rsm/read/preview/{*key}` 与 `/rsm/{*key}`。当 `stable-read-path` 与 `read-path` 相同或位于其下方时，为避免与真实 key catch-all 产生歧义，不注册无版本稳定 ID 路由；显式版本路由 `/v1/{id}` 及其预览、下载变体仍会注册。不同对象 key 操作路径重合、legacy 路径精确重合或路径包含非法字符会使应用以 `INVALID_CONFIGURATION` 启动失败。
 
 ### 大文件分片上传
 

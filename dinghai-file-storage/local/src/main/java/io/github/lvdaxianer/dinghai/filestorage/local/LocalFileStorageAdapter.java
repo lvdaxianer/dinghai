@@ -59,6 +59,9 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
     private final long maxSizeBytes;
     private final Set<String> contentTypeWhitelist;
     private final String pathPrefix;
+    private final String uploadBasePath;
+    private final String downloadBasePath;
+    private final String previewBasePath;
     private final Path multipartRoot;
     private final Clock clock;
 
@@ -107,6 +110,33 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
                                    Set<String> contentTypeWhitelist,
                                    Duration maximumPresignExpiry, Clock clock, String pathPrefix,
                                    Path multipartRoot) {
+        this(root, signingKey, maxSizeBytes, contentTypeWhitelist, maximumPresignExpiry, clock,
+                pathPrefix, multipartRoot, operationBasePath(pathPrefix, "upload"),
+                operationBasePath(pathPrefix, "download"), operationBasePath(pathPrefix, "preview"));
+    }
+
+    /**
+     * 使用指定操作 URL 基础路径创建本地适配器。
+     *
+     * @param root 正式对象根目录
+     * @param signingKey 本地预签名密钥
+     * @param maxSizeBytes 对象最大字节数
+     * @param contentTypeWhitelist 允许的内容类型
+     * @param maximumPresignExpiry 预签名最大有效期
+     * @param clock 用于会话过期判断的时钟
+     * @param pathPrefix 本地 multipart Web 访问路径前缀
+     * @param multipartRoot 独立的分片临时根目录
+     * @param uploadBasePath 上传 URL 的无对象 key 基础路径
+     * @param downloadBasePath 下载 URL 的无对象 key 基础路径
+     * @param previewBasePath 预览 URL 的无对象 key 基础路径
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-23
+     */
+    public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes,
+                                   Set<String> contentTypeWhitelist,
+                                   Duration maximumPresignExpiry, Clock clock, String pathPrefix,
+                                   Path multipartRoot, String uploadBasePath, String downloadBasePath,
+                                   String previewBasePath) {
         if (maxSizeBytes < 0) {
             throw new IllegalArgumentException("max size must be non-negative");
         }
@@ -117,6 +147,9 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
         this.contentTypeWhitelist = Set.copyOf(Objects.requireNonNull(
                 contentTypeWhitelist, "contentTypeWhitelist"));
         this.pathPrefix = LocalFileStorageSigner.validatePathPrefix(pathPrefix);
+        this.uploadBasePath = LocalFileStorageSigner.validatePathPrefix(uploadBasePath);
+        this.downloadBasePath = LocalFileStorageSigner.validatePathPrefix(downloadBasePath);
+        this.previewBasePath = LocalFileStorageSigner.validatePathPrefix(previewBasePath);
         this.clock = Objects.requireNonNull(clock, "clock");
         Path configuredMultipartRoot = multipartRoot == null
                 ? paths.root().resolveSibling(paths.root().getFileName() + ".dinghai-multipart")
@@ -244,14 +277,14 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
     @Override
     public PresignedUpload presignUpload(PresignUploadRequest request) {
         validatePresignUpload(request);
-        return signer.presignUpload(request, pathPrefix);
+        return signer.presignUploadAt(request, uploadBasePath);
     }
 
     /** 生成本地预签名下载地址。 */
     @Override
     public PresignedDownload presignDownload(PresignDownloadRequest request) {
         Objects.requireNonNull(request, "request");
-        return signer.presignDownload(request, pathPrefix);
+        return signer.presignDownloadAt(request, downloadBasePath, previewBasePath);
     }
 
     /** 验证本地预签名上传请求。 */
@@ -299,10 +332,16 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
             throw failure(FileStorageErrorCode.MULTIPART_EXPIRED,
                     "multipart session has expired", null);
         }
-        String url = pathPrefix + "/multipart/" + request.uploadId()
+        String url = ("/".equals(pathPrefix) ? "" : pathPrefix) + "/multipart/" + request.uploadId()
                 + "/parts/" + request.partNumber();
         return new PresignedUpload(url, "PUT", expiresAt,
                 Map.of("Content-Type", session.session().contentType()), Map.of());
+    }
+
+    /** 组合默认操作 URL 基础路径。 */
+    private static String operationBasePath(String pathPrefix, String operation) {
+        String prefix = LocalFileStorageSigner.validatePathPrefix(pathPrefix);
+        return ("/".equals(prefix) ? "" : prefix) + "/" + operation;
     }
 
     /** 将一个分片先写临时文件，再原子替换为已确认分片。 */

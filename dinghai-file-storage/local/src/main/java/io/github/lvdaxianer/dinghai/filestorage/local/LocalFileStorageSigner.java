@@ -42,11 +42,16 @@ public final class LocalFileStorageSigner {
 
     /** 生成受限的预签名上传地址。 */
     public PresignedUpload presignUpload(PresignUploadRequest request, String pathPrefix) {
+        return presignUploadAt(request, operationBasePath(pathPrefix, "upload"));
+    }
+
+    /** 生成指定上传 URL 基础路径的受限预签名地址。 */
+    public PresignedUpload presignUploadAt(PresignUploadRequest request, String uploadBasePath) {
         Objects.requireNonNull(request, "request");
         Instant expiresAt = expiry(request.expiresIn());
         String payload = uploadPayload(request, expiresAt);
         String signature = sign(payload);
-        String url = buildUrl(pathPrefix, "upload", request.key(),
+        String url = buildUrl(uploadBasePath, request.key(),
                 "expires=" + expiresAt.getEpochSecond(),
                 "contentType=" + encode(request.contentType()),
                 "maxSize=" + request.maxSizeBytes(),
@@ -58,13 +63,20 @@ public final class LocalFileStorageSigner {
 
     /** 生成受限的预签名下载地址。 */
     public PresignedDownload presignDownload(PresignDownloadRequest request, String pathPrefix) {
+        return presignDownloadAt(request, operationBasePath(pathPrefix, "download"),
+                operationBasePath(pathPrefix, "preview"));
+    }
+
+    /** 生成指定下载和预览 URL 基础路径的受限预签名地址。 */
+    public PresignedDownload presignDownloadAt(PresignDownloadRequest request, String downloadBasePath,
+                                               String previewBasePath) {
         Objects.requireNonNull(request, "request");
         Instant expiresAt = expiry(request.expiresIn());
         String payload = downloadPayload(request, expiresAt);
         String signature = sign(payload);
-        String operation = request.disposition() == PresignDownloadRequest.ResponseDisposition.INLINE
-                ? "preview" : "download";
-        String url = buildUrl(pathPrefix, operation, request.key(),
+        String basePath = request.disposition() == PresignDownloadRequest.ResponseDisposition.INLINE
+                ? previewBasePath : downloadBasePath;
+        String url = buildUrl(basePath, request.key(),
                 "expires=" + expiresAt.getEpochSecond(),
                 "disposition=" + request.disposition().name().toLowerCase(),
                 "cacheControl=" + encode(request.cacheControl().value()),
@@ -154,11 +166,17 @@ public final class LocalFileStorageSigner {
         }
     }
 
-    private static String buildUrl(String pathPrefix, String operation, ObjectKey key,
+    private static String buildUrl(String basePath, ObjectKey key,
                                    String... parameters) {
-        String prefix = validatePathPrefix(pathPrefix);
+        String prefix = validatePathPrefix(basePath);
         String encodedKey = encodeKey(key);
-        return prefix + "/" + operation + "/" + encodedKey + "?" + String.join("&", parameters);
+        return ("/".equals(prefix) ? "" : prefix) + "/" + encodedKey + "?"
+                + String.join("&", parameters);
+    }
+
+    private static String operationBasePath(String pathPrefix, String operation) {
+        String prefix = validatePathPrefix(pathPrefix);
+        return ("/".equals(prefix) ? "" : prefix) + "/" + operation;
     }
 
     private static String encodeKey(ObjectKey key) {

@@ -25,7 +25,7 @@
 - **THEN** Starter 从本地适配器流式返回对象，并应用签名中固定的响应模式和缓存策略
 
 ### Requirement: 默认拒绝直接 Web 访问
-Starter SHALL 默认以 `web.enabled=true`、`web.path-prefix=/files`、`web.direct-access=false` 注册文件端点。Web 上传无有效预签名凭据时 MUST 被拒绝；只有 `direct-access=true` 且应用提供 `FileStorageAccessPolicy` 时，上传端点才能根据宿主应用认证主体允许直接上传。成功的直接或预签名 Web 上传 MUST 返回 HTTP `201 Created`、所持久对象的 `key`、`contentLength`、`contentType`、`etag`、`lastModified`、`cacheControl` 和 `previewUrl`，并将 `Location` 设为 `previewUrl`。`previewUrl` MUST 指向配置路径前缀下的真实 key 预览端点。Web 下载、预览及真实 key 读取不要求组件用户凭证或直接访问授权，但仍受 Web 读取并发限制。
+Starter SHALL 默认以 `web.enabled=true`、`web.path-prefix=/files`、`web.upload-path=/upload`、`web.download-path=/download`、`web.preview-path=/preview`、`web.read-path=/read/key`、`web.stable-read-path=/read`、`web.direct-access=false` 注册文件端点。Web 上传无有效预签名凭据时 MUST 被拒绝；只有 `direct-access=true` 且应用提供 `FileStorageAccessPolicy` 时，上传端点才能根据宿主应用认证主体允许直接上传。成功的直接或预签名 Web 上传 MUST 返回 HTTP `201 Created`、所持久对象的 `key`、`contentLength`、`contentType`、`etag`、`lastModified`、`cacheControl` 和 `previewUrl`，并将 `Location` 设为 `previewUrl`。`previewUrl` MUST 指向配置路径前缀和配置读取路径下的真实 key 预览端点。Web 下载、预览及真实 key 读取不要求组件用户凭证或直接访问授权，但仍受 Web 读取并发限制。
 
 #### Scenario: 默认配置拒绝无签名预览
 - **WHEN** 客户端在默认配置下无预签名凭据访问 `/files/preview/{key}`
@@ -42,6 +42,10 @@ Starter SHALL 默认以 `web.enabled=true`、`web.path-prefix=/files`、`web.dir
 #### Scenario: 匿名读取真实 object key
 - **WHEN** 客户端不携带读取签名或认证主体访问 `/files/read/key/{key}`、预览或下载端点
 - **THEN** 端点按 object key 读取对象，并不调用 `FileStorageAccessPolicy`
+
+#### Scenario: 自定义端点路径
+- **WHEN** `path-prefix=/asset`、`upload-path=/upload-file`、`download-path=/download-file`、`preview-path=/preview-file` 且 `read-path=/content`
+- **THEN** Starter 分别注册 `/asset/upload-file/{*key}`、`/asset/download-file/{*key}`、`/asset/preview-file/{*key}` 与 `/asset/content/{*key}`，且上传响应使用配置后的预览 URL
 
 ### Requirement: 在线预览与 HTTP/CDN 缓存响应
 所有 `FileStorage` provider 的下载/预览端点 SHALL 设置对象的 Content-Type、ETag、Last-Modified、Cache-Control、Expires 与 Content-Disposition。预览 MUST 使用 `inline`，下载 MUST 使用 `attachment`；默认缓存策略 MUST 为 `private, max-age=0`，公开或 immutable 缓存 MUST 显式指定。端点 MUST 对 `If-None-Match` 与 `If-Modified-Since` 返回 304，并支持单字节范围请求以支持浏览器媒体预览。MinIO 预签名下载和稳定读取 ID 下载 MUST 固定相同的响应模式与允许的缓存响应语义。对于可直接解析的本地内容，端点 SHOULD 使用通道传输；对于对象存储内容，端点 MUST 使用有界缓冲流式转发，且不得将完整对象缓存至 JVM 内存。所有实际对象传输路径 MUST 计入 `web.max-concurrent-reads`。

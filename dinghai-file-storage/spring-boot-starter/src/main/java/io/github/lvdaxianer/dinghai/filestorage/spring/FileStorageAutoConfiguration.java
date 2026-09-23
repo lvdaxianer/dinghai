@@ -34,6 +34,9 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.env.Environment;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.core.task.TaskDecorator;
@@ -74,7 +77,7 @@ public class FileStorageAutoConfiguration {
     public FileStorage fileStorage(FileStorageProperties properties, Environment environment,
                                    Optional<OSSClient> aliyunOssClient,
                                    Optional<ObsClient> huaweicloudObsClient) {
-        validateWebPathPrefix(properties.getWeb().getPathPrefix());
+        validateWebRoutes(properties.getWeb());
         validateMultipartProperties(properties.getMultipart());
         String bucket = validateBucket(properties.getBucket());
         return selectedFileStorage(properties, environment, bucket, aliyunOssClient,
@@ -328,13 +331,33 @@ public class FileStorageAutoConfiguration {
                                                               Optional<WebTransferRateLimitKeyResolver> keyResolver,
                                                               FileStorageProperties properties) {
         validateResourceProperties(properties);
+        FileStorageWebRoutes routes = validateWebRoutes(properties.getWeb());
         return new FileStorageWebController(fileStorage, authorizer, Clock.systemUTC(), stableAccess,
                 readCache.orElse(null), new WebTransferConfiguration(
                 intSize(properties.getWeb().getReadBufferSize().toBytes()),
                 properties.getWeb().getMaxConcurrentReads(), properties.getWeb().getMaxConcurrentUploads(),
-                properties.getWeb().getMaxConcurrentTransfersPerKey(), keyResolver.orElse(null),
-                properties.getWeb().getPathPrefix(),
+                properties.getWeb().getMaxConcurrentTransfersPerKey(), keyResolver.orElse(null), routes,
                 properties.getWeb().isSendfileBinaryContentTypesEnabled()));
+    }
+
+    /**
+     * 为 MVC 环境注册配置化的文件 Web 映射。
+     *
+     * @param mappings MVC 路由映射器提供者
+     * @param controller 文件 Web 业务控制器
+     * @param properties 已绑定的文件存储属性
+     * @return 动态路由注册器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-23
+     */
+    @Bean
+    @ConditionalOnProperty(name = "dinghai.file-storage.web.enabled", havingValue = "true",
+            matchIfMissing = true)
+    public FileStorageWebRouteRegistrar fileStorageWebRouteRegistrar(
+            @Qualifier("requestMappingHandlerMapping") ObjectProvider<RequestMappingHandlerMapping> mappings,
+            FileStorageWebController controller,
+            FileStorageProperties properties) {
+        return new FileStorageWebRouteRegistrar(mappings, controller, validateWebRoutes(properties.getWeb()));
     }
 
     /**
@@ -484,7 +507,10 @@ public class FileStorageAutoConfiguration {
                 signingKey.getBytes(StandardCharsets.UTF_8), properties.getUpload().getMaxSize(),
                 properties.getUpload().getContentTypeWhitelist(),
                 properties.getSecurity().getMaximumPresignExpiry(), Clock.systemUTC(),
-                properties.getWeb().getPathPrefix(), properties.getMultipart().getLocalRoot());
+                properties.getWeb().getPathPrefix(), properties.getMultipart().getLocalRoot(),
+                FileStorageWebRoutes.from(properties.getWeb()).uploadBasePath(),
+                FileStorageWebRoutes.from(properties.getWeb()).downloadBasePath(),
+                FileStorageWebRoutes.from(properties.getWeb()).previewBasePath());
     }
 
     /**
@@ -584,20 +610,17 @@ public class FileStorageAutoConfiguration {
     }
 
     /**
-     * 校验 Web 路径前缀不会被解释为查询串或片段。
+     * 校验并规范化全部文件 Web 路由配置。
      *
-     * @param pathPrefix 文件端点路径前缀
+     * @param web 已绑定的文件 Web 属性
+     * @return 已校验且完整的文件 Web 路由
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    private void validateWebPathPrefix(String pathPrefix) {
-        if (pathPrefix == null || pathPrefix.isBlank() || !pathPrefix.startsWith("/")) {
-            throw invalidConfiguration("file storage web path prefix is invalid", null);
-        }
-        if (pathPrefix.indexOf('?') >= 0 || pathPrefix.indexOf('#') >= 0
-                || pathPrefix.indexOf('\r') >= 0 || pathPrefix.indexOf('\n') >= 0) {
-            throw invalidConfiguration("file storage web path prefix is invalid", null);
-        }
+    private FileStorageWebRoutes validateWebRoutes(FileStorageProperties.Web web) {
+        FileStorageWebRoutes routes = FileStorageWebRoutes.from(web);
+        routes.applyTo(web);
+        return routes;
     }
 
     /**

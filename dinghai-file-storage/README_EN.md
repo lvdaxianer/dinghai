@@ -133,7 +133,14 @@ OBS uses `com.huaweicloud:esdk-obs-java:3.26.6`, not Huawei Cloud SDK Bundle. Th
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `web.enabled` | `boolean` | `true` | Whether to register the file web endpoints, the async executor, and the MVC configuration |
-| `web.path-prefix` | `String` | `/files` | Path prefix of the file endpoints; also used as the prefix of local presigned URLs. Must be non-empty, start with `/`, and contain no `?`, `#`, `\r`, or `\n`. Note: the migration management endpoints are fixed at `/files/migration/*` and **do not follow this prefix** |
+| `web.path-prefix` | `String` | `/files` | Prefix of file endpoints and local presigned URLs. A missing leading `/`, repeated `/`, trailing `/`, and the root path are normalized at startup. `?`, `#`, `\\`, `\r`, and `\n` are rejected. Migration management endpoints remain fixed at `/files/migration/*` and **do not follow this prefix** |
+| `web.upload-path` | `String` | `/upload` | Upload path relative to `path-prefix`; local presigned upload URLs use it too |
+| `web.download-path` | `String` | `/download` | Download path relative to `path-prefix`; local presigned download URLs use it too |
+| `web.preview-path` | `String` | `/preview` | Preview path relative to `path-prefix`; local presigned preview URLs use it too |
+| `web.read-path` | `String` | `/read/key` | Base path relative to `path-prefix` for real object-key reads, previews, and downloads |
+| `web.stable-read-path` | `String` | `/read` | Base path relative to `path-prefix` for stable-file-ID reads, previews, and downloads |
+| `web.legacy-read-enabled` | `boolean` | `false` | Whether to register the legacy real-object-key read route |
+| `web.legacy-read-path` | `String` | `/` | Legacy read base path relative to `path-prefix`; effective only when `legacy-read-enabled=true` |
 | `web.direct-access` | `boolean` | `false` | Whether to allow Web uploads without presign credentials. Even when enabled, the host must provide a `FileStorageAccessPolicy` Bean and it must return allow; Web reads do not require component credentials but remain concurrency-limited |
 | `web.sendfile-binary-content-types-enabled` | `boolean` | `true` | Whether confirmed standard binary MIME types may keep Tomcat `sendfile` when gzip or another compression capability is negotiated. Text, SVG, unknown, and invalid MIME types always stream; set `false` when the host applies custom compression to binary content |
 | `web.read-buffer-size` | `DataSize` | `128KB` | Copy buffer size per response stream; this is a per-copy buffer, not whole-file memory. Must be positive and not exceed `Integer.MAX_VALUE` |
@@ -197,6 +204,13 @@ dinghai:
     web:
       enabled: true
       path-prefix: /files
+      upload-path: /upload
+      download-path: /download
+      preview-path: /preview
+      read-path: /read/key
+      stable-read-path: /read
+      legacy-read-enabled: false
+      legacy-read-path: /
       direct-access: false
       sendfile-binary-content-types-enabled: true
       read-buffer-size: 128KB
@@ -221,15 +235,34 @@ dinghai:
 
 ## Web Endpoints
 
-With `web.enabled=true`, the following endpoints are registered (default prefix `/files`, controlled by `web.path-prefix`):
+With `web.enabled=true`, routes are composed from the normalized `web.path-prefix` and their operation paths. The defaults preserve the existing `/files/**` addresses:
 
 | Endpoint | Description |
 | --- | --- |
-| `PUT /upload/{*key}` | Local presigned upload (HMAC); unsigned requests use direct-upload authorization and are limited by `web.max-concurrent-uploads`. Successful uploads return `201 Created`, `Location`, and confirmed object metadata |
-| `GET /download/{*key}` | Download; forces `attachment` and is limited by `web.max-concurrent-reads` |
-| `GET /preview/{*key}` | Preview; forces `inline` and is limited by `web.max-concurrent-reads` |
-| `GET /read/key/{*key}` plus `/read/key/preview/{*key}` and `/read/key/download/{*key}` | Anonymous read by the real object key; no component read credential required, but limited by `web.max-concurrent-reads` |
-| `GET /read/v1/{id}` plus `/read/v1/preview/{id}` and `/read/v1/download/{id}` | Anonymous read by stable file ID — no user authentication and no signature required (see next section) |
+| `PUT {prefix}{upload-path}/{*key}` | Default: `PUT /files/upload/{*key}`. Local presigned upload (HMAC); unsigned requests use direct-upload authorization and are limited by `web.max-concurrent-uploads` |
+| `GET {prefix}{download-path}/{*key}` | Default: `GET /files/download/{*key}`. Download; forces `attachment` |
+| `GET {prefix}{preview-path}/{*key}` | Default: `GET /files/preview/{*key}`. Preview; forces `inline` |
+| `GET {prefix}{read-path}/{*key}` plus `/preview/{*key}` and `/download/{*key}` | Default: `GET /files/read/key/{*key}` and its preview/download variants; anonymous read by real object key |
+| `GET {prefix}{stable-read-path}/{id}` plus `/v1/{id}`, preview, and download variants | Default: `/files/read/{id}` and `/files/read/v1/{id}` families; anonymous stable-file-ID read (see next section) |
+| `GET {prefix}{legacy-read-path}/{*key}` | Registered only when `web.legacy-read-enabled=true`; by default this is `GET /files/{*key}` for legacy real-key addresses |
+
+For example, this moves upload and read addresses under `/rsm`:
+
+```yaml
+dinghai:
+  file-storage:
+    web:
+      path-prefix: rsm
+      upload-path: upload-file
+      download-path: download-file
+      preview-path: preview-file
+      read-path: read
+      stable-read-path: read
+      legacy-read-enabled: true
+      legacy-read-path: /
+```
+
+It generates `/rsm/upload-file/{*key}`, `/rsm/download-file/{*key}`, `/rsm/preview-file/{*key}`, `/rsm/read/{*key}`, `/rsm/read/preview/{*key}`, and `/rsm/{*key}`. When `stable-read-path` equals or is nested under `read-path`, unversioned stable-ID routes are omitted to prevent a real-key catch-all ambiguity; explicit `/v1/{id}` routes and their preview/download variants remain available. Overlapping object-key operation paths, an exact legacy-route collision, or unsafe characters fail startup with `INVALID_CONFIGURATION`.
 
 ### Large-File Multipart Upload
 
