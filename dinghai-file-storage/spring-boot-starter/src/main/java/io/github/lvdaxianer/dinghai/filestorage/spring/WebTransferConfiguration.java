@@ -18,8 +18,8 @@ final class WebTransferConfiguration {
     private final int maxConcurrentTransfersPerKey;
     /** 宿主可选的传输限流 key 解析器。 */
     private final WebTransferRateLimitKeyResolver keyResolver;
-    /** Web 端点路径前缀。 */
-    private final String pathPrefix;
+    /** 已校验的 Web 路由。 */
+    private final FileStorageWebRoutes routes;
     /** 是否允许标准二进制类型绕过常规压缩回退。 */
     private final boolean sendfileBinaryContentTypesEnabled;
 
@@ -38,7 +38,7 @@ final class WebTransferConfiguration {
                              int maxConcurrentTransfersPerKey,
                              WebTransferRateLimitKeyResolver keyResolver) {
         this(bufferSize, maxConcurrentReads, maxConcurrentUploads, maxConcurrentTransfersPerKey,
-                keyResolver, "/files", true);
+                keyResolver, FileStorageWebRoutes.from(new FileStorageProperties.Web()), true);
     }
 
     /**
@@ -57,7 +57,7 @@ final class WebTransferConfiguration {
                              int maxConcurrentTransfersPerKey,
                              WebTransferRateLimitKeyResolver keyResolver, String pathPrefix) {
         this(bufferSize, maxConcurrentReads, maxConcurrentUploads, maxConcurrentTransfersPerKey,
-                keyResolver, pathPrefix, true);
+                keyResolver, routesForPathPrefix(pathPrefix), true);
     }
 
     /**
@@ -77,12 +77,33 @@ final class WebTransferConfiguration {
                              int maxConcurrentTransfersPerKey,
                              WebTransferRateLimitKeyResolver keyResolver, String pathPrefix,
                              boolean sendfileBinaryContentTypesEnabled) {
+        this(bufferSize, maxConcurrentReads, maxConcurrentUploads, maxConcurrentTransfersPerKey,
+                keyResolver, routesForPathPrefix(pathPrefix), sendfileBinaryContentTypesEnabled);
+    }
+
+    /**
+     * 创建使用完整路径模型的 Web 传输配置。
+     *
+     * @param bufferSize 单个响应流的复制缓冲区大小
+     * @param maxConcurrentReads 全局最大读取并发数
+     * @param maxConcurrentUploads 全局最大上传并发数
+     * @param maxConcurrentTransfersPerKey 单个宿主 key 的最大传输并发数
+     * @param keyResolver 宿主可选的传输限流 key 解析器
+     * @param routes 已校验的 Web 路由
+     * @param sendfileBinaryContentTypesEnabled 标准二进制 sendfile 优化开关
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-23
+     */
+    WebTransferConfiguration(int bufferSize, int maxConcurrentReads, int maxConcurrentUploads,
+                             int maxConcurrentTransfersPerKey,
+                             WebTransferRateLimitKeyResolver keyResolver, FileStorageWebRoutes routes,
+                             boolean sendfileBinaryContentTypesEnabled) {
         this.bufferSize = bufferSize;
         this.maxConcurrentReads = maxConcurrentReads;
         this.maxConcurrentUploads = maxConcurrentUploads;
         this.maxConcurrentTransfersPerKey = maxConcurrentTransfersPerKey;
         this.keyResolver = keyResolver;
-        this.pathPrefix = pathPrefix;
+        this.routes = routes;
         this.sendfileBinaryContentTypesEnabled = sendfileBinaryContentTypesEnabled;
     }
 
@@ -142,14 +163,25 @@ final class WebTransferConfiguration {
     }
 
     /**
-     * 返回 Web 端点路径前缀。
+     * 返回对象 key 预览 URL 的无变量基础路径。
      *
-     * @return Web 端点路径前缀
+     * @return 对象 key 预览 URL 基础路径
      * @author lvdaxianer@yeah.net
      * @date 2026-09-12
      */
-    String pathPrefix() {
-        return pathPrefix;
+    String keyPreviewBasePath() {
+        return routes.keyPreviewBasePath();
+    }
+
+    /**
+     * 返回已校验的 Web 路由集合。
+     *
+     * @return Web 路由集合
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-23
+     */
+    FileStorageWebRoutes routes() {
+        return routes;
     }
 
     /**
@@ -161,5 +193,19 @@ final class WebTransferConfiguration {
      */
     boolean sendfileBinaryContentTypesEnabled() {
         return sendfileBinaryContentTypesEnabled;
+    }
+
+    /**
+     * 根据既有构造器的前缀参数创建默认子路径路由。
+     *
+     * @param pathPrefix Web 端点路径前缀
+     * @return 使用默认子路径的已校验路由
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-23
+     */
+    private static FileStorageWebRoutes routesForPathPrefix(String pathPrefix) {
+        FileStorageProperties.Web web = new FileStorageProperties.Web();
+        web.setPathPrefix(pathPrefix);
+        return FileStorageWebRoutes.from(web);
     }
 }

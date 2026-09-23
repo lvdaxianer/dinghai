@@ -111,7 +111,7 @@ public class FileStorageWebControllerTest {
                 operation == FileStorageAccessOperation.MULTIPART_UPLOAD;
         MultipartUploadController multipartController = new MultipartUploadController(
                 new MultipartUploadService(storage, multipartPolicy, new FileStorageProperties(), clock));
-        mockMvc = MockMvcBuilders.standaloneSetup(controller, multipartController)
+        mockMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller, multipartController)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
     }
 
@@ -458,7 +458,7 @@ public class FileStorageWebControllerTest {
         FileStorageWebController controller = new FileStorageWebController(storage,
                 new FileStorageDirectAccessAuthorizer(true, (principal, key, operation) -> true),
                 Clock.fixed(NOW, ZoneOffset.UTC), stableAccess);
-        MockMvc directMvc = MockMvcBuilders.standaloneSetup(controller)
+        MockMvc directMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
 
         directMvc.perform(put("/files/upload/1/1/1/1.png")
@@ -487,8 +487,7 @@ public class FileStorageWebControllerTest {
         FileStorageWebController controller = new FileStorageWebController(customStorage,
                 new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC),
                 stableAccess, null, new WebTransferConfiguration(128 * 1024, 128, 16, 0, null, pathPrefix));
-        MockMvc customMvc = MockMvcBuilders.standaloneSetup(controller)
-                .addPlaceholderValue("dinghai.file-storage.web.path-prefix", pathPrefix)
+        MockMvc customMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
         ObjectKey key = ObjectKey.of("目录/hello world.png");
         PresignedUpload upload = customStorage.presignUpload(new PresignUploadRequest(
@@ -500,6 +499,68 @@ public class FileStorageWebControllerTest {
                 .andExpect(header().string("Location", previewUrl))
                 .andExpect(jsonPath("$.key.value").value(key.value()))
                 .andExpect(jsonPath("$.previewUrl").value(previewUrl));
+    }
+
+    /**
+     * 启用后历史直读地址必须复用既有对象读取、缓存和 Range 处理链路。
+     *
+     * @throws Exception MVC 请求执行失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-23
+     */
+    @Test
+    public void shouldReadUnicodeObjectThroughConfiguredLegacyRoute() throws Exception {
+        ObjectKey key = ObjectKey.of("archives/目录/hello world.gltf");
+        write(key, "hello", "model/gltf+json", new CacheControl("public, max-age=60"));
+        FileStorageProperties.Web web = new FileStorageProperties.Web();
+        web.setPathPrefix("rsm");
+        web.setReadPath("content");
+        web.setStableReadPath("content");
+        web.setLegacyReadEnabled(true);
+        web.setLegacyReadPath("/");
+        FileStorageWebRoutes routes = FileStorageWebRoutes.from(web);
+        FileStorageWebController controller = new FileStorageWebController(storage,
+                new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC),
+                stableAccess, null, new WebTransferConfiguration(128 * 1024, 128, 16, 0, null,
+                routes, true));
+        MockMvc legacyMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
+                .setControllerAdvice(new FileStorageExceptionHandler()).build();
+        String encodedPath = "/rsm/archives/%E7%9B%AE%E5%BD%95/hello%20world.gltf";
+
+        MvcResult initial = legacyMvc.perform(get(encodedPath))
+                .andExpect(request().asyncStarted()).andReturn();
+        MvcResult response = legacyMvc.perform(asyncDispatch(initial)).andExpect(status().isOk())
+                .andExpect(content().string("hello")).andExpect(header().exists("ETag")).andReturn();
+        legacyMvc.perform(get(encodedPath).header("If-None-Match", response.getResponse().getHeader("ETag")))
+                .andExpect(status().isNotModified());
+        MvcResult range = legacyMvc.perform(get(encodedPath).header("Range", "bytes=1-3"))
+                .andExpect(request().asyncStarted()).andReturn();
+        legacyMvc.perform(asyncDispatch(range)).andExpect(status().isPartialContent())
+                .andExpect(header().string("Content-Range", "bytes 1-3/5"))
+                .andExpect(content().string("ell"));
+    }
+
+    /**
+     * 未显式启用历史直读地址时，通用 catch-all 路由不得被注册。
+     *
+     * @throws Exception MVC 请求执行失败
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-23
+     */
+    @Test
+    public void shouldNotRegisterLegacyRouteWhenDisabled() throws Exception {
+        FileStorageProperties.Web web = new FileStorageProperties.Web();
+        web.setPathPrefix("rsm");
+        web.setReadPath("content");
+        FileStorageWebRoutes routes = FileStorageWebRoutes.from(web);
+        FileStorageWebController controller = new FileStorageWebController(storage,
+                new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC),
+                stableAccess, null, new WebTransferConfiguration(128 * 1024, 128, 16, 0, null,
+                routes, true));
+        MockMvc disabledMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
+                .setControllerAdvice(new FileStorageExceptionHandler()).build();
+
+        disabledMvc.perform(get("/rsm/documents/readme.txt")).andExpect(status().isNotFound());
     }
 
     /** 无签名预览按匿名读取契约启动响应。 */
@@ -516,7 +577,7 @@ public class FileStorageWebControllerTest {
         FileStorageWebController controller = new FileStorageWebController(storage,
                 new FileStorageDirectAccessAuthorizer(true, (principal, key, operation) -> true),
                 Clock.fixed(NOW, ZoneOffset.UTC), stableAccess);
-        MockMvc directMvc = MockMvcBuilders.standaloneSetup(controller)
+        MockMvc directMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
 
         MvcResult started = directMvc.perform(get("/files/read/key/documents/readme.txt"))
@@ -669,7 +730,7 @@ public class FileStorageWebControllerTest {
         FileStorageWebController controller = new FileStorageWebController(storage,
                 new FileStorageDirectAccessAuthorizer(false, null), clock, stableAccess, null,
                 webTransferConfiguration(2, 16, request -> request.getHeader("X-Tenant")));
-        MockMvc keyLimitedMvc = MockMvcBuilders.standaloneSetup(controller)
+        MockMvc keyLimitedMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
         PresignedDownload preview = storage.presignDownload(downloadRequest(
                 "documents/readme.txt", PresignDownloadRequest.ResponseDisposition.INLINE));
@@ -723,7 +784,7 @@ public class FileStorageWebControllerTest {
                 new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC),
                 stableAccess, null, new WebTransferConfiguration(128 * 1024, 128, 16, 0, null,
                 "/files", false));
-        MockMvc disabledMvc = MockMvcBuilders.standaloneSetup(controller)
+        MockMvc disabledMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
         String payload = stableAccess.identifier(key).substring("v1.".length());
 
@@ -758,7 +819,7 @@ public class FileStorageWebControllerTest {
         FileStorageWebController controller = new FileStorageWebController(provider,
                 new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC),
                 stableAccess, cache);
-        MockMvc cacheMvc = MockMvcBuilders.standaloneSetup(controller)
+        MockMvc cacheMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
         String payload = stableAccess.identifier(ObjectKey.of("reports/remote.txt")).substring("v1.".length());
 
@@ -826,7 +887,7 @@ public class FileStorageWebControllerTest {
         FileStorageWebController controller = new FileStorageWebController(provider,
                 new FileStorageDirectAccessAuthorizer(true, rejectingPolicy), Clock.fixed(NOW, ZoneOffset.UTC),
                 access);
-        MockMvc providerMvc = MockMvcBuilders.standaloneSetup(controller)
+        MockMvc providerMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
         String payload = access.identifier(ObjectKey.of("reports/remote.txt")).substring("v1.".length());
 
@@ -888,7 +949,7 @@ public class FileStorageWebControllerTest {
                 new FileStorageDirectAccessAuthorizer(true, (principal, key, operation) -> true), clock,
                 stableAccess, null, webTransferConfiguration(2, 2,
                 request -> request.getHeader("X-Tenant")));
-        MockMvc keyLimitedMvc = MockMvcBuilders.standaloneSetup(controller)
+        MockMvc keyLimitedMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
         AtomicReference<Throwable> firstFailure = new AtomicReference<>();
         Thread firstRequest = new Thread(() -> runBlockingUpload(keyLimitedMvc, firstFailure),
@@ -989,7 +1050,7 @@ public class FileStorageWebControllerTest {
         FileStorageWebController controller = new FileStorageWebController(blockingStorage,
                 new FileStorageDirectAccessAuthorizer(false, null), clock, stableAccess, null,
                 webTransferConfiguration(maxConcurrentReads, 16, resolver));
-        return MockMvcBuilders.standaloneSetup(controller)
+        return FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
     }
 

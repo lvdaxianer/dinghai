@@ -6,8 +6,13 @@ import com.obs.services.BasicObsCredentialsProvider;
 import com.obs.services.ObsClient;
 import io.github.lvdaxianer.dinghai.filestorage.aliyunoss.AliyunOssFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
+import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
+import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
+import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
+import java.time.Duration;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
@@ -87,6 +92,55 @@ public class FileStorageAutoConfigurationTest {
 
                     Path expected = Path.of(storageRoot()).resolve("documents").resolve(key.value());
                     assertThat(Files.readString(expected)).isEqualTo("file-content");
+                });
+    }
+
+    /**
+     * 本地 provider 的预签名地址必须使用与 MVC 相同的配置化操作路径。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-23
+     */
+    @Test
+    public void shouldUseConfiguredOperationPathsForLocalPresignedUrls() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.web.path-prefix=rsm",
+                        "dinghai.file-storage.web.upload-path=upload-file",
+                        "dinghai.file-storage.web.download-path=download-file",
+                        "dinghai.file-storage.web.preview-path=preview-file")
+                .run(context -> {
+                    FileStorage storage = context.getBean(FileStorage.class);
+                    ObjectKey key = ObjectKey.of("documents/read me.txt");
+
+                    assertThat(storage.presignUpload(new PresignUploadRequest(key, Duration.ofMinutes(1L),
+                            "text/plain", 1024L)).url()).startsWith("/rsm/upload-file/");
+                    assertThat(storage.presignDownload(new PresignDownloadRequest(key, Duration.ofMinutes(1L),
+                            PresignDownloadRequest.ResponseDisposition.ATTACHMENT,
+                            io.github.lvdaxianer.dinghai.filestorage.core.CacheControl.privateNoCache())).url())
+                            .startsWith("/rsm/download-file/");
+                    assertThat(storage.presignDownload(new PresignDownloadRequest(key, Duration.ofMinutes(1L),
+                            PresignDownloadRequest.ResponseDisposition.INLINE,
+                            io.github.lvdaxianer.dinghai.filestorage.core.CacheControl.privateNoCache())).url())
+                            .startsWith("/rsm/preview-file/");
+                });
+    }
+
+    /**
+     * 非法 Web 路由值必须在自动装配阶段以统一错误码终止启动。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-23
+     */
+    @Test
+    public void shouldRejectUnsafeWebRouteConfigurationAtStartup() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.web.read-path=/read?unsafe=true")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    Throwable failure = rootCause(context.getStartupFailure());
+                    assertThat(failure).isInstanceOf(FileStorageException.class);
+                    assertThat(((FileStorageException) failure).errorCode())
+                            .isEqualTo(FileStorageErrorCode.INVALID_CONFIGURATION);
                 });
     }
 

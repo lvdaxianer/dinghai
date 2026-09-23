@@ -144,6 +144,41 @@ public class MinioStableFileReadIntegrationTest {
     }
 
     /**
+     * MinIO 对象应能通过显式启用的历史真实 key 路由读取。
+     *
+     * @throws Exception 创建、读取和清理临时 bucket 失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-23
+     */
+    @Test
+    public void shouldReadPrivateMinioObjectThroughEnabledLegacyRoute() throws Exception {
+        Assume.assumeTrue(Boolean.parseBoolean(System.getenv(ENABLED)));
+        MinioClient client = client();
+        String bucket = temporaryBucket();
+        ObjectKey key = ObjectKey.of("reports/legacy/private.txt");
+        client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+        try {
+            MinioFileStorageAdapter storage = new MinioFileStorageAdapter(client, bucket, endpoint());
+            put(storage, key, "legacy-minio-content");
+            StableFileAccessService stableAccess = new StableFileAccessService("documents",
+                    "stable-file-id-test-key-material-32b".getBytes(StandardCharsets.UTF_8));
+            FileStorageProperties.Web web = new FileStorageProperties.Web();
+            web.setLegacyReadEnabled(true);
+            FileStorageWebRoutes routes = FileStorageWebRoutes.from(web);
+            MockMvc mockMvc = webClient(storage, stableAccess, routes);
+
+            MvcResult started = mockMvc.perform(get("/files/reports/legacy/private.txt"))
+                    .andExpect(request().asyncStarted()).andReturn();
+
+            mockMvc.perform(asyncDispatch(started)).andExpect(status().isOk())
+                    .andExpect(content().string("legacy-minio-content"));
+        } finally {
+            client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(key.value()).build());
+            client.removeBucket(RemoveBucketArgs.builder().bucket(bucket).build());
+        }
+    }
+
+    /**
      * MinIO 对象首次直通后应异步落盘，远程变更时缓存必须失效。
      *
      * @throws Exception 创建、读取和清理临时 bucket 失败时抛出
@@ -191,10 +226,17 @@ public class MinioStableFileReadIntegrationTest {
 
     /** 创建稳定读取的 MockMvc 客户端。 */
     private MockMvc webClient(MinioFileStorageAdapter storage, StableFileAccessService stableAccess) {
+        return webClient(storage, stableAccess, FileStorageWebRoutes.from(new FileStorageProperties.Web()));
+    }
+
+    /** 创建使用指定配置化路由的 MockMvc 客户端。 */
+    private MockMvc webClient(MinioFileStorageAdapter storage, StableFileAccessService stableAccess,
+                              FileStorageWebRoutes routes) {
         FileStorageWebController controller = new FileStorageWebController(storage,
                 new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC),
-                stableAccess);
-        return MockMvcBuilders.standaloneSetup(controller)
+                stableAccess, null, new WebTransferConfiguration(128 * 1024, 128, 16, 0, null,
+                routes, true));
+        return FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
     }
 

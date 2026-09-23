@@ -18,10 +18,10 @@
 - **THEN** 组件拒绝请求且不读取任何存储对象
 
 ### Requirement: 无组件登录鉴权的私有对象流式读取
-Starter SHALL 提供以稳定文件 ID 为路径参数的读取、预览和下载端点。端点 MUST 在不调用组件用户鉴权策略的前提下解密 ID、从当前 `FileStorage` provider 流式读取私有对象，并且不得暴露 bucket 地址、对象 key 或存储密钥。读取端点 MUST 支持 ETag、Last-Modified、Cache-Control、304 和单 Range 响应；预览 MUST 为 `inline`，下载 MUST 为 `attachment`。所有稳定 ID 读取 MUST 计入可配置的 `web.max-concurrent-reads` 并发限制。
+Starter SHALL 在 `{path-prefix}{stable-read-path}/{identifier}` 及配置稳定路径下的预览和下载端点提供以稳定文件 ID 为路径参数的读取。默认路径 MUST 为 `/files/read/{identifier}`。端点 MUST 在不调用组件用户鉴权策略的前提下解密 ID、从当前 `FileStorage` provider 流式读取私有对象，并且不得暴露 bucket 地址、对象 key 或存储密钥。读取端点 MUST 支持 ETag、Last-Modified、Cache-Control、304 和单 Range 响应；预览 MUST 为 `inline`，下载 MUST 为 `attachment`。所有稳定 ID 读取 MUST 计入可配置的 `web.max-concurrent-reads` 并发限制。
 
 #### Scenario: 私有 MinIO 对象通过稳定 ID 预览
-- **WHEN** 浏览器请求有效稳定 ID 对应的私有 MinIO 对象预览地址
+- **WHEN** 浏览器请求有效稳定 ID 对应的配置预览地址
 - **THEN** Starter 以 `inline` 流式返回内容和缓存/Range 响应头，浏览器不直接访问 bucket
 
 #### Scenario: 稳定读取地址不使用组件用户授权

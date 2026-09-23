@@ -29,13 +29,9 @@ import org.springframework.http.HttpRange;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -47,8 +43,6 @@ import org.springframework.web.util.UriUtils;
  * @author lvdaxianer@yeah.net
  * @date 2026-09-11
  */
-@RestController
-@RequestMapping("${dinghai.file-storage.web.path-prefix:/files}")
 public class FileStorageWebController {
 
     static final String READ_PERMIT_ATTRIBUTE = FileStorageWebController.class.getName() + ".readPermit";
@@ -57,8 +51,6 @@ public class FileStorageWebController {
     private static final int DEFAULT_BUFFER_SIZE = 128 * 1024;
     /** HTTP 日期格式化器。 */
     private static final DateTimeFormatter HTTP_DATE = DateTimeFormatter.RFC_1123_DATE_TIME;
-    /** 真实 key 预览端点的固定路径。 */
-    private static final String REAL_KEY_PREVIEW_PATH = "/read/key/preview/";
 
     /** 后端中立的文件存储。 */
     private final FileStorage storage;
@@ -72,8 +64,10 @@ public class FileStorageWebController {
     private final ProviderFileReadCache readCache;
     /** 宿主可选的传输限流 key 解析器。 */
     private final WebTransferRateLimitKeyResolver keyResolver;
-    /** 已规范化的 Web 路径前缀。 */
-    private final String pathPrefix;
+    /** 已规范化的真实 key 预览 URL 基础路径。 */
+    private final String keyPreviewBasePath;
+    /** 已校验的 Web 路由集合。 */
+    private final FileStorageWebRoutes routes;
     private final int bufferSize;
     private final boolean sendfileBinaryContentTypesEnabled;
     private final WebTransferLimiter transferLimiter;
@@ -173,7 +167,8 @@ public class FileStorageWebController {
         }
         this.bufferSize = transferConfiguration.bufferSize();
         this.keyResolver = transferConfiguration.keyResolver();
-        this.pathPrefix = normalizedPathPrefix(transferConfiguration.pathPrefix());
+        this.keyPreviewBasePath = transferConfiguration.keyPreviewBasePath();
+        this.routes = transferConfiguration.routes();
         this.sendfileBinaryContentTypesEnabled = transferConfiguration.sendfileBinaryContentTypesEnabled();
         this.transferLimiter = new WebTransferLimiter(transferConfiguration.maxConcurrentUploads(),
                 transferConfiguration.maxConcurrentReads(),
@@ -197,7 +192,6 @@ public class FileStorageWebController {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    @PutMapping(value = "/upload/{*key}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<WebUploadResult> upload(@PathVariable String key,
                                        @RequestParam(required = false) Long expires,
                                        @RequestParam(required = false) String contentType,
@@ -246,7 +240,6 @@ public class FileStorageWebController {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    @GetMapping("/download/{*key}")
     public ResponseEntity<StreamingResponseBody> download(@PathVariable String key,
                                                             @RequestParam(required = false) Long expires,
                                                             @RequestParam(required = false) String cacheControl,
@@ -275,7 +268,6 @@ public class FileStorageWebController {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    @GetMapping("/preview/{*key}")
     public ResponseEntity<StreamingResponseBody> preview(@PathVariable String key,
                                                            @RequestParam(required = false) Long expires,
                                                            @RequestParam(required = false) String cacheControl,
@@ -291,7 +283,6 @@ public class FileStorageWebController {
     }
 
     /** 通过真实对象 key 读取对象，保留宿主直接访问或预签名校验。 */
-    @GetMapping("/read/key/{*key}")
     public ResponseEntity<StreamingResponseBody> keyRead(@PathVariable String key,
                                                            @RequestParam(required = false) Long expires,
                                                            @RequestParam(required = false) String cacheControl,
@@ -304,7 +295,6 @@ public class FileStorageWebController {
     }
 
     /** 通过真实对象 key 在线预览对象。 */
-    @GetMapping("/read/key/preview/{*key}")
     public ResponseEntity<StreamingResponseBody> keyPreview(@PathVariable String key,
                                                               @RequestParam(required = false) Long expires,
                                                               @RequestParam(required = false) String cacheControl,
@@ -317,7 +307,6 @@ public class FileStorageWebController {
     }
 
     /** 通过真实对象 key 下载对象。 */
-    @GetMapping("/read/key/download/{*key}")
     public ResponseEntity<StreamingResponseBody> keyDownload(@PathVariable String key,
                                                                @RequestParam(required = false) Long expires,
                                                                @RequestParam(required = false) String cacheControl,
@@ -340,7 +329,6 @@ public class FileStorageWebController {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    @GetMapping("/read/{identifier}")
     public ResponseEntity<StreamingResponseBody> stableRead(@PathVariable String identifier,
                                                               @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
                                                                       required = false) String ifNoneMatch,
@@ -353,7 +341,6 @@ public class FileStorageWebController {
     }
 
     /** 通过稳定 ID 的显式版本路径匿名读取对象。 */
-    @GetMapping("/read/v1/{identifier}")
     public ResponseEntity<StreamingResponseBody> stableVersionedRead(@PathVariable String identifier,
                                                                        @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
                                                                                required = false) String ifNoneMatch,
@@ -376,7 +363,6 @@ public class FileStorageWebController {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    @GetMapping("/read/preview/{identifier}")
     public ResponseEntity<StreamingResponseBody> stablePreview(@PathVariable String identifier,
                                                                  @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
                                                                          required = false) String ifNoneMatch,
@@ -389,7 +375,6 @@ public class FileStorageWebController {
     }
 
     /** 通过稳定 ID 的显式版本路径匿名预览对象。 */
-    @GetMapping("/read/v1/preview/{identifier}")
     public ResponseEntity<StreamingResponseBody> stableVersionedPreview(@PathVariable String identifier,
                                                                           @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
                                                                                   required = false) String ifNoneMatch,
@@ -412,7 +397,6 @@ public class FileStorageWebController {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-11
      */
-    @GetMapping("/read/download/{identifier}")
     public ResponseEntity<StreamingResponseBody> stableDownload(@PathVariable String identifier,
                                                                   @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
                                                                           required = false) String ifNoneMatch,
@@ -425,7 +409,6 @@ public class FileStorageWebController {
     }
 
     /** 通过稳定 ID 的显式版本路径匿名下载对象。 */
-    @GetMapping("/read/v1/download/{identifier}")
     public ResponseEntity<StreamingResponseBody> stableVersionedDownload(@PathVariable String identifier,
                                                                            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH,
                                                                                    required = false) String ifNoneMatch,
@@ -897,25 +880,7 @@ public class FileStorageWebController {
      * @date 2026-09-12
      */
     private String previewUrl(ObjectKey key) {
-        return pathPrefix + REAL_KEY_PREVIEW_PATH + UriUtils.encodePath(key.value(), StandardCharsets.UTF_8);
-    }
-
-    /**
-     * 规范化末尾斜杠，保证返回地址与请求映射一致。
-     *
-     * @param configuredPathPrefix 已校验的 Web 路径前缀
-     * @return 无末尾斜杠的路径前缀，根路径返回空字符串
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-12
-     */
-    private String normalizedPathPrefix(String configuredPathPrefix) {
-        java.util.Objects.requireNonNull(configuredPathPrefix, "configuredPathPrefix");
-        if ("/".equals(configuredPathPrefix)) {
-            return "";
-        }
-        return configuredPathPrefix.endsWith("/")
-                ? configuredPathPrefix.substring(0, configuredPathPrefix.length() - 1)
-                : configuredPathPrefix;
+        return keyPreviewBasePath + UriUtils.encodePath(key.value(), StandardCharsets.UTF_8);
     }
 
     /**
@@ -1029,5 +994,10 @@ public class FileStorageWebController {
         } catch (IllegalArgumentException exception) {
             throw invalidRequest("object key is invalid");
         }
+    }
+
+    /** 返回此控制器实例对应的动态路由集合。 */
+    FileStorageWebRoutes routes() {
+        return routes;
     }
 }

@@ -863,6 +863,20 @@ public class FileStorageProperties {
         private boolean enabled = true;
         /** 文件端点路径前缀。 */
         private String pathPrefix = "/files";
+        /** 上传端点相对于前缀的路径。 */
+        private String uploadPath = "/upload";
+        /** 下载端点相对于前缀的路径。 */
+        private String downloadPath = "/download";
+        /** 预览端点相对于前缀的路径。 */
+        private String previewPath = "/preview";
+        /** 真实对象 key 读取端点相对于前缀的路径。 */
+        private String readPath = "/read/key";
+        /** 稳定文件 ID 读取端点相对于前缀的路径。 */
+        private String stableReadPath = "/read";
+        /** 是否注册历史对象 key 直读端点。 */
+        private boolean legacyReadEnabled;
+        /** 历史对象 key 直读端点相对于前缀的路径。 */
+        private String legacyReadPath = "/";
         /** 是否允许没有预签名凭据的直接访问。 */
         private boolean directAccess;
         /** 是否允许标准二进制类型在接受压缩时使用 sendfile。 */
@@ -918,6 +932,160 @@ public class FileStorageProperties {
          */
         public void setPathPrefix(String pathPrefix) {
             this.pathPrefix = pathPrefix;
+        }
+
+        /**
+         * 获取上传端点相对于前缀的路径。
+         *
+         * @return 上传端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public String getUploadPath() {
+            return uploadPath;
+        }
+
+        /**
+         * 设置上传端点相对于前缀的路径。
+         *
+         * @param uploadPath 上传端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public void setUploadPath(String uploadPath) {
+            this.uploadPath = uploadPath;
+        }
+
+        /**
+         * 获取下载端点相对于前缀的路径。
+         *
+         * @return 下载端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public String getDownloadPath() {
+            return downloadPath;
+        }
+
+        /**
+         * 设置下载端点相对于前缀的路径。
+         *
+         * @param downloadPath 下载端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public void setDownloadPath(String downloadPath) {
+            this.downloadPath = downloadPath;
+        }
+
+        /**
+         * 获取预览端点相对于前缀的路径。
+         *
+         * @return 预览端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public String getPreviewPath() {
+            return previewPath;
+        }
+
+        /**
+         * 设置预览端点相对于前缀的路径。
+         *
+         * @param previewPath 预览端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public void setPreviewPath(String previewPath) {
+            this.previewPath = previewPath;
+        }
+
+        /**
+         * 获取真实对象 key 读取端点相对于前缀的路径。
+         *
+         * @return 真实对象 key 读取端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public String getReadPath() {
+            return readPath;
+        }
+
+        /**
+         * 设置真实对象 key 读取端点相对于前缀的路径。
+         *
+         * @param readPath 真实对象 key 读取端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public void setReadPath(String readPath) {
+            this.readPath = readPath;
+        }
+
+        /**
+         * 获取稳定文件 ID 读取端点相对于前缀的路径。
+         *
+         * @return 稳定文件 ID 读取端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public String getStableReadPath() {
+            return stableReadPath;
+        }
+
+        /**
+         * 设置稳定文件 ID 读取端点相对于前缀的路径。
+         *
+         * @param stableReadPath 稳定文件 ID 读取端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public void setStableReadPath(String stableReadPath) {
+            this.stableReadPath = stableReadPath;
+        }
+
+        /**
+         * 判断是否启用历史对象 key 直读端点。
+         *
+         * @return 启用时返回 true
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public boolean isLegacyReadEnabled() {
+            return legacyReadEnabled;
+        }
+
+        /**
+         * 设置是否启用历史对象 key 直读端点。
+         *
+         * @param legacyReadEnabled 是否启用
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public void setLegacyReadEnabled(boolean legacyReadEnabled) {
+            this.legacyReadEnabled = legacyReadEnabled;
+        }
+
+        /**
+         * 获取历史对象 key 直读端点相对于前缀的路径。
+         *
+         * @return 历史直读端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public String getLegacyReadPath() {
+            return legacyReadPath;
+        }
+
+        /**
+         * 设置历史对象 key 直读端点相对于前缀的路径。
+         *
+         * @param legacyReadPath 历史直读端点路径
+         * @author lvdaxianer@yeah.net
+         * @date 2026-09-23
+         */
+        public void setLegacyReadPath(String legacyReadPath) {
+            this.legacyReadPath = legacyReadPath;
         }
 
         /**
