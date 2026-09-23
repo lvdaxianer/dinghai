@@ -7,6 +7,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
+import org.springframework.web.util.pattern.PathPatternParser;
 
 /**
  * 在 MVC 初始化完成后为文件控制器注册已校验的动态路由。
@@ -15,6 +16,9 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
  * @date 2026-09-23
  */
 final class FileStorageWebRouteRegistrar implements SmartInitializingSingleton {
+
+    /** Spring 6 多段对象 key 路由必须使用 PathPatternParser。 */
+    private static final RequestMappingInfo.BuilderConfiguration MAPPING_OPTIONS = mappingOptions();
 
     private final ObjectProvider<RequestMappingHandlerMapping> mappings;
     private final FileStorageWebController controller;
@@ -70,7 +74,7 @@ final class FileStorageWebRouteRegistrar implements SmartInitializingSingleton {
     private static void registerUpload(RequestMappingHandlerMapping mapping,
                                        FileStorageWebController controller, FileStorageWebRoutes routes) {
         RequestMappingInfo info = RequestMappingInfo.paths(routes.upload()).methods(RequestMethod.PUT)
-                .produces(MediaType.APPLICATION_JSON_VALUE).build();
+                .produces(MediaType.APPLICATION_JSON_VALUE).options(MAPPING_OPTIONS).build();
         register(mapping, info, controller, "upload");
     }
 
@@ -100,7 +104,16 @@ final class FileStorageWebRouteRegistrar implements SmartInitializingSingleton {
     /** 注册 GET 路由。 */
     private static void registerGet(RequestMappingHandlerMapping mapping,
                                     FileStorageWebController controller, String method, String path) {
-        register(mapping, RequestMappingInfo.paths(path).methods(RequestMethod.GET).build(), controller, method);
+        RequestMappingInfo info = RequestMappingInfo.paths(path).methods(RequestMethod.GET)
+                .options(MAPPING_OPTIONS).build();
+        register(mapping, info, controller, method);
+    }
+
+    /** 创建与 Spring 6 MVC 默认策略一致的动态路由配置。 */
+    private static RequestMappingInfo.BuilderConfiguration mappingOptions() {
+        RequestMappingInfo.BuilderConfiguration options = new RequestMappingInfo.BuilderConfiguration();
+        options.setPatternParser(PathPatternParser.defaultInstance);
+        return options;
     }
 
     /** 注册一个已解析业务方法。 */
