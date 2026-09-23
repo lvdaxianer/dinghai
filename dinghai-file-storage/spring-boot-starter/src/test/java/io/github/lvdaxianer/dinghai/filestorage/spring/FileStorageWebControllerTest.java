@@ -510,7 +510,7 @@ public class FileStorageWebControllerTest {
      */
     @Test
     public void shouldReadUnicodeObjectThroughConfiguredLegacyRoute() throws Exception {
-        ObjectKey key = ObjectKey.of("archives/目录/hello world.gltf");
+        ObjectKey key = ObjectKey.of("origin/29b071a7-27fe-409d-a0e5-1e4c945d496a/板卡_PSR-663UG-DM-1-HMI.gltf");
         write(key, "hello", "model/gltf+json", new CacheControl("public, max-age=60"));
         FileStorageProperties.Web web = new FileStorageProperties.Web();
         web.setPathPrefix("rsm");
@@ -525,7 +525,8 @@ public class FileStorageWebControllerTest {
                 routes, true));
         MockMvc legacyMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
-        String encodedPath = "/rsm/archives/%E7%9B%AE%E5%BD%95/hello%20world.gltf";
+        String encodedPath = "/rsm/origin/29b071a7-27fe-409d-a0e5-1e4c945d496a/"
+                + "%E6%9D%BF%E5%8D%A1_PSR-663UG-DM-1-HMI.gltf";
 
         MvcResult initial = legacyMvc.perform(get(encodedPath))
                 .andExpect(request().asyncStarted()).andReturn();
