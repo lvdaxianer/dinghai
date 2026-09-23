@@ -19,6 +19,14 @@ public class ObjectKeyTest {
         assertEquals("用户资料/头像/1.png", ObjectKey.of("用户资料/头像/1.png").value());
     }
 
+    /** UTF-8 百分号编码的中文 key 应还原为相同逻辑路径。 */
+    @Test
+    public void decodesUtf8PercentEncodedChineseKey() {
+        assertEquals("中文目录/板卡_PSR-663UG-DM-1-HMI.gltf",
+                ObjectKey.of("%E4%B8%AD%E6%96%87%E7%9B%AE%E5%BD%95/"
+                        + "%E6%9D%BF%E5%8D%A1_PSR-663UG-DM-1-HMI.gltf").value());
+    }
+
     /** NFC 规范化应在校验前完成。 */
     @Test
     public void normalizesUnicodeToNfc() {

@@ -110,6 +110,33 @@ public class LocalFileStorageAdapterTest {
         assertEquals("头像", read(storage.get(key)));
     }
 
+    /** 已有 UTF-8 字节名的中文目录和文件应在本地适配器中正常读取。 */
+    @Test
+    public void readsExistingUtf8UnicodePathWithoutNativeEncodingDependency() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        ObjectKey key = ObjectKey.of("origin/中文目录/板卡_PSR-663UG-DM-1-HMI.gltf");
+        Path existing = Path.of(LocalObjectPathResolver.utf8ObjectUri(root.toRealPath(), key));
+        Files.createDirectories(existing.getParent());
+        Files.writeString(existing, "模型内容", StandardCharsets.UTF_8);
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+
+        assertEquals("模型内容", read(storage.get(key)));
+        assertEquals(existing.toRealPath().toUri().getRawPath(),
+                storage.localFile(key).orElseThrow().toUri().getRawPath());
+    }
+
+    /** 对象 key 到本地路径必须以 UTF-8 原始字节构造 file URI。 */
+    @Test
+    public void encodesUnicodeObjectPathAsUtf8FileUri() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath().toRealPath();
+        ObjectKey key = ObjectKey.of("中文目录/板卡.gltf");
+
+        assertEquals("/" + root.toUri().getRawPath().substring(1)
+                        + "%E4%B8%AD%E6%96%87%E7%9B%AE%E5%BD%95/"
+                        + "%E6%9D%BF%E5%8D%A1.gltf",
+                LocalObjectPathResolver.utf8ObjectUri(root, key).getRawPath());
+    }
+
     /** 覆盖同一对象会替换内容和 ETag。 */
     @Test
     public void overwritingObjectReplacesContentAndEtag() throws Exception {

@@ -5,6 +5,8 @@ import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 
 import java.io.IOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -16,6 +18,7 @@ import java.util.Objects;
 /** 将对象 key 安全解析为本地内容和元数据路径。 */
 final class LocalObjectPathResolver {
     private static final String METADATA_DIRECTORY_SUFFIX = ".dinghai-metadata";
+    private static final char[] HEX = "0123456789ABCDEF".toCharArray();
     private final Path root;
     private final Path metadataRoot;
 
@@ -36,7 +39,7 @@ final class LocalObjectPathResolver {
     /** 解析可读写的对象路径并校验父目录未越出根目录。 */
     Path resolve(ObjectKey key) {
         Objects.requireNonNull(key, "key");
-        Path candidate = root.resolve(key.value()).normalize();
+        Path candidate = Path.of(utf8ObjectUri(root, key)).normalize();
         if (!candidate.startsWith(root)) {
             throw failure(FileStorageErrorCode.INVALID_OBJECT_KEY,
                     "object key resolves outside storage root", null);
@@ -47,6 +50,60 @@ final class LocalObjectPathResolver {
                     "object key resolves to a symbolic link", null);
         }
         return candidate;
+    }
+
+    /**
+     * 将已验证 object key 以 UTF-8 原始字节编码为本地文件 URI。
+     *
+     * @param root 已真实化的本地存储根目录
+     * @param key 已完成安全校验的对象 key
+     * @return 保留 UTF-8 文件系统字节的绝对文件 URI
+     */
+    static URI utf8ObjectUri(Path root, ObjectKey key) {
+        String rootUri = root.toUri().toString();
+        String separator = rootUri.endsWith("/") ? "" : "/";
+        return URI.create(rootUri + separator + encodeUtf8Path(key.value()));
+    }
+
+    /**
+     * 将相对 key 的 UTF-8 字节编码为 URI 原始路径。
+     *
+     * @param key 已验证的相对对象 key
+     * @return 可拼接到目录 URI 后的百分号编码路径
+     */
+    private static String encodeUtf8Path(String key) {
+        byte[] bytes = key.getBytes(StandardCharsets.UTF_8);
+        StringBuilder encoded = new StringBuilder(bytes.length * 3);
+        for (byte value : bytes) {
+            appendEncodedByte(encoded, Byte.toUnsignedInt(value));
+        }
+        return encoded.toString();
+    }
+
+    /**
+     * 追加 URI 路径中可直接使用或需百分号编码的单个字节。
+     *
+     * @param encoded 当前 URI 路径缓冲区
+     * @param value 无符号字节值
+     */
+    private static void appendEncodedByte(StringBuilder encoded, int value) {
+        if (isPathByte(value)) {
+            encoded.append((char) value);
+        } else {
+            encoded.append('%').append(HEX[value >>> 4]).append(HEX[value & 0x0F]);
+        }
+    }
+
+    /**
+     * 判断字节是否可原样放入 file URI 路径。
+     *
+     * @param value 无符号字节值
+     * @return 可原样写入时为 true
+     */
+    private static boolean isPathByte(int value) {
+        return value == '/' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
+                || value >= '0' && value <= '9' || value == '-' || value == '.' || value == '_'
+                || value == '~';
     }
 
     /** 解析不可由对象 key 直接访问的元数据文件。 */
@@ -93,7 +150,7 @@ final class LocalObjectPathResolver {
     private static String digestKey(ObjectKey key) {
         try {
             byte[] bytes = MessageDigest.getInstance("SHA-256")
-                    .digest(key.value().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    .digest(key.value().getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(bytes);
         } catch (NoSuchAlgorithmException exception) {
             throw failure(FileStorageErrorCode.INTERNAL_ERROR,
