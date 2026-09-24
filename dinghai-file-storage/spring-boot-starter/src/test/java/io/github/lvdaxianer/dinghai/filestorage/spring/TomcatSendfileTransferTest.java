@@ -43,6 +43,23 @@ public class TomcatSendfileTransferTest {
         assertEquals(4L, request.getAttribute(TomcatSendfileTransfer.END));
     }
 
+    /**
+     * 非 ASCII 绝对路径不能传给 Tomcat sendfile，必须让调用方回退流式读取。
+     *
+     * @throws Exception 创建 Unicode 临时文件失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-24
+     */
+    @Test
+    public void shouldRejectNonAsciiAbsolutePathForTomcatSendfile() throws Exception {
+        Path file = temporaryFolder.newFile("端子标记槽-NJD-11L.gltf").toPath();
+        Files.writeString(file, "hello", StandardCharsets.UTF_8);
+        MockHttpServletRequest request = tomcatRequest();
+
+        assertFalse(TomcatSendfileTransfer.register(request, file, 0L, 5L));
+        assertNull(request.getAttribute(TomcatSendfileTransfer.FILENAME));
+    }
+
     @Test
     public void shouldRejectSecureCompressedOrUnsupportedRequests() throws Exception {
         Path file = temporaryFolder.newFile("content.bin").toPath();

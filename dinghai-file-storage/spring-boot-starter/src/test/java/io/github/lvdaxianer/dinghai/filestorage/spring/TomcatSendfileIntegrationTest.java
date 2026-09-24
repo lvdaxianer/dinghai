@@ -97,6 +97,60 @@ public class TomcatSendfileIntegrationTest {
         assertEquals(5L, rangeAttributes.end());
     }
 
+    /**
+     * Unicode 本地文件在真实 Tomcat 中必须回退流式读取并保留完整 HTTP 响应。
+     *
+     * @throws Exception 创建临时目录、启动服务器或请求文件时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-24
+     */
+    @Test
+    public void shouldStreamUnicodeLocalPathThroughEmbeddedTomcat() throws Exception {
+        Path root = Files.createTempDirectory("dinghai-sendfile-unicode-");
+        context = start(root);
+        byte[] content = "unicode-gltf-response".getBytes(StandardCharsets.UTF_8);
+        String identifier = putAndIdentifier("origin/479c7172-7832-49bf-96b4-52772b3db05b/端子标记槽-NJD-11L.gltf", content, "model/gltf+json");
+
+        assertUnicodeCompleteResponse(identifier, content);
+        assertUnicodeRangeResponse(identifier, content);
+    }
+
+    /**
+     * 断言 Unicode 文件完整读取走流式回退且不注册 sendfile。
+     *
+     * @param identifier 稳定文件 ID
+     * @param content 期望文件字节
+     * @throws Exception HTTP 请求失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-24
+     */
+    private void assertUnicodeCompleteResponse(String identifier, byte[] content) throws Exception {
+        SENDFILE.set(null);
+        HttpResponse<String> complete = request(identifier, null);
+        assertEquals(200, complete.statusCode());
+        assertEquals("unicode-gltf-response", complete.body());
+        assertEquals(String.valueOf(content.length), complete.headers().firstValue("Content-Length").orElseThrow());
+        assertNull(SENDFILE.get());
+    }
+
+    /**
+     * 断言 Unicode 文件单 Range 读取仍返回正确流式字节且不注册 sendfile。
+     *
+     * @param identifier 稳定文件 ID
+     * @param content 完整文件字节
+     * @throws Exception HTTP 请求失败时抛出
+     * @author lvdaxianer@yeah.net
+     * @date 2026-09-24
+     */
+    private void assertUnicodeRangeResponse(String identifier, byte[] content) throws Exception {
+        SENDFILE.set(null);
+        HttpResponse<String> range = request(identifier, "bytes=1-4");
+        assertEquals(206, range.statusCode());
+        assertEquals("nico", range.body());
+        assertEquals("bytes 1-4/" + content.length, range.headers().firstValue("Content-Range").orElseThrow());
+        assertNull(SENDFILE.get());
+    }
+
     /** 启用容器压缩后，标准二进制对象仍应走 sendfile 且不得声明错误的内容编码。 */
     @Test
     public void shouldUseSendfileForBinaryObjectWhenCompressionIsEnabled() throws Exception {
