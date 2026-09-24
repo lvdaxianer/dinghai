@@ -52,8 +52,8 @@ Starter SHALL 默认以 `web.enabled=true`、`web.path-prefix=/files`、`web.upl
 
 #### Scenario: 本地文件传输自动回退
 
-- **WHEN** Local 主文件或已校验远程缓存命中，但请求使用 TLS、响应压缩、非 Tomcat 容器或容器拒绝文件传输
-- **THEN** 端点自动使用有界流式复制，并保持内容、条件请求和 Range 语义
+- **WHEN** Local 主文件或已校验远程缓存命中，但请求使用 TLS、响应压缩、非 Tomcat 容器、容器拒绝文件传输，或最终绝对路径包含非 ASCII 字符
+- **THEN** 端点自动使用有界流式复制，并保持内容、内容长度、条件请求和 Range 语义
 
 ### Requirement: 零拷贝传输并发边界
 
