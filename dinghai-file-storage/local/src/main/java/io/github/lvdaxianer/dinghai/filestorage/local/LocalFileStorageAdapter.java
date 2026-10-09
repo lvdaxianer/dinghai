@@ -43,6 +43,8 @@ import java.util.Properties;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 /** 基于本地磁盘的流式文件存储适配器。 */
@@ -50,6 +52,7 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
         MultipartFileStorage {
     private static final int BUFFER_SIZE = 8192;
     private static final String DEFAULT_CONTENT_TYPE = "application/octet-stream";
+    private static final Logger LOGGER = Logger.getLogger(LocalFileStorageAdapter.class.getName());
     /** 本地预签名 URL 的默认最长有效期。 */
     public static final Duration DEFAULT_MAXIMUM_PRESIGN_EXPIRY = Duration.ofHours(1);
     private static final String DEFAULT_PATH_PREFIX = "/files";
@@ -259,13 +262,50 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
     public Stream<ObjectMetadata> list() {
         try {
             Path root = paths.root();
-            return Files.walk(root).filter(this::isRegularObjectFile).map(root::relativize)
+            Stream<Path> walk = Files.walk(root);
+            return walk.filter(this::isRegularObjectFile).map(root::relativize)
                     .map(Path::toString).map(value -> value.replace(java.io.File.separatorChar, '/'))
-                    .map(ObjectKey::of).map(key -> stat(key).orElseThrow());
+                    .map(ObjectKey::of).map(this::readMetadataForListing).flatMap(Optional::stream)
+                    .onClose(walk::close);
         } catch (IOException exception) {
             throw failure(FileStorageErrorCode.STORAGE_UNAVAILABLE,
                     "local object listing failed", exception);
         }
+    }
+
+    /** 读取列表对象元数据；单个对象异常时记录告警并跳过。 */
+    private Optional<ObjectMetadata> readMetadataForListing(ObjectKey key) {
+        Path metadata = paths.metadata(key);
+        if (!Files.isRegularFile(metadata, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            logMetadataListingSkip(key, "metadata file is missing");
+            return Optional.empty();
+        }
+        try {
+            Path object = paths.resolve(key);
+            return Optional.of(readMetadata(key, object));
+        } catch (IOException | FileStorageException | IllegalArgumentException exception) {
+            logMetadataListingSkip(key, safeMetadataFailureReason(exception));
+            return Optional.empty();
+        }
+    }
+
+    /** 记录安全且限长的单对象元数据跳过告警。 */
+    private static void logMetadataListingSkip(ObjectKey key, String reason) {
+        LOGGER.log(Level.WARNING, "[本地文件枚举] 跳过元数据异常对象, objectPath={0}, reason={1}",
+                new Object[]{key.value(), reason});
+    }
+
+    /** 将元数据读取异常转换为不含完整路径或文件内容的安全原因。 */
+    private static String safeMetadataFailureReason(Exception exception) {
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            return exception.getClass().getSimpleName();
+        }
+        String safeMessage = message.replace('\r', ' ').replace('\n', ' ');
+        if (safeMessage.length() > 128) {
+            safeMessage = safeMessage.substring(0, 128);
+        }
+        return exception.getClass().getSimpleName() + ": " + safeMessage;
     }
 
     /** 判断目录项是否为不跟随符号链接的普通对象文件。 */

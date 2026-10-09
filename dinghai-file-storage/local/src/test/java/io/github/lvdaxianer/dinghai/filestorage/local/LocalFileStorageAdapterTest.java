@@ -274,6 +274,53 @@ public class LocalFileStorageAdapterTest {
         }
     }
 
+    /** 枚举跳过缺失元数据的对象并继续返回其他完整对象。 */
+    @Test
+    public void skipsObjectWithMissingMetadataAndContinuesListing() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+        ObjectKey validKey = ObjectKey.of("valid.txt");
+        ObjectKey missingMetadataKey = ObjectKey.of("missing-metadata.txt");
+        storage.put(upload(validKey, "valid"));
+        storage.put(upload(missingMetadataKey, "missing"));
+
+        Files.delete(new LocalObjectPathResolver(root).metadata(missingMetadataKey));
+
+        try (Stream<ObjectMetadata> objects = storage.list()) {
+            assertEquals(Set.of(validKey.value()), objects.map(metadata -> metadata.key().value())
+                    .collect(java.util.stream.Collectors.toSet()));
+        }
+    }
+
+    /** 枚举跳过损坏元数据的对象并继续返回其他完整对象。 */
+    @Test
+    public void skipsObjectWithCorruptMetadataAndContinuesListing() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+        ObjectKey validKey = ObjectKey.of("valid.txt");
+        ObjectKey corruptMetadataKey = ObjectKey.of("corrupt-metadata.txt");
+        storage.put(upload(validKey, "valid"));
+        storage.put(upload(corruptMetadataKey, "corrupt"));
+
+        Path metadata = new LocalObjectPathResolver(root).metadata(corruptMetadataKey);
+        Files.writeString(metadata, "contentType=text/plain\netag=\\uZZZZ\n");
+
+        try (Stream<ObjectMetadata> objects = storage.list()) {
+            assertEquals(Set.of(validKey.value()), objects.map(metadataValue -> metadataValue.key().value())
+                    .collect(java.util.stream.Collectors.toSet()));
+        }
+    }
+
+    /** 空的本地对象目录枚举为空且返回可关闭流。 */
+    @Test
+    public void listsEmptyObjectDirectoryAsEmptyStream() throws Exception {
+        LocalFileStorageAdapter storage = storage();
+
+        try (Stream<ObjectMetadata> objects = storage.list()) {
+            assertTrue(objects.findAny().isEmpty());
+        }
+    }
+
     /** 枚举忽略存储根内的符号链接，避免把根外文件视为对象。 */
     @Test
     public void ignoresSymbolicLinksWhenListingObjects() throws Exception {
