@@ -17,12 +17,17 @@ Requirements: Java 21+, Spring Boot 3.x.
 | `dinghai-file-storage-aliyun-oss` | Fixed-bucket Alibaba Cloud OSS V2 SDK adapter with native presign capability |
 | `dinghai-file-storage-huaweicloud-obs` | Fixed-bucket Huawei Cloud OBS adapter with native presigning and multipart support |
 | `dinghai-file-storage-spring-boot-starter` | Auto-wires file storage by provider and provides local web presign endpoints |
+| `dinghai-file-storage-*-spring-boot-starter` | Dedicated auto-configuration and provider factory for MinIO, RustFS, Alibaba Cloud OSS, and Huawei Cloud OBS |
 
 The `benchmark` module is for development verification only and is not published (see "Benchmark" at the end).
 
 ## Quick Start
 
-Add the Starter:
+Add the Starter. The public Starter contains only the contract, Local, Web, cache, and migration capabilities; a remote backend additionally requires exactly its matching provider Starter.
+
+`dinghai.file-storage.provider` selects the runtime Bean and provider factory, but it cannot remove jars already present in the Maven dependency graph. To keep security scans scoped to the SDK actually used, declare the minimal dependency combination below and do not include all four provider Starters.
+
+Local:
 
 ```xml
 <dependency>
@@ -31,6 +36,69 @@ Add the Starter:
     <version>1.0.0</version>
 </dependency>
 ```
+
+MinIO:
+
+```xml
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-minio-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+RustFS:
+
+```xml
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-rustfs-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+For Alibaba Cloud OSS or Huawei Cloud OBS, replace the provider artifact with `dinghai-file-storage-aliyun-oss-spring-boot-starter` or `dinghai-file-storage-huaweicloud-obs-spring-boot-starter` respectively.
+
+For example, a complete remote dependency pair is:
+
+```xml
+<!-- Required public Starter for every remote backend -->
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+<!-- OSS: replace this artifact with huaweicloud-obs-spring-boot-starter for OBS -->
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-aliyun-oss-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+An OBS application only replaces the second artifact with `dinghai-file-storage-huaweicloud-obs-spring-boot-starter`; it does not need OSS, MinIO, or RustFS dependencies at the same time.
+
+The dependency boundary is:
+
+| Selected provider | Provider Starter | Runtime provider SDK |
+| --- | --- | --- |
+| `local` | None | No remote SDK |
+| `minio` | `dinghai-file-storage-minio-spring-boot-starter` | MinIO SDK |
+| `rustfs` | `dinghai-file-storage-rustfs-spring-boot-starter` | AWS SDK for Java v2 S3, without the MinIO SDK |
+| `aliyun-oss` | `dinghai-file-storage-aliyun-oss-spring-boot-starter` | Alibaba Cloud OSS V2 SDK |
+| `huaweicloud-obs` | `dinghai-file-storage-huaweicloud-obs-spring-boot-starter` | Huawei Cloud OBS SDK |
+
+If a provider is configured without its matching Starter, startup fails with `INVALID_CONFIGURATION`; there is no silent fallback to another provider. When using RustFS, do not additionally declare the MinIO Starter or `io.minio:minio`.
 
 Minimal configuration (Local backend, sensitive values injected via environment variables):
 
@@ -87,11 +155,11 @@ The MinIO adapter **does not create or modify buckets automatically**; create th
 | `rustfs.endpoint` | `String` | none (required when provider=rustfs) | RustFS S3 API endpoint, for example `http://localhost:9100` |
 | `rustfs.access-key` | `String` | none (required) | Access key, injected by the deployment environment |
 | `rustfs.secret-key` | `String` | none (required) | Secret access key, injected by the deployment environment |
-| `rustfs.connect-timeout` | `Duration` | `10s` | Connect timeout (OkHttp client); must be positive |
-| `rustfs.read-timeout` | `Duration` | `10s` | Read timeout; must be positive |
-| `rustfs.write-timeout` | `Duration` | `10s` | Write timeout; must be positive |
+| `rustfs.connect-timeout` | `Duration` | `10s` | Connect timeout (AWS Apache HTTP client); must be positive |
+| `rustfs.read-timeout` | `Duration` | `10s` | Read/API-call timeout; must be positive |
+| `rustfs.write-timeout` | `Duration` | `10s` | Write/API-call timeout; must be positive |
 
-RustFS uses its S3-compatible API. Its bucket should remain private and must be pre-created by operations. The adapter **does not create buckets or change bucket policies**; upload and download presigns are issued natively by RustFS.
+RustFS uses an independent AWS SDK for Java v2 S3 client and presigner against its S3-compatible API. Its bucket should remain private and must be pre-created by operations. The adapter **does not create buckets or change bucket policies**; it uses endpoint override, path-style access, and a fixed S3 signing region. Object and multipart-part presigns are native `PUT` / `GET` URLs.
 
 ### aliyun-oss (Alibaba Cloud OSS Backend)
 
