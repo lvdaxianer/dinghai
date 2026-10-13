@@ -24,4 +24,4 @@
 - [x] 4.1 更新中文/英文文件存储 README，说明公共 Starter、provider Starter、配置变量和 BREAKING 迁移方式。
 - [x] 4.2 增加 Local、MinIO、RustFS、OSS、OBS 的最小 Maven 依赖示例和安全扫描边界说明。
 - [x] 4.3 执行 `openspec validate provider-scoped-storage-dependencies --strict`，核对所有需求都有实现和测试映射。
-- [ ] 4.4 执行完整 Maven reactor 测试、包构建、provider dependency tree 验证，并完成代码审查和最终集成。
+- [x] 4.4 执行完整 Maven reactor 测试、包构建、provider dependency tree 验证，并完成代码审查和最终集成。
