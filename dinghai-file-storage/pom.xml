@@ -19,9 +19,13 @@
         <module>core</module>
         <module>local</module>
         <module>minio</module>
+        <module>minio-spring-boot-starter</module>
         <module>rustfs</module>
+        <module>rustfs-spring-boot-starter</module>
         <module>aliyun-oss</module>
+        <module>aliyun-oss-spring-boot-starter</module>
         <module>huaweicloud-obs</module>
+        <module>huaweicloud-obs-spring-boot-starter</module>
         <module>spring-boot-starter</module>
         <module>benchmark</module>
     </modules>
