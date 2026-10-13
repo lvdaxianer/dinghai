@@ -11,12 +11,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignedUpload;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
-import io.minio.MakeBucketArgs;
-import io.minio.MinioClient;
-import io.minio.RemoveBucketArgs;
-import io.minio.RemoveObjectArgs;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -26,6 +21,10 @@ import java.time.Duration;
 import java.util.UUID;
 import org.junit.Assume;
 import org.junit.Test;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
+import software.amazon.awssdk.services.s3.model.DeleteBucketRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -58,10 +57,6 @@ public class RustfsLifecycleIntegrationTest {
     private static final ObjectKey MULTIPART_KEY = ObjectKey.of("multipart/recovered.bin");
     /** 测试对象内容类型。 */
     private static final String CONTENT_TYPE = "text/plain";
-    /** multipart 文件字段名称。 */
-    private static final String FILE_FIELD_NAME = "file";
-    /** multipart 上传文件名称。 */
-    private static final String FILE_NAME = "upload.txt";
     /** HTTP 成功状态码下界。 */
     private static final int HTTP_SUCCESS_MIN = 200;
     /** HTTP 成功状态码上界（不包含）。 */
@@ -84,14 +79,20 @@ public class RustfsLifecycleIntegrationTest {
     public void shouldCompleteLifecycleAndNativePresigningAgainstRustfs() throws Exception {
         Assume.assumeTrue(Boolean.parseBoolean(System.getenv(ENABLED)));
         String bucket = temporaryBucket();
-        MinioClient client = client();
-        client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+        RustfsClients clients = RustfsClientFactory.create(configuration(bucket));
+        S3Client client = clients.s3Client();
+        client.createBucket(CreateBucketRequest.builder().bucket(bucket).build());
         try {
-            verifyObjectLifecycle(storage(bucket));
-            verifyNativePresigning(storage(bucket));
-            verifyMultipartRecovery(storage(bucket), bucket);
+            try (RustfsFileStorageAdapter lifecycle = storage(bucket);
+                 RustfsFileStorageAdapter presigning = storage(bucket);
+                 RustfsFileStorageAdapter multipart = storage(bucket)) {
+                verifyObjectLifecycle(lifecycle);
+                verifyNativePresigning(presigning);
+                verifyMultipartRecovery(multipart, bucket);
+            }
         } finally {
             removeTemporaryBucket(client, bucket);
+            clients.close();
         }
     }
 
@@ -119,7 +120,7 @@ public class RustfsLifecycleIntegrationTest {
     }
 
     /**
-     * 验证 RustFS 原生 POST 上传表单和 GET 下载地址都可实际访问。
+     * 验证 RustFS 原生 PUT 上传地址和 GET 下载地址都可实际访问。
      *
      * @param storage RustFS 文件存储适配器
      * @throws Exception 预签名 HTTP 请求失败时抛出
@@ -130,7 +131,10 @@ public class RustfsLifecycleIntegrationTest {
         byte[] content = "rustfs-presigned-content".getBytes(StandardCharsets.UTF_8);
         PresignedUpload upload = storage.presignUpload(new PresignUploadRequest(PRESIGNED_KEY,
                 PRESIGN_EXPIRY, CONTENT_TYPE, content.length, CacheControl.privateNoCache()));
-        HttpResponse<String> uploadResponse = httpClient().send(presignedPost(upload, content),
+        HttpRequest.Builder uploadRequest = HttpRequest.newBuilder(URI.create(upload.uri()))
+                .PUT(HttpRequest.BodyPublishers.ofByteArray(content));
+        upload.requiredHeaders().forEach(uploadRequest::header);
+        HttpResponse<String> uploadResponse = httpClient().send(uploadRequest.build(),
                 HttpResponse.BodyHandlers.ofString());
         assertTrue(uploadResponse.statusCode() >= HTTP_SUCCESS_MIN
                 && uploadResponse.statusCode() < HTTP_SUCCESS_MAX_EXCLUSIVE);
@@ -156,12 +160,13 @@ public class RustfsLifecycleIntegrationTest {
             uploadPresignedPart(first, session, 2, (byte) 'c');
             MultipartPart second = first.listParts(session).get(1);
 
-            RustfsFileStorageAdapter recovered = storage(bucket);
-            assertEquals(java.util.List.of(retried, second), recovered.listParts(session));
-            assertEquals(PART_SIZE * 2L, recovered.complete(session,
-                    new MultipartCompletion(java.util.List.of(retried, second))).contentLength());
-            try (var object = recovered.get(MULTIPART_KEY).orElseThrow()) {
-                assertEquals('b', object.stream().read());
+            try (RustfsFileStorageAdapter recovered = storage(bucket)) {
+                assertEquals(java.util.List.of(retried, second), recovered.listParts(session));
+                assertEquals(PART_SIZE * 2L, recovered.complete(session,
+                        new MultipartCompletion(java.util.List.of(retried, second))).contentLength());
+                try (var object = recovered.get(MULTIPART_KEY).orElseThrow()) {
+                    assertEquals('b', object.stream().read());
+                }
             }
             assertNotEquals(initial.etag(), retried.etag());
         } finally {
@@ -193,99 +198,6 @@ public class RustfsLifecycleIntegrationTest {
     }
 
     /**
-     * 按 RustFS 签发的表单字段构建 multipart POST 请求。
-     *
-     * @param upload RustFS 签发的上传表单
-     * @param content 待上传对象内容
-     * @return 可直接发送的 HTTP 请求
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-13
-     */
-    private HttpRequest presignedPost(PresignedUpload upload, byte[] content) {
-        String boundary = "dinghai-" + UUID.randomUUID();
-        return HttpRequest.newBuilder(URI.create(upload.uri()))
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .POST(HttpRequest.BodyPublishers.ofByteArray(multipartBody(upload, content, boundary)))
-                .build();
-    }
-
-    /**
-     * 编码 RustFS POST policy 要求的表单字段及文件段。
-     *
-     * @param upload RustFS 签发的上传表单
-     * @param content 待上传对象内容
-     * @param boundary multipart 分隔符
-     * @return multipart 请求体
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-13
-     */
-    private byte[] multipartBody(PresignedUpload upload, byte[] content, String boundary) {
-        ByteArrayOutputStream body = new ByteArrayOutputStream();
-        upload.formFields().forEach((name, value) -> writeField(body, boundary, name, value));
-        writeFile(body, boundary, content);
-        write(body, "--" + boundary + "--\r\n");
-        return body.toByteArray();
-    }
-
-    /**
-     * 写入一个 multipart 文本字段。
-     *
-     * @param body multipart 请求体
-     * @param boundary multipart 分隔符
-     * @param name 字段名称
-     * @param value 字段值
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-13
-     */
-    private void writeField(ByteArrayOutputStream body, String boundary, String name, String value) {
-        write(body, "--" + boundary + "\r\n");
-        write(body, "Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n");
-        write(body, value + "\r\n");
-    }
-
-    /**
-     * 写入 multipart 文件字段。
-     *
-     * @param body multipart 请求体
-     * @param boundary multipart 分隔符
-     * @param content 待上传对象内容
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-13
-     */
-    private void writeFile(ByteArrayOutputStream body, String boundary, byte[] content) {
-        write(body, "--" + boundary + "\r\n");
-        write(body, "Content-Disposition: form-data; name=\"" + FILE_FIELD_NAME
-                + "\"; filename=\"" + FILE_NAME + "\"\r\n");
-        write(body, "Content-Type: " + CONTENT_TYPE + "\r\n\r\n");
-        body.writeBytes(content);
-        write(body, "\r\n");
-    }
-
-    /**
-     * 写入 UTF-8 multipart 片段。
-     *
-     * @param body multipart 请求体
-     * @param value 文本片段
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-13
-     */
-    private void write(ByteArrayOutputStream body, String value) {
-        body.writeBytes(value.getBytes(StandardCharsets.UTF_8));
-    }
-
-    /**
-     * 创建用于签桶和清理的 RustFS S3 客户端。
-     *
-     * @return 已配置客户端
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-13
-     */
-    private MinioClient client() {
-        return MinioClient.builder().endpoint(required(ENDPOINT)).credentials(required(ACCESS_KEY),
-                required(SECRET_KEY)).build();
-    }
-
-    /**
      * 创建固定临时 bucket 的 RustFS 适配器。
      *
      * @param bucket 已创建的测试 bucket
@@ -294,8 +206,13 @@ public class RustfsLifecycleIntegrationTest {
      * @date 2026-09-13
      */
     private RustfsFileStorageAdapter storage(String bucket) {
-        return new RustfsFileStorageAdapter(new RustfsStorageConfiguration(required(ENDPOINT), bucket,
-                required(ACCESS_KEY), required(SECRET_KEY)));
+        return new RustfsFileStorageAdapter(configuration(bucket));
+    }
+
+    /** 创建固定 bucket 的 RustFS 配置。 */
+    private RustfsStorageConfiguration configuration(String bucket) {
+        return new RustfsStorageConfiguration(required(ENDPOINT), bucket,
+                required(ACCESS_KEY), required(SECRET_KEY));
     }
 
     /**
@@ -318,11 +235,11 @@ public class RustfsLifecycleIntegrationTest {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-13
      */
-    private void removeTemporaryBucket(MinioClient client, String bucket) throws Exception {
+    private void removeTemporaryBucket(S3Client client, String bucket) throws Exception {
         removeObject(client, bucket, LIFECYCLE_KEY);
         removeObject(client, bucket, PRESIGNED_KEY);
         removeObject(client, bucket, MULTIPART_KEY);
-        client.removeBucket(RemoveBucketArgs.builder().bucket(bucket).build());
+        client.deleteBucket(DeleteBucketRequest.builder().bucket(bucket).build());
     }
 
     /**
@@ -335,8 +252,8 @@ public class RustfsLifecycleIntegrationTest {
      * @author lvdaxianer@yeah.net
      * @date 2026-09-13
      */
-    private void removeObject(MinioClient client, String bucket, ObjectKey key) throws Exception {
-        client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(key.value()).build());
+    private void removeObject(S3Client client, String bucket, ObjectKey key) throws Exception {
+        client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key.value()).build());
     }
 
     /**

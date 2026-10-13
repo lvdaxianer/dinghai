@@ -16,7 +16,6 @@ import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignedDownload;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignedUpload;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
-import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.List;
@@ -32,7 +31,7 @@ import java.util.stream.Stream;
  * @author lvdaxianer@yeah.net
  * @date 2026-09-13
  */
-public final class RustfsFileStorageAdapter implements FileStorage, MultipartFileStorage {
+public final class RustfsFileStorageAdapter implements FileStorage, MultipartFileStorage, AutoCloseable {
     private final FileStorage delegate;
 
     /**
@@ -209,8 +208,7 @@ public final class RustfsFileStorageAdapter implements FileStorage, MultipartFil
      * @date 2026-09-13
      */
     private static FileStorage createDelegate(RustfsStorageConfiguration configuration) {
-        return new MinioFileStorageAdapter(RustfsClientFactory.create(configuration),
-                configuration.bucket(), configuration.endpoint());
+        return new RustfsS3FileStorage(RustfsClientFactory.create(configuration), configuration);
     }
 
     /** 获取 S3 兼容 multipart 委托。 */
@@ -236,6 +234,18 @@ public final class RustfsFileStorageAdapter implements FileStorage, MultipartFil
             return operation.get();
         } catch (FileStorageException exception) {
             throw RustfsExceptionMapper.map(exception);
+        }
+    }
+
+    /** 关闭独立 AWS S3 client 与 presigner。 */
+    @Override
+    public void close() {
+        if (delegate instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Exception exception) {
+                throw RustfsExceptionMapper.map(exception);
+            }
         }
     }
 }
