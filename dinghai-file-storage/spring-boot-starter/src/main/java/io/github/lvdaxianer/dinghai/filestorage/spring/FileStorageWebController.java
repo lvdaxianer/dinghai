@@ -23,7 +23,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import java.util.Optional;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpRange;
 import org.springframework.http.HttpStatus;
@@ -609,9 +611,37 @@ public class FileStorageWebController {
         headers.set(HttpHeaders.EXPIRES, HTTP_DATE.format(clock.instant().atZone(ZoneOffset.UTC)));
         headers.set(HttpHeaders.ACCEPT_RANGES, "bytes");
         headers.setContentType(mediaType(metadata.contentType()));
-        headers.set(HttpHeaders.CONTENT_DISPOSITION, disposition.name().toLowerCase()
-                + "; filename=\"file\"");
+        headers.setContentDisposition(responseContentDisposition(metadata, disposition));
         return headers;
+    }
+
+    /**
+     * 从已校验的 object key 提取最后一段，避免将目录路径暴露到响应头。
+     *
+     * @param metadata 对象元数据
+     * @return 不包含目录路径的响应文件名
+     */
+    private String responseFileName(ObjectMetadata metadata) {
+        String objectKey = metadata.key().value();
+        return objectKey.substring(objectKey.lastIndexOf('/') + 1);
+    }
+
+    /**
+     * 使用 ASCII 兼容格式或 RFC UTF-8 格式创建 Content-Disposition。
+     *
+     * @param metadata 对象元数据
+     * @param disposition 响应处置模式
+     * @return 编码后的 Content-Disposition
+     */
+    private ContentDisposition responseContentDisposition(ObjectMetadata metadata,
+                                                           PresignDownloadRequest.ResponseDisposition disposition) {
+        ContentDisposition.Builder builder = ContentDisposition.builder(
+                disposition.name().toLowerCase(Locale.ROOT));
+        String fileName = responseFileName(metadata);
+        if (StandardCharsets.US_ASCII.newEncoder().canEncode(fileName)) {
+            return builder.filename(fileName).build();
+        }
+        return builder.filename(fileName, StandardCharsets.UTF_8).build();
     }
 
     /**

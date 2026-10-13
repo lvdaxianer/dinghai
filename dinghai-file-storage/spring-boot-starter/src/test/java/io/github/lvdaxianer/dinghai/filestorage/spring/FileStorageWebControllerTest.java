@@ -509,8 +509,8 @@ public class FileStorageWebControllerTest {
      * @date 2026-09-23
      */
     @Test
-    public void shouldReadUnicodeObjectThroughConfiguredLegacyRoute() throws Exception {
-        ObjectKey key = ObjectKey.of("origin/29b071a7-27fe-409d-a0e5-1e4c945d496a/板卡_PSR-663UG-DM-1-HMI.gltf");
+    public void shouldReadNestedObjectThroughConfiguredLegacyRouteWithBasename() throws Exception {
+        ObjectKey key = ObjectKey.of("model-version/2109461736481492992/V0/index.gltf");
         write(key, "hello", "model/gltf+json", new CacheControl("public, max-age=60"));
         FileStorageProperties.Web web = new FileStorageProperties.Web();
         web.setPathPrefix("rsm");
@@ -525,13 +525,14 @@ public class FileStorageWebControllerTest {
                 routes, true));
         MockMvc legacyMvc = FileStorageWebMvcTestSupport.standaloneSetup(controller)
                 .setControllerAdvice(new FileStorageExceptionHandler()).build();
-        String encodedPath = "/rsm/origin/29b071a7-27fe-409d-a0e5-1e4c945d496a/"
-                + "%E6%9D%BF%E5%8D%A1_PSR-663UG-DM-1-HMI.gltf";
+        String encodedPath = "/rsm/model-version/2109461736481492992/V0/index.gltf";
 
         MvcResult initial = legacyMvc.perform(get(encodedPath))
                 .andExpect(request().asyncStarted()).andReturn();
         MvcResult response = legacyMvc.perform(asyncDispatch(initial)).andExpect(status().isOk())
-                .andExpect(content().string("hello")).andExpect(header().exists("ETag")).andReturn();
+                .andExpect(content().string("hello"))
+                .andExpect(header().string("Content-Disposition", "inline; filename=\"index.gltf\""))
+                .andExpect(header().exists("ETag")).andReturn();
         legacyMvc.perform(get(encodedPath).header("If-None-Match", response.getResponse().getHeader("ETag")))
                 .andExpect(status().isNotModified());
         MvcResult range = legacyMvc.perform(get(encodedPath).header("Range", "bytes=1-3"))
@@ -597,6 +598,22 @@ public class FileStorageWebControllerTest {
                 .andExpect(content().string("hello"));
     }
 
+    /** 路径穿越 key 必须在构建响应头前被拒绝，且不能访问 provider。 */
+    @Test
+    public void shouldRejectTraversalBeforeReadingObjectMetadata() {
+        FileStorage invalidStorage = mock(FileStorage.class);
+        FileStorageWebController controller = new FileStorageWebController(invalidStorage,
+                new FileStorageDirectAccessAuthorizer(false, null), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        try {
+            controller.keyRead("tenant/../secret.txt", null, null, null, null, null, null);
+            org.junit.Assert.fail("expected traversal key to be rejected");
+        } catch (FileStorageException exception) {
+            assertEquals(FileStorageErrorCode.INVALID_REQUEST, exception.errorCode());
+        }
+        verify(invalidStorage, never()).stat(any(ObjectKey.class));
+    }
+
     /**
      * 附件下载和内联预览应使用各自端点与处置模式。
      *
@@ -618,12 +635,12 @@ public class FileStorageWebControllerTest {
         MvcResult downloadStarted = mockMvc.perform(get(download.url()))
                 .andExpect(request().asyncStarted()).andReturn();
         mockMvc.perform(asyncDispatch(downloadStarted)).andExpect(status().isOk())
-                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("attachment")))
+                .andExpect(header().string("Content-Disposition", "attachment; filename=\"readme.txt\""))
                 .andExpect(content().string("hello"));
         MvcResult previewStarted = mockMvc.perform(get(preview.url()))
                 .andExpect(request().asyncStarted()).andReturn();
         mockMvc.perform(asyncDispatch(previewStarted)).andExpect(status().isOk())
-                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("inline")))
+                .andExpect(header().string("Content-Disposition", "inline; filename=\"readme.txt\""))
                 .andExpect(content().string("hello"));
     }
 
@@ -643,7 +660,12 @@ public class FileStorageWebControllerTest {
         MvcResult started = mockMvc.perform(get(download.url()))
                 .andExpect(request().asyncStarted()).andReturn();
         mockMvc.perform(asyncDispatch(started)).andExpect(status().isOk())
-                .andExpect(content().string("avatar"));
+                .andExpect(content().string("avatar"))
+                .andExpect(header().string("Content-Disposition",
+                        org.hamcrest.Matchers.allOf(
+                                org.hamcrest.Matchers.containsString("inline"),
+                                org.hamcrest.Matchers.containsString(
+                                        "filename*=UTF-8''%E5%A4%B4%E5%83%8F.png"))));
     }
 
     /**
