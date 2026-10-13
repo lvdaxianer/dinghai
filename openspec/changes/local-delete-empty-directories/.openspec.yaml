@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-13
+goal: 修复 Dinghai 本地文件删除残留空目录问题，同时保持远端存储实现不变。
