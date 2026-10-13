@@ -1,15 +1,15 @@
 ## 1. 公共依赖边界与 provider SPI
 
-- [ ] 1.1 在根 POM 和文件存储聚合 POM 中登记公共 Starter 与四个 provider Starter 模块，集中管理 RustFS 独立 S3 SDK 版本。
+- [x] 1.1 在根 POM 和文件存储聚合 POM 中登记公共 Starter 与四个 provider Starter 模块，集中管理 RustFS 独立 S3 SDK 版本。
 - [x] 1.2 先写公共 Starter 的依赖树和 Local 自动配置回归测试，证明公共 Starter 不解析远端 SDK 类型，运行时只选 Local。
 - [x] 1.3 新增 `FileStorageProviderFactory` SPI，并将公共自动配置改为通过 factory 选择远端 provider；缺少匹配 factory 时抛出稳定配置错误。
 - [x] 1.4 删除公共 Starter 对 MinIO、RustFS、OSS、OBS 适配器和 SDK 的直接依赖，运行公共模块测试并提交。
 
 ## 2. Provider 专用 Spring Boot Starter
 
-- [ ] 2.1 为 MinIO、RustFS、阿里云 OSS、华为云 OBS 创建独立 Starter POM、自动配置资源和 provider factory Bean。
-- [ ] 2.2 将 OSS/OBS 客户端生命周期和 provider 配置校验迁移到各自 Starter，保持原有 timeout、凭据和固定 bucket 约束。
-- [ ] 2.3 为每个 provider 增加 Spring 容器测试，验证匹配 provider 只创建一个主 `FileStorage`，未选 provider 不创建客户端。
+- [x] 2.1 为 MinIO、RustFS、阿里云 OSS、华为云 OBS 创建独立 Starter POM、自动配置资源和 provider factory Bean。
+- [x] 2.2 将 OSS/OBS 客户端生命周期和 provider 配置校验迁移到各自 Starter，保持原有 timeout、凭据和固定 bucket 约束。
+- [x] 2.3 为每个 provider 增加 Spring 容器测试，验证匹配 provider 只创建一个主 `FileStorage`，未选 provider 不创建客户端。
 - [ ] 2.4 为每个最小依赖组合增加 Maven dependency tree 验证，确认 provider Starter 不通过公共 Starter传递其他 provider SDK。
 
 ## 3. RustFS 脱离 MinIO SDK
