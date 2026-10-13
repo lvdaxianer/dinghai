@@ -1,10 +1,5 @@
 package io.github.lvdaxianer.dinghai.filestorage.spring;
 
-import com.aliyun.sdk.service.oss2.OSSClient;
-import com.obs.services.IObsCredentialsProvider;
-import com.obs.services.BasicObsCredentialsProvider;
-import com.obs.services.ObsClient;
-import io.github.lvdaxianer.dinghai.filestorage.aliyunoss.AliyunOssFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
@@ -12,11 +7,7 @@ import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignUploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
-import java.time.Duration;
 import io.github.lvdaxianer.dinghai.filestorage.local.LocalFileStorageAdapter;
-import io.github.lvdaxianer.dinghai.filestorage.minio.MinioFileStorageAdapter;
-import io.github.lvdaxianer.dinghai.filestorage.rustfs.RustfsFileStorageAdapter;
-import io.github.lvdaxianer.dinghai.filestorage.huaweicloudobs.HuaweiObsFileStorageAdapter;
 import io.github.lvdaxianer.dinghai.threadpool.core.ThreadPoolGovernor;
 import io.github.lvdaxianer.dinghai.threadpool.spring.ThreadPoolAutoConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +15,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -35,7 +27,10 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * 文件存储自动装配测试。
@@ -66,9 +61,6 @@ public class FileStorageAutoConfigurationTest {
                 .run(context -> {
                     assertThat(context).hasSingleBean(FileStorage.class);
                     assertThat(context).hasSingleBean(LocalFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(RustfsFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(AliyunOssFileStorageAdapter.class);
                 });
     }
 
@@ -189,111 +181,27 @@ public class FileStorageAutoConfigurationTest {
                 });
     }
 
-    /**
-     * minio provider 应仅注册 MinIO 存储主 Bean。
-     *
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-11
-     */
+    /** 选中的 provider 必须由匹配的 factory 创建，基础 Starter 不直接依赖厂商 SDK。 */
     @Test
-    public void shouldRegisterOnlyMinioFileStorageForMinioProvider() {
-        contextRunner.withPropertyValues(minioProperties())
+    public void shouldCreateSelectedRemoteStorageThroughProviderFactory() {
+        FileStorage storage = mock(FileStorage.class);
+        FileStorageProviderFactory factory = mock(FileStorageProviderFactory.class);
+        when(factory.provider()).thenReturn(FileStorageProvider.MINIO);
+        when(factory.create(any(FileStorageProperties.class), eq("test-bucket"))).thenReturn(storage);
+
+        contextRunner.withBean(FileStorageProviderFactory.class, () -> factory)
+                .withPropertyValues(minioProperties())
                 .run(context -> {
                     assertThat(context).hasSingleBean(FileStorage.class);
-                    assertThat(context).hasSingleBean(MinioFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(LocalFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(RustfsFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(AliyunOssFileStorageAdapter.class);
-                });
-    }
-
-    /**
-     * rustfs provider 应仅注册 RustFS 存储主 Bean。
-     *
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-13
-     */
-    @Test
-    public void shouldRegisterOnlyRustfsFileStorageForRustfsProvider() {
-        contextRunner.withPropertyValues(rustfsProperties())
-                .run(context -> {
-                    assertThat(context).hasSingleBean(FileStorage.class);
-                    assertThat(context).hasSingleBean(RustfsFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(LocalFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(AliyunOssFileStorageAdapter.class);
-                });
-    }
-
-    /**
-     * aliyun-oss provider 应仅注册阿里云 OSS 存储主 Bean 和受 Spring 管理的 SDK client。
-     *
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-14
-     */
-    @Test
-    public void shouldRegisterOnlyAliyunOssFileStorageForAliyunOssProvider() {
-        contextRunner.withBean(OSSClient.class, () -> mock(OSSClient.class))
-                .withPropertyValues(aliyunOssProperties())
-                .run(context -> {
-                    assertThat(context).hasSingleBean(FileStorage.class);
-                    assertThat(context).hasSingleBean(AliyunOssFileStorageAdapter.class);
-                    assertThat(context).hasSingleBean(OSSClient.class);
-                    assertThat(context).doesNotHaveBean(LocalFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(RustfsFileStorageAdapter.class);
-        });
-    }
-
-    /** huaweicloud-obs provider 应注册 OBS 适配器与受 Spring 管理的 SDK client。 */
-    @Test
-    public void shouldRegisterOnlyHuaweiObsFileStorageForHuaweiObsProvider() {
-        contextRunner.withBean(ObsClient.class, () -> mock(ObsClient.class))
-                .withPropertyValues(huaweiObsProperties())
-                .run(context -> {
-                    assertThat(context).hasSingleBean(FileStorage.class);
-                    assertThat(context).hasSingleBean(HuaweiObsFileStorageAdapter.class);
-                    assertThat(context).hasSingleBean(ObsClient.class);
-                    assertThat(context).doesNotHaveBean(LocalFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(MinioFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(RustfsFileStorageAdapter.class);
-                    assertThat(context).doesNotHaveBean(AliyunOssFileStorageAdapter.class);
-                });
-    }
-
-    /** OBS 缺失 endpoint 时必须在启动期失败且不回退到其他 provider。 */
-    @Test
-    public void shouldRejectIncompleteHuaweiObsConfiguration() {
-        contextRunner.withBean(ObsClient.class, () -> mock(ObsClient.class))
-                .withPropertyValues(huaweiObsProperties())
-                .withPropertyValues("dinghai.file-storage.huaweicloud-obs.endpoint=")
-                .run(context -> {
-                    assertThat(context).hasFailed();
-                    assertThat(context.getStartupFailure()).hasMessageContaining(
-                            "huaweicloud obs configuration is incomplete");
-                });
-    }
-
-    /** OBS PROVIDER 模式应要求宿主提供可刷新凭证 Bean。 */
-    @Test
-    public void shouldCreateHuaweiObsClientFromApplicationCredentialProvider() {
-        contextRunner.withBean(IObsCredentialsProvider.class,
-                        () -> new BasicObsCredentialsProvider("provider-access-key", "provider-secret-key"))
-                .withPropertyValues(huaweiObsProperties())
-                .withPropertyValues(
-                        "dinghai.file-storage.huaweicloud-obs.credential-mode=provider",
-                        "dinghai.file-storage.huaweicloud-obs.access-key=",
-                        "dinghai.file-storage.huaweicloud-obs.secret-key=")
-                .run(context -> {
-                    assertThat(context).hasSingleBean(FileStorage.class);
-                    assertThat(context).hasSingleBean(ObsClient.class);
+                    assertThat(context.getBean(FileStorage.class)).isSameAs(storage);
                 });
     }
 
     /** MinIO provider 也应注册后端中立的受控读取端点和专用执行器。 */
     @Test
     public void shouldRegisterWebReadEndpointForMinioProvider() {
-        contextRunner.withPropertyValues(minioProperties())
+        withProviderFactory(FileStorageProvider.MINIO)
+                .withPropertyValues(minioProperties())
                 .run(context -> {
                     assertThat(context).hasSingleBean(FileStorageWebController.class);
                     assertThat(context).hasSingleBean(FileStorageWebMvcConfiguration.class);
@@ -333,30 +241,16 @@ public class FileStorageAutoConfigurationTest {
     /** 非本地 provider 默认开启二级磁盘缓存。 */
     @Test
     public void shouldEnableDiskCacheByDefaultForNonLocalProvider() {
-        contextRunner.withPropertyValues(minioProperties())
+        withProviderFactory(FileStorageProvider.MINIO)
+                .withPropertyValues(minioProperties())
                 .run(context -> assertThat(context).hasSingleBean(ProviderFileReadCache.class));
     }
 
     /** RustFS 作为远端 provider 默认启用二级磁盘缓存及其清理器。 */
     @Test
     public void shouldEnableDiskCacheByDefaultForRustfsProvider() {
-        contextRunner.withPropertyValues(rustfsProperties())
-                .run(context -> {
-                    assertThat(context).hasSingleBean(ProviderFileReadCache.class);
-                    assertThat(context).hasSingleBean(ProviderFileReadCacheCleaner.class);
-                });
-    }
-
-    /**
-     * aliyun-oss 作为远端 provider 默认启用二级磁盘缓存及其清理器。
-     *
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-14
-     */
-    @Test
-    public void shouldEnableDiskCacheByDefaultForAliyunOssProvider() {
-        contextRunner.withBean(OSSClient.class, () -> mock(OSSClient.class))
-                .withPropertyValues(aliyunOssProperties())
+        withProviderFactory(FileStorageProvider.RUSTFS)
+                .withPropertyValues(rustfsProperties())
                 .run(context -> {
                     assertThat(context).hasSingleBean(ProviderFileReadCache.class);
                     assertThat(context).hasSingleBean(ProviderFileReadCacheCleaner.class);
@@ -388,7 +282,8 @@ public class FileStorageAutoConfigurationTest {
     /** 非本地 provider 显式关闭缓存后不得创建二级缓存。 */
     @Test
     public void shouldDisableDiskCacheForNonLocalProviderWhenExplicitlyDisabled() {
-        contextRunner.withPropertyValues(minioProperties())
+        withProviderFactory(FileStorageProvider.MINIO)
+                .withPropertyValues(minioProperties())
                 .withPropertyValues("dinghai.file-storage.cache.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(ProviderFileReadCache.class));
     }
@@ -396,7 +291,8 @@ public class FileStorageAutoConfigurationTest {
     /** RustFS 显式关闭缓存后不得创建二级缓存或清理器。 */
     @Test
     public void shouldDisableDiskCacheForRustfsProviderWhenExplicitlyDisabled() {
-        contextRunner.withPropertyValues(rustfsProperties())
+        withProviderFactory(FileStorageProvider.RUSTFS)
+                .withPropertyValues(rustfsProperties())
                 .withPropertyValues("dinghai.file-storage.cache.enabled=false")
                 .run(context -> {
                     assertThat(context).doesNotHaveBean(ProviderFileReadCache.class);
@@ -404,22 +300,6 @@ public class FileStorageAutoConfigurationTest {
                 });
     }
 
-    /**
-     * aliyun-oss 显式关闭缓存后不得创建二级缓存或清理器。
-     *
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-14
-     */
-    @Test
-    public void shouldDisableDiskCacheForAliyunOssProviderWhenExplicitlyDisabled() {
-        contextRunner.withBean(OSSClient.class, () -> mock(OSSClient.class))
-                .withPropertyValues(aliyunOssProperties())
-                .withPropertyValues("dinghai.file-storage.cache.enabled=false")
-                .run(context -> {
-                    assertThat(context).doesNotHaveBean(ProviderFileReadCache.class);
-                    assertThat(context).doesNotHaveBean(ProviderFileReadCacheCleaner.class);
-                });
-    }
 
     /** 读取和缓存资源限制必须拒绝非正数配置。 */
     @Test
@@ -535,6 +415,22 @@ public class FileStorageAutoConfigurationTest {
                         "dinghai.file-storage.provider=unknown",
                         "dinghai.file-storage.bucket=documents")
                 .run(context -> assertThat(context).hasFailed());
+    }
+
+    /**
+     * 远端 provider 缺少对应 Starter 时必须以明确配置错误失败。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-10-13
+     */
+    @Test
+    public void shouldFailFastWhenSelectedRemoteProviderStarterIsMissing() {
+        contextRunner.withPropertyValues(minioProperties())
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(rootCause(context.getStartupFailure()).getMessage())
+                            .contains("dinghai-file-storage-minio-spring-boot-starter");
+                });
     }
 
     /**
@@ -795,6 +691,22 @@ public class FileStorageAutoConfigurationTest {
     }
 
     /**
+     * 为基础 Starter 测试注册不携带厂商 SDK 的远端 factory。
+     *
+     * @param provider 需要模拟的 provider
+     * @return 带有模拟 factory 的上下文运行器
+     * @author lvdaxianer@yeah.net
+     * @date 2026-10-13
+     */
+    private ApplicationContextRunner withProviderFactory(FileStorageProvider provider) {
+        FileStorageProviderFactory factory = mock(FileStorageProviderFactory.class);
+        when(factory.provider()).thenReturn(provider);
+        when(factory.create(any(FileStorageProperties.class), any(String.class)))
+                .thenReturn(mock(FileStorage.class));
+        return contextRunner.withBean(FileStorageProviderFactory.class, () -> factory);
+    }
+
+    /**
      * 返回 local provider 所需的完整属性。
      *
      * @return 本地 provider 属性
@@ -899,45 +811,6 @@ public class FileStorageAutoConfigurationTest {
                 "dinghai.file-storage.rustfs.endpoint=",
                 "dinghai.file-storage.rustfs.access-key=test-access-key",
                 "dinghai.file-storage.rustfs.secret-key=test-secret-key",
-                "dinghai.file-storage.storage-alias=documents",
-                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
-                "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
-                "dinghai.file-storage.migration.import-root=" + migrationRoot("import"),
-                "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
-                "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
-        };
-    }
-
-    /**
-     * 返回 OSS provider 所需的完整属性。
-     *
-     * @return OSS provider 属性
-     * @author lvdaxianer@yeah.net
-     * @date 2026-09-14
-     */
-    private String[] aliyunOssProperties() {
-        return new String[]{
-                "dinghai.file-storage.provider=aliyun-oss",
-                "dinghai.file-storage.bucket=test-bucket",
-                "dinghai.file-storage.aliyun-oss.region=oss-cn-beijing",
-                "dinghai.file-storage.storage-alias=documents",
-                "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
-                "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
-                "dinghai.file-storage.migration.import-root=" + migrationRoot("import"),
-                "dinghai.file-storage.migration.completed-root=" + migrationRoot("completed"),
-                "dinghai.file-storage.migration.failed-root=" + migrationRoot("failed")
-        };
-    }
-
-    /** 返回 OBS provider 所需的完整静态凭证属性。 */
-    private String[] huaweiObsProperties() {
-        return new String[]{
-                "dinghai.file-storage.provider=huaweicloud-obs",
-                "dinghai.file-storage.bucket=test-bucket",
-                "dinghai.file-storage.huaweicloud-obs.endpoint=https://obs.cn-north-4.myhuaweicloud.com",
-                "dinghai.file-storage.huaweicloud-obs.region=cn-north-4",
-                "dinghai.file-storage.huaweicloud-obs.access-key=test-access-key",
-                "dinghai.file-storage.huaweicloud-obs.secret-key=test-secret-key",
                 "dinghai.file-storage.storage-alias=documents",
                 "dinghai.file-storage.security.stable-id-key=stable-file-id-test-key-material-32b",
                 "dinghai.file-storage.migration.export-root=" + migrationRoot("export"),
