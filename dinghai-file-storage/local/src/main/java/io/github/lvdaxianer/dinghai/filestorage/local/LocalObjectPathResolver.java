@@ -39,15 +39,48 @@ final class LocalObjectPathResolver {
     /** 解析可读写的对象路径并校验父目录未越出根目录。 */
     Path resolve(ObjectKey key) {
         Objects.requireNonNull(key, "key");
+        return resolveCandidate(key, "object key");
+    }
+
+    /** 解析本地前缀路径并拒绝 root 本身及符号链接目标。 */
+    Path resolvePrefix(ObjectKey prefix) {
+        Objects.requireNonNull(prefix, "prefix");
+        Path candidate = resolveCandidate(prefix, "object prefix");
+        if (candidate.equals(root)) {
+            throw failure(FileStorageErrorCode.INVALID_OBJECT_KEY,
+                    "object prefix cannot resolve to storage root", null);
+        }
+        return candidate;
+    }
+
+    /** 将原始前缀规范化为安全的相对对象 key。 */
+    ObjectKey normalizePrefix(String rawPrefix) {
+        if (rawPrefix == null || rawPrefix.isBlank()) {
+            throw failure(FileStorageErrorCode.INVALID_OBJECT_KEY,
+                    "object prefix is invalid", null);
+        }
+        String trimmed = rawPrefix;
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        try {
+            return ObjectKey.of(trimmed);
+        } catch (IllegalArgumentException exception) {
+            throw failure(FileStorageErrorCode.INVALID_OBJECT_KEY,
+                    "object prefix is invalid", exception);
+        }
+    }
+
+    private Path resolveCandidate(ObjectKey key, String label) {
         Path candidate = Path.of(utf8ObjectUri(root, key)).normalize();
         if (!candidate.startsWith(root)) {
             throw failure(FileStorageErrorCode.INVALID_OBJECT_KEY,
-                    "object key resolves outside storage root", null);
+                    label + " resolves outside storage root", null);
         }
         verifyParent(candidate);
         if (Files.isSymbolicLink(candidate)) {
             throw failure(FileStorageErrorCode.INVALID_OBJECT_KEY,
-                    "object key resolves to a symbolic link", null);
+                    label + " resolves to a symbolic link", null);
         }
         return candidate;
     }

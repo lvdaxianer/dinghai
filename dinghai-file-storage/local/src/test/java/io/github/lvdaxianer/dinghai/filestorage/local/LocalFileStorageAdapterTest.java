@@ -28,6 +28,11 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import static org.junit.Assert.assertArrayEquals;
@@ -156,6 +161,161 @@ public class LocalFileStorageAdapterTest {
         LocalFileStorageAdapter storage = storage();
 
         assertFalse(storage.delete(ObjectKey.of("missing/file.txt")));
+    }
+
+    /** 删除单个对象后只回收空的父目录，且保留本地存储根目录。 */
+    @Test
+    public void deletingObjectCleansEmptyParentDirectories() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+        ObjectKey key = ObjectKey.of("model-version/123/V0/model.glb");
+        storage.put(upload(key, "model"));
+
+        assertTrue(storage.delete(key));
+
+        assertFalse(Files.exists(root.resolve("model-version/123/V0")));
+        assertTrue(Files.isDirectory(root));
+    }
+
+    /** 删除前缀下的多个对象后按深度回收空目录。 */
+    @Test
+    public void deletingPrefixCleansNestedEmptyDirectories() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+        storage.put(upload(ObjectKey.of("model-version/123/V0/model.glb"), "model"));
+        storage.put(upload(ObjectKey.of("model-version/123/V0/texture.png"), "texture"));
+
+        storage.deletePrefix("model-version/123/V0");
+
+        assertFalse(Files.exists(root.resolve("model-version/123/V0")));
+        assertFalse(Files.exists(root.resolve("model-version/123")));
+        assertFalse(Files.exists(root.resolve("model-version")));
+        assertTrue(Files.isDirectory(root));
+    }
+
+    /** 父目录中仍有其他对象时不能误删目录。 */
+    @Test
+    public void deletingObjectRetainsNonEmptyParentDirectory() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+        ObjectKey deleted = ObjectKey.of("model-version/123/V0/model.glb");
+        ObjectKey retained = ObjectKey.of("model-version/123/V0/keep.glb");
+        storage.put(upload(deleted, "model"));
+        storage.put(upload(retained, "keep"));
+
+        assertTrue(storage.delete(deleted));
+
+        assertTrue(Files.isDirectory(root.resolve("model-version/123/V0")));
+        assertTrue(storage.exists(retained));
+    }
+
+    /** 不存在的前缀可以重复删除且保持幂等成功。 */
+    @Test
+    public void deletingMissingPrefixIsIdempotent() throws Exception {
+        LocalFileStorageAdapter storage = storage();
+        Path root = new LocalObjectPathResolver(
+                temporaryFolder.getRoot().toPath().resolve("storage")).root();
+        Path unrelatedEmptyDirectory = Files.createDirectories(root.resolve("unrelated/empty"));
+
+        storage.deletePrefix("missing/model");
+        storage.deletePrefix("missing/model");
+
+        assertTrue(Files.isDirectory(root));
+        assertTrue(Files.isDirectory(unrelatedEmptyDirectory));
+    }
+
+    /** URL 编码前缀应与中文对象路径使用同一删除语义。 */
+    @Test
+    public void deletingUrlEncodedUnicodePrefixCleansDirectories() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+        ObjectKey key = ObjectKey.of("用户资料/版本一/模型.glb");
+        storage.put(upload(key, "model"));
+
+        storage.deletePrefix("%E7%94%A8%E6%88%B7%E8%B5%84%E6%96%99/%E7%89%88%E6%9C%AC%E4%B8%80");
+
+        assertFalse(Files.exists(root.resolve("用户资料/版本一")));
+    }
+
+    /** 前缀路径穿越必须在访问文件系统前拒绝。 */
+    @Test
+    public void rejectsPrefixPathTraversal() throws Exception {
+        LocalFileStorageAdapter storage = storage();
+
+        for (String prefix : new String[]{"../outside", "/tmp/outside", "tenant/../../outside"}) {
+            try {
+                storage.deletePrefix(prefix);
+                fail("expected unsafe prefix rejection for " + prefix);
+            } catch (FileStorageException expected) {
+                assertEquals("INVALID_OBJECT_KEY", expected.errorCode().name());
+            }
+        }
+    }
+
+    /** 前缀符号链接不能引导删除根目录之外的内容。 */
+    @Test
+    public void rejectsPrefixSymbolicLinkWithoutDeletingOutsideDirectory() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        Path outside = temporaryFolder.newFolder("outside").toPath();
+        Files.writeString(outside.resolve("keep.txt"), "keep", StandardCharsets.UTF_8);
+        Files.createSymbolicLink(root.resolve("linked"), outside);
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+
+        try {
+            storage.deletePrefix("linked");
+            fail("expected symbolic link rejection");
+        } catch (FileStorageException expected) {
+            assertEquals("INVALID_OBJECT_KEY", expected.errorCode().name());
+        }
+        assertTrue(Files.exists(outside.resolve("keep.txt")));
+    }
+
+    /** 并发删除同一前缀时，目录和文件竞态仍保持幂等。 */
+    @Test
+    public void concurrentPrefixDeletionIsIdempotent() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY);
+        storage.put(upload(ObjectKey.of("models/123/V0/model.glb"), "model"));
+        storage.put(upload(ObjectKey.of("models/123/V0/texture.png"), "texture"));
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Throwable> failures = new CopyOnWriteArrayList<>();
+        try {
+            for (int index = 0; index < 2; index++) {
+                executor.submit(() -> {
+                    ready.countDown();
+                    try {
+                        assertTrue(start.await(5, TimeUnit.SECONDS));
+                        storage.deletePrefix("models/123/V0");
+                    } catch (Throwable failure) {
+                        failures.add(failure);
+                    }
+                });
+            }
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            executor.shutdown();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertTrue(failures.toString(), failures.isEmpty());
+        assertFalse(Files.exists(root.resolve("models/123/V0")));
+    }
+
+    /** 关闭开关时删除对象但保留目录层级。 */
+    @Test
+    public void keepsDirectoriesWhenCleanupIsDisabled() throws Exception {
+        Path root = temporaryFolder.newFolder("storage").toPath();
+        LocalFileStorageAdapter storage = new LocalFileStorageAdapter(root, SIGNING_KEY, false);
+        ObjectKey key = ObjectKey.of("models/123/V0/model.glb");
+        storage.put(upload(key, "model"));
+
+        assertTrue(storage.delete(key));
+
+        assertTrue(Files.isDirectory(root.resolve("models/123/V0")));
     }
 
     /** 不安全 key 在接触磁盘前被拒绝。 */

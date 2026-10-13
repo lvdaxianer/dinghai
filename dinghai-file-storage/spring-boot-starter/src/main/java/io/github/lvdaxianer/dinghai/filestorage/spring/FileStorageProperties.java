@@ -238,6 +238,8 @@ public class FileStorageProperties {
     public static class Local {
         /** 对象根目录。 */
         private Path root;
+        /** 是否在删除对象后清理空目录。 */
+        private boolean cleanupEmptyDirectories = true;
 
         /**
          * 获取对象根目录。
@@ -259,6 +261,28 @@ public class FileStorageProperties {
          */
         public void setRoot(Path root) {
             this.root = root;
+        }
+
+        /**
+         * 获取空目录清理开关。
+         *
+         * @return 是否清理空目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-10-13
+         */
+        public boolean isCleanupEmptyDirectories() {
+            return cleanupEmptyDirectories;
+        }
+
+        /**
+         * 设置空目录清理开关。
+         *
+         * @param cleanupEmptyDirectories 是否清理空目录
+         * @author lvdaxianer@yeah.net
+         * @date 2026-10-13
+         */
+        public void setCleanupEmptyDirectories(boolean cleanupEmptyDirectories) {
+            this.cleanupEmptyDirectories = cleanupEmptyDirectories;
         }
     }
 

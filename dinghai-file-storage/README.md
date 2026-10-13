@@ -66,6 +66,11 @@ dinghai:
 | 配置键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `local.root` | `Path` | 无（provider=local 时必填） | 本地对象根目录，缺失时启动失败 |
+| `local.cleanup-empty-directories` | `boolean` | `true` | 删除本地对象后是否回收 root 内的空父目录；仅影响 Local，不改变远程对象存储行为 |
+
+Local 适配器额外提供 `deletePrefix(String prefix)`，用于一次删除某个对象前缀下的全部本地对象，
+例如删除 `model-version/123/V0` 下的模型文件和元数据。它不是 `FileStorage` 通用契约的一部分，
+不会改变 MinIO、RustFS、OSS 或 OBS 的行为；删除完成后仅回收存储 root 内的空目录。
 
 ### minio（MinIO 后端）
 

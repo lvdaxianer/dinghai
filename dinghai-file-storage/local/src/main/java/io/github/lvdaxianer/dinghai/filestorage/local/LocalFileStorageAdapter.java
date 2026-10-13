@@ -3,6 +3,8 @@ package io.github.lvdaxianer.dinghai.filestorage.local;
 import io.github.lvdaxianer.dinghai.filestorage.core.CacheControl;
 import io.github.lvdaxianer.dinghai.filestorage.core.DownloadObject;
 import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
+import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
+import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.core.LocalFileSource;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartCompletion;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartFileStorage;
@@ -10,8 +12,6 @@ import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPart;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartPartRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadRequest;
 import io.github.lvdaxianer.dinghai.filestorage.core.MultipartUploadSession;
-import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageErrorCode;
-import io.github.lvdaxianer.dinghai.filestorage.core.FileStorageException;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectKey;
 import io.github.lvdaxianer.dinghai.filestorage.core.ObjectMetadata;
 import io.github.lvdaxianer.dinghai.filestorage.core.PresignDownloadRequest;
@@ -23,7 +23,9 @@ import io.github.lvdaxianer.dinghai.filestorage.core.UploadRequest;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -67,16 +69,30 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
     private final String previewBasePath;
     private final Path multipartRoot;
     private final Clock clock;
+    private final boolean cleanupEmptyDirectories;
 
     /** 使用默认 100 MB 上限创建本地适配器。 */
     public LocalFileStorageAdapter(Path root, byte[] signingKey) {
         this(root, signingKey, UploadRequest.DEFAULT_MAX_SIZE_BYTES);
     }
 
+    /** 使用默认上传上限和指定目录清理策略创建本地适配器。 */
+    public LocalFileStorageAdapter(Path root, byte[] signingKey,
+                                   boolean cleanupEmptyDirectories) {
+        this(root, signingKey, UploadRequest.DEFAULT_MAX_SIZE_BYTES, cleanupEmptyDirectories);
+    }
+
     /** 使用指定上传上限创建本地适配器。 */
     public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes) {
         this(root, signingKey, maxSizeBytes, Set.of(), DEFAULT_MAXIMUM_PRESIGN_EXPIRY,
-                Clock.systemUTC());
+                Clock.systemUTC(), true);
+    }
+
+    /** 使用指定上传上限和目录清理策略创建本地适配器。 */
+    public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes,
+                                   boolean cleanupEmptyDirectories) {
+        this(root, signingKey, maxSizeBytes, Set.of(), DEFAULT_MAXIMUM_PRESIGN_EXPIRY,
+                Clock.systemUTC(), cleanupEmptyDirectories);
     }
 
     /** 使用指定上传和签名策略创建本地适配器。 */
@@ -84,7 +100,16 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
                                    Set<String> contentTypeWhitelist,
                                    Duration maximumPresignExpiry, Clock clock) {
         this(root, signingKey, maxSizeBytes, contentTypeWhitelist, maximumPresignExpiry, clock,
-                DEFAULT_PATH_PREFIX);
+                DEFAULT_PATH_PREFIX, true);
+    }
+
+    /** 使用指定上传和签名策略及目录清理策略创建本地适配器。 */
+    public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes,
+                                   Set<String> contentTypeWhitelist,
+                                   Duration maximumPresignExpiry, Clock clock,
+                                   boolean cleanupEmptyDirectories) {
+        this(root, signingKey, maxSizeBytes, contentTypeWhitelist, maximumPresignExpiry, clock,
+                DEFAULT_PATH_PREFIX, cleanupEmptyDirectories);
     }
 
     /** 使用指定 Web 路径前缀创建本地适配器。 */
@@ -92,7 +117,16 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
                                    Set<String> contentTypeWhitelist,
                                    Duration maximumPresignExpiry, Clock clock, String pathPrefix) {
         this(root, signingKey, maxSizeBytes, contentTypeWhitelist, maximumPresignExpiry, clock,
-                pathPrefix, null);
+                pathPrefix, null, true);
+    }
+
+    /** 使用指定 Web 路径和目录清理策略创建本地适配器。 */
+    public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes,
+                                   Set<String> contentTypeWhitelist,
+                                   Duration maximumPresignExpiry, Clock clock, String pathPrefix,
+                                   boolean cleanupEmptyDirectories) {
+        this(root, signingKey, maxSizeBytes, contentTypeWhitelist, maximumPresignExpiry, clock,
+                pathPrefix, null, cleanupEmptyDirectories);
     }
 
     /**
@@ -115,7 +149,19 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
                                    Path multipartRoot) {
         this(root, signingKey, maxSizeBytes, contentTypeWhitelist, maximumPresignExpiry, clock,
                 pathPrefix, multipartRoot, operationBasePath(pathPrefix, "upload"),
-                operationBasePath(pathPrefix, "download"), operationBasePath(pathPrefix, "preview"));
+                operationBasePath(pathPrefix, "download"), operationBasePath(pathPrefix, "preview"),
+                true);
+    }
+
+    /** 使用指定 multipart 临时目录和目录清理策略创建本地适配器。 */
+    public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes,
+                                   Set<String> contentTypeWhitelist,
+                                   Duration maximumPresignExpiry, Clock clock, String pathPrefix,
+                                   Path multipartRoot, boolean cleanupEmptyDirectories) {
+        this(root, signingKey, maxSizeBytes, contentTypeWhitelist, maximumPresignExpiry, clock,
+                pathPrefix, multipartRoot, operationBasePath(pathPrefix, "upload"),
+                operationBasePath(pathPrefix, "download"), operationBasePath(pathPrefix, "preview"),
+                cleanupEmptyDirectories);
     }
 
     /**
@@ -140,6 +186,16 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
                                    Duration maximumPresignExpiry, Clock clock, String pathPrefix,
                                    Path multipartRoot, String uploadBasePath, String downloadBasePath,
                                    String previewBasePath) {
+        this(root, signingKey, maxSizeBytes, contentTypeWhitelist, maximumPresignExpiry, clock,
+                pathPrefix, multipartRoot, uploadBasePath, downloadBasePath, previewBasePath, true);
+    }
+
+    /** 使用完整本地策略创建适配器。 */
+    public LocalFileStorageAdapter(Path root, byte[] signingKey, long maxSizeBytes,
+                                   Set<String> contentTypeWhitelist,
+                                   Duration maximumPresignExpiry, Clock clock, String pathPrefix,
+                                   Path multipartRoot, String uploadBasePath, String downloadBasePath,
+                                   String previewBasePath, boolean cleanupEmptyDirectories) {
         if (maxSizeBytes < 0) {
             throw new IllegalArgumentException("max size must be non-negative");
         }
@@ -154,6 +210,7 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
         this.downloadBasePath = LocalFileStorageSigner.validatePathPrefix(downloadBasePath);
         this.previewBasePath = LocalFileStorageSigner.validatePathPrefix(previewBasePath);
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.cleanupEmptyDirectories = cleanupEmptyDirectories;
         Path configuredMultipartRoot = multipartRoot == null
                 ? paths.root().resolveSibling(paths.root().getFileName() + ".dinghai-multipart")
                 : multipartRoot.toAbsolutePath().normalize();
@@ -243,18 +300,227 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
     public boolean delete(ObjectKey key) {
         Path path = paths.resolve(key);
         if (!Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            deleteMissingObjectMetadata(key);
             return false;
         }
         try {
-            Files.deleteIfExists(path);
+            boolean deleted = Files.deleteIfExists(path);
             metadataStore.delete(key);
-            return true;
+            if (deleted && cleanupEmptyDirectories) {
+                cleanupParentDirectories(path.getParent(), new DeleteSummary());
+            }
+            return deleted;
         } catch (NoSuchFileException exception) {
+            deleteMissingObjectMetadata(key);
             return false;
         } catch (IOException exception) {
+            logObjectDeleteFailure(key, exception);
             throw failure(FileStorageErrorCode.STORAGE_UNAVAILABLE,
                     "local object delete failed", exception);
         }
+    }
+
+    /** 删除对象前残留的元数据，并保持对象不存在时的幂等语义。 */
+    private void deleteMissingObjectMetadata(ObjectKey key) {
+        try {
+            metadataStore.delete(key);
+        } catch (IOException exception) {
+            logObjectDeleteFailure(key, exception);
+            throw failure(FileStorageErrorCode.STORAGE_UNAVAILABLE,
+                    "local object metadata delete failed", exception);
+        }
+    }
+
+    /**
+     * 删除本地前缀下的对象，并在开关开启时回收空目录。
+     *
+     * @param rawPrefix 原始对象前缀，可包含 URL 百分号编码
+     * @author lvdaxianer@yeah.net
+     * @date 2026-10-13
+     */
+    public void deletePrefix(String rawPrefix) {
+        ObjectKey prefix = paths.normalizePrefix(rawPrefix);
+        Path prefixPath = paths.resolvePrefix(prefix);
+        DeleteSummary summary = new DeleteSummary();
+        long startedAt = System.nanoTime();
+        try {
+            deletePrefixObjects(prefix, prefixPath, summary);
+            if (cleanupEmptyDirectories) {
+                cleanupPrefixDirectories(prefixPath, summary);
+            }
+        } finally {
+            logPrefixDeleteSummary(prefix, summary, elapsedMillis(startedAt));
+        }
+        if (summary.failedDeletions > 0) {
+            throw failure(FileStorageErrorCode.STORAGE_UNAVAILABLE,
+                    "local prefix delete was incomplete", null);
+        }
+    }
+
+    /** 扫描前缀范围并逐个删除普通对象及其元数据。 */
+    private void deletePrefixObjects(ObjectKey prefix, Path prefixPath, DeleteSummary summary) {
+        try (Stream<Path> objects = Files.walk(prefixPath)) {
+            objects.filter(this::isRegularObjectFile)
+                    .map(paths.root()::relativize)
+                    .map(this::objectKey)
+                    .filter(key -> matchesPrefix(key, prefix))
+                    .forEach(key -> deletePrefixObject(key, summary));
+        } catch (NoSuchFileException exception) {
+            // 并发任务已经删除前缀目录，按幂等成功处理。
+        } catch (IOException | UncheckedIOException exception) {
+            summary.failedDeletions++;
+            logPrefixDeleteFailure(prefix, exception);
+        }
+    }
+
+    /** 删除前缀范围内的一个对象，失败时继续处理其余对象。 */
+    private void deletePrefixObject(ObjectKey key, DeleteSummary summary) {
+        try {
+            Path path = paths.resolve(key);
+            if (!Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                deleteMissingObjectMetadata(key);
+                return;
+            }
+            if (Files.deleteIfExists(path)) {
+                summary.deletedFiles++;
+            }
+            metadataStore.delete(key);
+        } catch (NoSuchFileException exception) {
+            deleteMissingObjectMetadata(key);
+        } catch (IOException | FileStorageException exception) {
+            summary.failedDeletions++;
+            logObjectDeleteFailure(key, exception);
+        }
+    }
+
+    /** 清理前缀范围内的目录并继续向上清理其空父目录。 */
+    private void cleanupPrefixDirectories(Path prefixPath, DeleteSummary summary) {
+        if (!Files.isDirectory(prefixPath, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            cleanupParentDirectories(prefixPath.getParent(), summary);
+            return;
+        }
+        Path start = prefixPath;
+        if (!start.startsWith(paths.root())) {
+            return;
+        }
+        try (Stream<Path> directories = Files.walk(start)) {
+            directories.filter(this::isDirectoryCandidate)
+                    .sorted(Comparator.comparingInt(Path::getNameCount).reversed())
+                    .forEach(directory -> deleteEmptyDirectory(directory, summary));
+        } catch (NoSuchFileException exception) {
+            // 并发任务已经删除目录，按幂等成功处理。
+        } catch (IOException | UncheckedIOException exception) {
+            summary.failedDeletions++;
+            logPrefixDeleteFailure(null, exception);
+        }
+        cleanupParentDirectories(start.getParent(), summary);
+    }
+
+    /** 从对象父目录开始逐层回收空目录，遇到不能删除的目录即停止。 */
+    private void cleanupParentDirectories(Path start, DeleteSummary summary) {
+        Path current = start;
+        while (current != null && current.startsWith(paths.root())
+                && !current.equals(paths.root())) {
+            DeleteDirectoryResult result = deleteEmptyDirectory(current, summary);
+            if (result != DeleteDirectoryResult.DELETED
+                    && result != DeleteDirectoryResult.ABSENT) {
+                return;
+            }
+            current = current.getParent();
+        }
+    }
+
+    /** 尝试删除一个空目录并返回可用于并发控制的结果。 */
+    private DeleteDirectoryResult deleteEmptyDirectory(Path directory, DeleteSummary summary) {
+        if (!directory.startsWith(paths.root()) || directory.equals(paths.root())
+                || Files.isSymbolicLink(directory)) {
+            summary.skippedDirectories++;
+            return DeleteDirectoryResult.SKIPPED;
+        }
+        if (!Files.isDirectory(directory, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            return DeleteDirectoryResult.ABSENT;
+        }
+        try {
+            if (Files.deleteIfExists(directory)) {
+                summary.deletedDirectories++;
+                return DeleteDirectoryResult.DELETED;
+            }
+            return DeleteDirectoryResult.ABSENT;
+        } catch (DirectoryNotEmptyException exception) {
+            summary.skippedDirectories++;
+            return DeleteDirectoryResult.NON_EMPTY;
+        } catch (NoSuchFileException exception) {
+            return DeleteDirectoryResult.ABSENT;
+        } catch (IOException exception) {
+            summary.failedDeletions++;
+            summary.skippedDirectories++;
+            logDirectoryDeleteFailure(directory, exception);
+            return DeleteDirectoryResult.FAILED;
+        }
+    }
+
+    /** 判断目录遍历结果是否为可清理目录或需统计的符号链接。 */
+    private boolean isDirectoryCandidate(Path path) {
+        return !path.equals(paths.root()) && (Files.isDirectory(path,
+                java.nio.file.LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path));
+    }
+
+    /** 判断对象 key 是否等于前缀或位于前缀目录下。 */
+    private static boolean matchesPrefix(ObjectKey key, ObjectKey prefix) {
+        return key.value().equals(prefix.value())
+                || key.value().startsWith(prefix.value() + "/");
+    }
+
+    /** 将 root 下的相对路径转换为规范化对象 key。 */
+    private ObjectKey objectKey(Path relative) {
+        String value = relative.toString().replace(java.io.File.separatorChar, '/');
+        return ObjectKey.of(value);
+    }
+
+    /** 输出对象删除失败的安全告警。 */
+    private static void logObjectDeleteFailure(ObjectKey key, Exception exception) {
+        LOGGER.log(Level.WARNING, "[本地对象删除] 删除失败, keyDigest={0}, reason={1}",
+                new Object[]{digestForLog(key.value()), safeFailureReason(exception)});
+    }
+
+    /** 输出目录删除失败的安全告警。 */
+    private static void logDirectoryDeleteFailure(Path directory, Exception exception) {
+        LOGGER.log(Level.WARNING, "[本地目录回收] 删除失败, directoryName={0}, reason={1}",
+                new Object[]{directory.getFileName(), safeFailureReason(exception)});
+    }
+
+    /** 输出前缀删除失败的安全告警。 */
+    private static void logPrefixDeleteFailure(ObjectKey prefix, Exception exception) {
+        LOGGER.log(Level.WARNING, "[本地前缀删除] 扫描失败, prefix={0}, reason={1}",
+                new Object[]{prefix == null ? "[REDACTED]" : digestForLog(prefix.value()),
+                        safeFailureReason(exception)});
+    }
+
+    /** 输出前缀删除的结构化汇总日志。 */
+    private static void logPrefixDeleteSummary(ObjectKey prefix, DeleteSummary summary,
+                                               long durationMs) {
+        LOGGER.log(Level.INFO, "[本地前缀删除] 完成, prefix={0}, deletedFiles={1}, "
+                        + "deletedDirectories={2}, skippedDirectories={3}, failedDeletions={4}, "
+                        + "durationMs={5}",
+                new Object[]{digestForLog(prefix.value()), summary.deletedFiles,
+                        summary.deletedDirectories, summary.skippedDirectories,
+                        summary.failedDeletions, durationMs});
+    }
+
+    /** 计算不包含原始对象 key 的安全标识。 */
+    private static String digestForLog(String value) {
+        return java.util.HexFormat.of().formatHex(sha256()
+                .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    }
+
+    /** 将删除耗时转换为非负毫秒数。 */
+    private static long elapsedMillis(long startedAt) {
+        return Math.max(0L, Duration.ofNanos(System.nanoTime() - startedAt).toMillis());
+    }
+
+    /** 将异常转换为限长且不带路径内容的安全原因。 */
+    private static String safeFailureReason(Exception exception) {
+        return exception.getClass().getSimpleName();
     }
 
     /** 惰性枚举根目录中的普通对象，关闭流时释放目录遍历句柄。 */
@@ -971,6 +1237,23 @@ public final class LocalFileStorageAdapter implements FileStorage, LocalFileSour
     private static FileStorageException failure(FileStorageErrorCode code,
                                                 String message, Throwable cause) {
         return new FileStorageException(code, message, cause);
+    }
+
+    /** 前缀删除的对象和目录统计。 */
+    private static final class DeleteSummary {
+        private int deletedFiles;
+        private int deletedDirectories;
+        private int skippedDirectories;
+        private int failedDeletions;
+    }
+
+    /** 单个目录删除在并发和非空场景下的结果。 */
+    private enum DeleteDirectoryResult {
+        DELETED,
+        ABSENT,
+        NON_EMPTY,
+        SKIPPED,
+        FAILED
     }
 
     private record WriteResult(long length, String etag) {

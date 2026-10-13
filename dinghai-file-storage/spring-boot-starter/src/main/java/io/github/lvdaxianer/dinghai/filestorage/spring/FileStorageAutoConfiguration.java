@@ -510,7 +510,8 @@ public class FileStorageAutoConfiguration {
                 properties.getWeb().getPathPrefix(), properties.getMultipart().getLocalRoot(),
                 FileStorageWebRoutes.from(properties.getWeb()).uploadBasePath(),
                 FileStorageWebRoutes.from(properties.getWeb()).downloadBasePath(),
-                FileStorageWebRoutes.from(properties.getWeb()).previewBasePath());
+                FileStorageWebRoutes.from(properties.getWeb()).previewBasePath(),
+                properties.getLocal().isCleanupEmptyDirectories());
     }
 
     /**

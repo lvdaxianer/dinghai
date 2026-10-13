@@ -96,6 +96,51 @@ public class FileStorageAutoConfigurationTest {
     }
 
     /**
+     * 本地 provider 默认应在删除对象后清理空目录。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-10-13
+     */
+    @Test
+    public void shouldCleanEmptyDirectoriesByDefaultForLocalProvider() {
+        contextRunner.withPropertyValues(localProperties())
+                .run(context -> {
+                    FileStorage storage = context.getBean(FileStorage.class);
+                    ObjectKey key = ObjectKey.of("model-version/1/V0/model.bin");
+                    storage.put(UploadRequest.of(key, new ByteArrayInputStream(new byte[]{1}), 1L,
+                            "application/octet-stream"));
+
+                    assertThat(storage.delete(key)).isTrue();
+                    assertThat(Files.exists(Path.of(storageRoot()).resolve(
+                            "documents/model-version/1/V0")))
+                            .isFalse();
+                });
+    }
+
+    /**
+     * 本地 provider 关闭清理开关后应保留空目录。
+     *
+     * @author lvdaxianer@yeah.net
+     * @date 2026-10-13
+     */
+    @Test
+    public void shouldKeepEmptyDirectoriesWhenCleanupIsDisabled() {
+        contextRunner.withPropertyValues(localProperties())
+                .withPropertyValues("dinghai.file-storage.local.cleanup-empty-directories=false")
+                .run(context -> {
+                    FileStorage storage = context.getBean(FileStorage.class);
+                    ObjectKey key = ObjectKey.of("model-version/1/V0/model.bin");
+                    storage.put(UploadRequest.of(key, new ByteArrayInputStream(new byte[]{1}), 1L,
+                            "application/octet-stream"));
+
+                    assertThat(storage.delete(key)).isTrue();
+                    assertThat(Files.isDirectory(Path.of(storageRoot()).resolve(
+                            "documents/model-version/1/V0")))
+                            .isTrue();
+                });
+    }
+
+    /**
      * 本地 provider 的预签名地址必须使用与 MVC 相同的配置化操作路径。
      *
      * @author lvdaxianer@yeah.net
