@@ -17,12 +17,17 @@
 | `dinghai-file-storage-aliyun-oss` | 固定 bucket 的阿里云 OSS V2 SDK 适配器与原生预签名能力 |
 | `dinghai-file-storage-huaweicloud-obs` | 固定 bucket 的华为云 OBS 专用 SDK 适配器、原生预签名与 multipart 能力 |
 | `dinghai-file-storage-spring-boot-starter` | 按 provider 自动装配文件存储，并提供本地 Web 预签名端点 |
+| `dinghai-file-storage-*-spring-boot-starter` | MinIO、RustFS、阿里云 OSS、华为云 OBS 的专用自动配置与 provider factory |
 
 `benchmark` 模块仅用于开发验证，不发布（见文末「基准测试」）。
 
 ## 快速开始
 
-引入 Starter：
+引入 Starter：公共 Starter 只包含契约、Local、Web、缓存和迁移能力；远端后端必须再引入且只引入对应的 provider Starter。
+
+`dinghai.file-storage.provider` 只负责运行时选择和 Bean 注入，不能从已经打进应用的 Maven 依赖中移除 jar。要让安全扫描只看到实际使用的 SDK，依赖也必须按下面的最小组合声明；不要把四个 provider Starter 一起引入。
+
+Local：
 
 ```xml
 <dependency>
@@ -31,6 +36,69 @@
     <version>1.0.0</version>
 </dependency>
 ```
+
+MinIO：
+
+```xml
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-minio-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+RustFS：
+
+```xml
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-rustfs-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+阿里云 OSS / 华为云 OBS：分别使用 `dinghai-file-storage-aliyun-oss-spring-boot-starter` 或 `dinghai-file-storage-huaweicloud-obs-spring-boot-starter`，组合方式与上面相同。
+
+例如完整的远端依赖组合如下（每个应用只选择其中一组 provider starter）：
+
+```xml
+<!-- 公共 Starter，四种远端后端都需要 -->
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+<!-- OSS：二选一替换为 huaweicloud-obs-spring-boot-starter -->
+<dependency>
+    <groupId>io.github.lvdaxianer</groupId>
+    <artifactId>dinghai-file-storage-aliyun-oss-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+OBS 应用只需把上例的第二个 artifact 替换为 `dinghai-file-storage-huaweicloud-obs-spring-boot-starter`；不需要同时声明 OSS、MinIO 或 RustFS 依赖。
+
+依赖边界如下：
+
+| 应用实际选择 | 应引入的 provider Starter | 运行时 provider SDK |
+| --- | --- | --- |
+| `local` | 无 | 无远端 SDK |
+| `minio` | `dinghai-file-storage-minio-spring-boot-starter` | MinIO SDK |
+| `rustfs` | `dinghai-file-storage-rustfs-spring-boot-starter` | AWS SDK for Java v2 S3，不包含 MinIO SDK |
+| `aliyun-oss` | `dinghai-file-storage-aliyun-oss-spring-boot-starter` | Alibaba Cloud OSS V2 SDK |
+| `huaweicloud-obs` | `dinghai-file-storage-huaweicloud-obs-spring-boot-starter` | Huawei Cloud OBS SDK |
+
+因此，配置了某个 provider 但没有对应 Starter 时，应用会以 `INVALID_CONFIGURATION` 启动失败；不会偷偷回退到另一个 provider。配置了 RustFS 时，不要额外声明 MinIO starter 或 `io.minio:minio`。
 
 最小配置（Local 后端，敏感值用环境变量注入）：
 
@@ -92,11 +160,11 @@ MinIO 适配器**不会自动创建或修改 bucket**，需事先自行建好。
 | `rustfs.endpoint` | `String` | 无（provider=rustfs 时必填） | RustFS S3 API 服务端地址，例如 `http://localhost:9100` |
 | `rustfs.access-key` | `String` | 无（必填） | 访问密钥，应由部署环境注入 |
 | `rustfs.secret-key` | `String` | 无（必填） | 私密访问密钥，应由部署环境注入 |
-| `rustfs.connect-timeout` | `Duration` | `10s` | 连接超时（OkHttp 客户端），必须为正 |
-| `rustfs.read-timeout` | `Duration` | `10s` | 读取超时，必须为正 |
-| `rustfs.write-timeout` | `Duration` | `10s` | 写入超时，必须为正 |
+| `rustfs.connect-timeout` | `Duration` | `10s` | 连接超时（AWS Apache HTTP client），必须为正 |
+| `rustfs.read-timeout` | `Duration` | `10s` | 读取/API 调用超时，必须为正 |
+| `rustfs.write-timeout` | `Duration` | `10s` | 写入/API 调用超时，必须为正 |
 
-RustFS 使用 S3 兼容 API；其 bucket 应保持私有并由运维预先创建。适配器**不会自动创建或修改 bucket 策略**，上传、下载预签名由 RustFS 原生签发。
+RustFS 使用独立的 AWS SDK for Java v2 S3 client/presigner 调用 S3 兼容 API；其 bucket 应保持私有并由运维预先创建。适配器**不会自动创建或修改 bucket 策略**，使用 endpoint override、path-style 和固定 S3 签名地域。上传、下载和 multipart 分片预签名均为原生 `PUT` / `GET` URL。
 
 ### aliyun-oss（阿里云 OSS 后端）
 
