@@ -47,6 +47,8 @@ public class FileStorageProperties {
     private final Cache cache = new Cache();
     /** 服务器目录迁移配置。 */
     private final Migration migration = new Migration();
+    /** 删除任务配置。 */
+    private final Delete delete = new Delete();
 
     /**
      * 获取后端类型。
@@ -227,6 +229,15 @@ public class FileStorageProperties {
      */
     public Migration getMigration() {
         return migration;
+    }
+
+    /**
+     * 获取删除任务配置。
+     *
+     * @return 删除任务配置
+     */
+    public Delete getDelete() {
+        return delete;
     }
 
     /**
@@ -1343,5 +1354,64 @@ public class FileStorageProperties {
         public void setFailedRoot(Path failedRoot) {
             this.failedRoot = failedRoot;
         }
+    }
+
+    /** 删除任务与持久化配置。 */
+    public static class Delete {
+        /** 默认保持现有同步删除行为。 */
+        private FileStorageDeleteMode mode = FileStorageDeleteMode.SYNC;
+        /** 异步任务数据库类型。 */
+        private FileStorageDeleteDatabase database = FileStorageDeleteDatabase.SQLITE;
+        /** SQLite 数据库文件。 */
+        private Path sqlitePath = Paths.get("data", "dinghai-file-storage-delete.db");
+        /** Worker 数量。 */
+        private int workerCount = 2;
+        /** Worker 内存队列容量。 */
+        private int queueCapacity = 1000;
+        /** 轮询间隔。 */
+        private Duration pollInterval = Duration.ofSeconds(1L);
+        /** 租约时长。 */
+        private Duration leaseDuration = Duration.ofSeconds(30L);
+        /** 最大尝试次数。 */
+        private int maxAttempts = 5;
+        /** 初始重试退避。 */
+        private Duration retryBackoff = Duration.ofSeconds(1L);
+
+        /** 获取删除模式。 */
+        public FileStorageDeleteMode getMode() { return mode; }
+        /** 设置删除模式。 */
+        public void setMode(FileStorageDeleteMode mode) { this.mode = mode; }
+        /** 获取数据库类型。 */
+        public FileStorageDeleteDatabase getDatabase() { return database; }
+        /** 设置数据库类型。 */
+        public void setDatabase(FileStorageDeleteDatabase database) { this.database = database; }
+        /** 获取 SQLite 路径。 */
+        public Path getSqlitePath() { return sqlitePath; }
+        /** 设置 SQLite 路径。 */
+        public void setSqlitePath(Path sqlitePath) { this.sqlitePath = sqlitePath; }
+        /** 获取 Worker 数量。 */
+        public int getWorkerCount() { return workerCount; }
+        /** 设置 Worker 数量。 */
+        public void setWorkerCount(int workerCount) { this.workerCount = workerCount; }
+        /** 获取队列容量。 */
+        public int getQueueCapacity() { return queueCapacity; }
+        /** 设置队列容量。 */
+        public void setQueueCapacity(int queueCapacity) { this.queueCapacity = queueCapacity; }
+        /** 获取轮询间隔。 */
+        public Duration getPollInterval() { return pollInterval; }
+        /** 设置轮询间隔。 */
+        public void setPollInterval(Duration pollInterval) { this.pollInterval = pollInterval; }
+        /** 获取租约时长。 */
+        public Duration getLeaseDuration() { return leaseDuration; }
+        /** 设置租约时长。 */
+        public void setLeaseDuration(Duration leaseDuration) { this.leaseDuration = leaseDuration; }
+        /** 获取最大尝试次数。 */
+        public int getMaxAttempts() { return maxAttempts; }
+        /** 设置最大尝试次数。 */
+        public void setMaxAttempts(int maxAttempts) { this.maxAttempts = maxAttempts; }
+        /** 获取重试退避。 */
+        public Duration getRetryBackoff() { return retryBackoff; }
+        /** 设置重试退避。 */
+        public void setRetryBackoff(Duration retryBackoff) { this.retryBackoff = retryBackoff; }
     }
 }
