@@ -31,4 +31,10 @@ public interface FileStorageDeleteTaskRepository {
 
     /** 使用租约令牌标记成功。 */
     boolean markSuccess(String taskId, String leaseToken, long now);
+
+    /** 使用租约令牌安排下一次重试。 */
+    boolean markRetry(String taskId, String leaseToken, long nextRunAt, String lastError, long now);
+
+    /** 使用租约令牌标记最终失败。 */
+    boolean markFailed(String taskId, String leaseToken, String lastError, long now);
 }
