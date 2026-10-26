@@ -26,6 +26,8 @@ import org.springframework.context.SmartLifecycle;
 public final class FileStorageDeleteWorker implements SmartLifecycle, AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(FileStorageDeleteWorker.class);
     private static final long MAX_BACKOFF_MILLIS = TimeUnit.HOURS.toMillis(1L);
+    private static final String TRACE_ID_KEY = "traceId";
+    private static final String TRACE_ID_PREFIX = "file-delete-";
     private final FileStorage storage;
     private final FileStorageDeleteTaskRepository repository;
     private final FileStorageProperties.Delete properties;
@@ -63,22 +65,56 @@ public final class FileStorageDeleteWorker implements SmartLifecycle, AutoClosea
         if (task == null) {
             return false;
         }
+        return executeClaimedTask(task, leaseToken);
+    }
+
+    /** 执行已领取任务并隔离本次任务的日志上下文。 */
+    private boolean executeClaimedTask(FileStorageDeleteTask task, String leaseToken) {
+        Map<String, String> previous = MDC.getCopyOfContextMap();
+        MDC.put(TRACE_ID_KEY, TRACE_ID_PREFIX + UUID.randomUUID());
+        long startedAt = clock.millis();
+        LOGGER.info("[文件异步删除] task started, taskId={}, attempt={}, workerId={}",
+                task.taskId(), task.attemptCount(), workerId);
+        try {
+            return deleteClaimedTask(task, leaseToken, startedAt);
+        } finally {
+            restoreMdc(previous);
+        }
+    }
+
+    /** 调用 provider 并记录成功或失败状态。 */
+    private boolean deleteClaimedTask(FileStorageDeleteTask task, String leaseToken, long startedAt) {
         try {
             // FileStorage.delete 对不存在对象返回 false，删除本身仍按幂等成功处理。
-            storage.delete(ObjectKey.of(task.objectKey()));
-            repository.markSuccess(task.taskId(), leaseToken, clock.millis());
+            boolean deleted = storage.delete(ObjectKey.of(task.objectKey()));
+            long completedAt = clock.millis();
+            boolean marked = repository.markSuccess(task.taskId(), leaseToken, completedAt);
+            LOGGER.info("[文件异步删除] task succeeded, taskId={}, attempt={}, result={}, durationMs={}, "
+                            + "stateUpdated={}", task.taskId(), task.attemptCount(),
+                    deleted ? "deleted" : "missing", completedAt - startedAt, marked);
         } catch (RuntimeException exception) {
-            String safeError = safeError(exception);
-            if (task.attemptCount() >= properties.getMaxAttempts()) {
-                repository.markFailed(task.taskId(), leaseToken, safeError, clock.millis());
-                LOGGER.warn("file delete task reached terminal failure, taskId={}, errorType={}",
-                        task.taskId(), safeError);
-            } else {
-                repository.markRetry(task.taskId(), leaseToken,
-                        now + backoffMillis(task.attemptCount()), safeError, clock.millis());
-            }
+            handleFailure(task, leaseToken, startedAt, exception);
         }
         return true;
+    }
+
+    /** 记录安全失败摘要并安排重试或最终失败。 */
+    private void handleFailure(FileStorageDeleteTask task, String leaseToken, long startedAt,
+                               RuntimeException exception) {
+        String safeError = safeError(exception);
+        long completedAt = clock.millis();
+        long duration = completedAt - startedAt;
+        if (task.attemptCount() >= properties.getMaxAttempts()) {
+            boolean marked = repository.markFailed(task.taskId(), leaseToken, safeError, completedAt);
+            LOGGER.error("[文件异步删除] task failed, taskId={}, attempt={}, errorType={}, durationMs={}, "
+                            + "stateUpdated={}", task.taskId(), task.attemptCount(), safeError, duration, marked);
+        } else {
+            long nextRunAt = completedAt + backoffMillis(task.attemptCount());
+            boolean marked = repository.markRetry(task.taskId(), leaseToken, nextRunAt, safeError, completedAt);
+            LOGGER.warn("[文件异步删除] task retry-scheduled, taskId={}, attempt={}, nextRunAt={}, "
+                            + "errorType={}, durationMs={}, stateUpdated={}", task.taskId(),
+                    task.attemptCount(), nextRunAt, safeError, duration, marked);
+        }
     }
 
     @Override
@@ -90,6 +126,8 @@ public final class FileStorageDeleteWorker implements SmartLifecycle, AutoClosea
                 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(properties.getQueueCapacity()),
                 namedFactory("file-storage-delete-"), new ThreadPoolExecutor.AbortPolicy());
         poller = Executors.newSingleThreadScheduledExecutor(namedFactory("file-storage-delete-poller-"));
+        LOGGER.info("[文件异步删除] worker started, workerId={}, workerCount={}, queueCapacity={}",
+                workerId, properties.getWorkerCount(), properties.getQueueCapacity());
         poller.scheduleWithFixedDelay(this::poll, 0L, properties.getPollInterval().toMillis(), TimeUnit.MILLISECONDS);
     }
 
@@ -141,6 +179,7 @@ public final class FileStorageDeleteWorker implements SmartLifecycle, AutoClosea
                 Thread.currentThread().interrupt();
             }
         }
+        LOGGER.info("[文件异步删除] worker stopped, workerId={}", workerId);
     }
 
     private void poll() {
@@ -172,7 +211,8 @@ public final class FileStorageDeleteWorker implements SmartLifecycle, AutoClosea
             try {
                 processOnce(clock.millis());
             } catch (RuntimeException exception) {
-                LOGGER.warn("file delete worker iteration failed, errorType={}", safeError(exception));
+                LOGGER.warn("[文件异步删除] worker iteration failed, workerId={}, errorType={}",
+                        workerId, safeError(exception));
             }
         } finally {
             if (previous == null) {
@@ -197,6 +237,15 @@ public final class FileStorageDeleteWorker implements SmartLifecycle, AutoClosea
     private String safeError(Throwable exception) {
         String type = exception.getClass().getSimpleName();
         return type == null || type.isBlank() ? "delete-failed" : type;
+    }
+
+    /** 恢复 Worker 执行前的 MDC，避免线程池复用时串联 trace。 */
+    private void restoreMdc(Map<String, String> context) {
+        if (context == null) {
+            MDC.clear();
+        } else {
+            MDC.setContextMap(context);
+        }
     }
 
     private ThreadFactory namedFactory(String prefix) {
