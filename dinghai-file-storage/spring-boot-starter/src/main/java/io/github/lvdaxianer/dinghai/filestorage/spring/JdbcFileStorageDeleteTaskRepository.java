@@ -116,6 +116,22 @@ final class JdbcFileStorageDeleteTaskRepository implements FileStorageDeleteTask
                 now, now, taskId, leaseToken) == 1;
     }
 
+    @Override
+    public boolean markRetry(String taskId, String leaseToken, long nextRunAt, String lastError, long now) {
+        return jdbcTemplate.update("UPDATE " + TABLE + " SET status = 'RETRY_WAIT', worker_id = NULL, "
+                        + "lease_token = NULL, lease_until = NULL, next_run_at = ?, last_error = ?, updated_at = ? "
+                        + "WHERE task_id = ? AND status = 'RUNNING' AND lease_token = ?",
+                nextRunAt, lastError, now, taskId, leaseToken) == 1;
+    }
+
+    @Override
+    public boolean markFailed(String taskId, String leaseToken, String lastError, long now) {
+        return jdbcTemplate.update("UPDATE " + TABLE + " SET status = 'FAILED', worker_id = NULL, "
+                        + "lease_token = NULL, lease_until = NULL, last_error = ?, updated_at = ?, completed_at = ? "
+                        + "WHERE task_id = ? AND status = 'RUNNING' AND lease_token = ?",
+                lastError, now, now, taskId, leaseToken) == 1;
+    }
+
     private Optional<FileStorageDeleteTask> queryOne(String sql, Object... arguments) {
         List<FileStorageDeleteTask> tasks = jdbcTemplate.query(sql, this::map, arguments);
         return tasks.stream().findFirst();

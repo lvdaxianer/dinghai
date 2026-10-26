@@ -8,8 +8,10 @@ import org.junit.rules.TemporaryFolder;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.sqlite.SQLiteDataSource;
+import io.github.lvdaxianer.dinghai.filestorage.core.FileStorage;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /** 删除任务自动装配测试。 */
 public class FileStorageDeleteAutoConfigurationTest {
@@ -65,5 +67,22 @@ public class FileStorageDeleteAutoConfigurationTest {
                 .withPropertyValues("dinghai.file-storage.delete.mode=async",
                         "dinghai.file-storage.delete.database=jdbc")
                 .run(context -> assertThat(context).hasSingleBean(FileStorageDeleteTaskRepository.class));
+    }
+
+    /** 异步模式在存在文件存储时才暴露提交服务和独立 Worker。 */
+    @Test
+    public void shouldExposeDeleteServiceAndWorkerOnlyForAsyncStorage() throws Exception {
+        Path database = temporaryFolder.newFile("service-delete-task.db").toPath();
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(FileStorageDeleteAutoConfiguration.class))
+                .withBean(FileStorage.class, () -> mock(FileStorage.class))
+                .withPropertyValues("dinghai.file-storage.storage-alias=documents",
+                        "dinghai.file-storage.delete.mode=async",
+                        "dinghai.file-storage.delete.sqlite-path=" + database,
+                        "dinghai.file-storage.delete.poll-interval=1h")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(FileStorageDeleteService.class);
+                    assertThat(context).hasSingleBean(FileStorageDeleteWorker.class);
+                });
     }
 }
