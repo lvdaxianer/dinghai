@@ -256,6 +256,60 @@ OBS uses `com.huaweicloud:esdk-obs-java:3.26.6`, not Huawei Cloud SDK Bundle. Th
 | `migration.completed-root` | `Path` | none (required) | Archive directory for successfully imported packages |
 | `migration.failed-root` | `Path` | none (required) | Archive directory for failed packages and their `errors.ndjson` |
 
+### delete (Asynchronous Deletion)
+
+The existing `FileStorage.delete(ObjectKey)` remains synchronous by default. Asynchronous registration, status lookup, and the background Worker are enabled only when `delete.mode=async` is set explicitly. This change exposes a Java service only; it does not register an HTTP Controller.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `delete.mode` | `sync` / `async` | `sync` | `sync` creates no database-related Bean and requires no JDBC configuration; `async` enables the asynchronous delete service |
+| `delete.database` | `sqlite` / `jdbc` | `sqlite` | `sqlite` is for a single node; `jdbc` reuses the host application's `DataSource` for multi-instance high availability |
+| `delete.sqlite-path` | `Path` | `data/dinghai-file-storage-delete.db` | SQLite task database file; used only with `database=sqlite`, and should not be placed on a shared network filesystem for multiple instances |
+| `delete.worker-count` | `int` | `2` | Number of threads in the isolated delete executor; must be positive |
+| `delete.queue-capacity` | `int` | `1000` | In-memory queue capacity for the delete executor; must be positive |
+| `delete.poll-interval` | `Duration` | `1s` | Interval for polling pending tasks |
+| `delete.lease-duration` | `Duration` | `30s` | Worker lease duration; another instance can take over after a stop or timeout |
+| `delete.max-attempts` | `int` | `5` | Maximum attempts per task; exhaustion marks the task as `FAILED` |
+| `delete.retry-backoff` | `Duration` | `1s` | Initial retry backoff; subsequent retries use exponential backoff with a cap |
+
+Single-node SQLite example:
+
+```yaml
+dinghai:
+  file-storage:
+    storage-alias: documents
+    delete:
+      mode: async
+      database: sqlite
+      sqlite-path: /var/lib/app/dinghai-file-storage-delete.db
+```
+
+Multi-instance high-availability example:
+
+```yaml
+dinghai:
+  file-storage:
+    storage-alias: documents
+    delete:
+      mode: async
+      database: jdbc
+spring:
+  datasource:
+    url: jdbc:mysql://db.example/dinghai
+    username: ${DINGHAI_DB_USERNAME}
+    password: ${DINGHAI_DB_PASSWORD}
+```
+
+The host registers a task and queries its status through `FileStorageDeleteService`:
+
+```java
+FileStorageDeleteTaskView task = deleteService.submit(
+        new FileStorageDeleteRequest(ObjectKey.of("a/b.txt"), "request-id"));
+Optional<FileStorageDeleteTaskView> status = deleteService.status(task.taskId());
+```
+
+The same `storage-alias` and `idempotencyKey` register only one task. A missing object is treated as an idempotent success. Task states are `PENDING`, `RUNNING`, `RETRY_WAIT`, `SUCCESS`, and `FAILED`. Failure records contain only the exception type, not provider exception messages. If an HTTP endpoint is needed, the host should wrap this service in an authenticated Controller.
+
 Full configuration example:
 
 ```yaml

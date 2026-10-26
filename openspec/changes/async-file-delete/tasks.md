@@ -14,8 +14,8 @@
 
 ## 3. 使用说明与集成验证
 
-- [ ] 3.1 更新文件存储中英文 README 与配置示例，说明 sync、SQLite 单机和宿主 DataSource 高可用模式，并验证文档配置键与实现一致
-- [ ] 3.2 运行 OpenSpec 严格校验、文件存储 Starter 聚焦测试和完整 Maven 验证，确认现有同步删除/provider 回归测试不受影响
+- [x] 3.1 更新文件存储中英文 README 与配置示例，说明 sync、SQLite 单机和宿主 DataSource 高可用模式，并验证文档配置键与实现一致
+- [x] 3.2 运行 OpenSpec 严格校验、文件存储 Starter 聚焦测试和完整 Maven 验证，确认现有同步删除/provider 回归测试不受影响
 
 ## Workflow follow-up
 
