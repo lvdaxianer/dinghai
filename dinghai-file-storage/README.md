@@ -261,6 +261,60 @@ OBS 使用 `com.huaweicloud:esdk-obs-java:3.26.6`，不使用 Huawei Cloud SDK B
 | `migration.completed-root` | `Path` | 无（必填） | 导入成功后包的归档目录 |
 | `migration.failed-root` | `Path` | 无（必填） | 导入失败包及 `errors.ndjson` 的归档目录 |
 
+### delete（异步删除）
+
+现有 `FileStorage.delete(ObjectKey)` 默认保持同步行为。只有显式设置 `delete.mode=async` 才会启用异步登记、任务状态查询和后台 Worker；该模式只暴露 Java 服务，不自动注册 HTTP Controller。
+
+| 配置键 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `delete.mode` | `sync` / `async` | `sync` | `sync` 不创建数据库相关 Bean，也不要求 JDBC 配置；`async` 启用异步删除服务 |
+| `delete.database` | `sqlite` / `jdbc` | `sqlite` | `sqlite` 适合单机；`jdbc` 复用宿主应用提供的 `DataSource`，适合多实例高可用 |
+| `delete.sqlite-path` | `Path` | `data/dinghai-file-storage-delete.db` | SQLite 任务库文件；只在 `database=sqlite` 时使用，不应放在多实例共享网络文件系统上 |
+| `delete.worker-count` | `int` | `2` | 独立删除执行器的线程数，必须为正 |
+| `delete.queue-capacity` | `int` | `1000` | 删除执行器内存队列容量，必须为正 |
+| `delete.poll-interval` | `Duration` | `1s` | 轮询待执行任务的间隔 |
+| `delete.lease-duration` | `Duration` | `30s` | Worker 租约时长；实例停止或超时后其他实例可接管 |
+| `delete.max-attempts` | `int` | `5` | 单个任务最大尝试次数，耗尽后标记为 `FAILED` |
+| `delete.retry-backoff` | `Duration` | `1s` | 初始重试退避，后续按指数退避并封顶 |
+
+单机 SQLite 示例：
+
+```yaml
+dinghai:
+  file-storage:
+    storage-alias: documents
+    delete:
+      mode: async
+      database: sqlite
+      sqlite-path: /var/lib/app/dinghai-file-storage-delete.db
+```
+
+多实例高可用示例：
+
+```yaml
+dinghai:
+  file-storage:
+    storage-alias: documents
+    delete:
+      mode: async
+      database: jdbc
+spring:
+  datasource:
+    url: jdbc:mysql://db.example/dinghai
+    username: ${DINGHAI_DB_USERNAME}
+    password: ${DINGHAI_DB_PASSWORD}
+```
+
+宿主通过 `FileStorageDeleteService` 登记任务并查询状态：
+
+```java
+FileStorageDeleteTaskView task = deleteService.submit(
+        new FileStorageDeleteRequest(ObjectKey.of("a/b.txt"), "request-id"));
+Optional<FileStorageDeleteTaskView> status = deleteService.status(task.taskId());
+```
+
+相同 `storage-alias` 和 `idempotencyKey` 只会登记一个任务；对象已经不存在时按幂等成功处理。任务状态包括 `PENDING`、`RUNNING`、`RETRY_WAIT`、`SUCCESS` 和 `FAILED`。失败记录只保存异常类型，不保存 provider 异常消息；宿主如需 HTTP 接口，应自行在鉴权后的 Controller 中包装该服务。
+
 完整配置示例：
 
 ```yaml
