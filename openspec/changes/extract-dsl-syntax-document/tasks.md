@@ -12,7 +12,7 @@
 
 ## 3. 集成验证
 
-- [ ] 3.1 执行 OpenSpec strict 校验、Markdown 链接检查、工作区卫生检查，并审查文档与当前 parser/test fixture 的一致性。
+- [x] 3.1 执行 OpenSpec strict 校验、Markdown 链接检查、工作区卫生检查，并审查文档与当前 parser/test fixture 的一致性。
 
 ## Workflow follow-up
 
