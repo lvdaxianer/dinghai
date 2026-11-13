@@ -104,6 +104,37 @@ PostgreSQL 将 `default-data-adapter` 改为 `postgresql`，并使用 PostgreSQL
 
 宿主应用必须提供 schema policy 和 `PlanPolicy`；公共模块不实现企业表权限、`userId`/`domainId` 权限或租户规则。缺少 `PlanPolicy` 时 starter fail-fast，禁止默认放行数据权限。
 
+## 计划扩展：通过代码 Bean 注入语义
+
+逻辑删除、租户隔离、数据域约束等跨请求规则不通过 YAML 拼接 SQL，也不允许请求体携带规则。宿主应用以代码实现 `PlanExtension`，并注册为 Spring Bean；starter 会在启动阶段收集扩展、校验唯一 `id`、按 `order` 排序并冻结 `PlanExtensionRegistry`：
+
+```java
+@Bean
+RelationalPlanExtension activeRowsExtension() {
+    return new RelationalPlanExtension() {
+        @Override
+        public String id() {
+            return "active-rows";
+        }
+
+        @Override
+        public List<RelationalConstraint> constraints(
+                RelationalQueryPlan plan, PlanExtensionContext context) {
+            return List.of(RelationalConstraint.of(
+                    new RelationalQueryAst.RelationalField("f", "active"),
+                    RelationalQueryAst.ComparisonOperator.EQ,
+                    "integer",
+                    1,
+                    ConstraintPlacement.WHERE));
+        }
+    };
+}
+```
+
+关系扩展只能返回类型化、白名单校验后的约束；重写器负责把约束变成绑定参数，并根据 `ConstraintPlacement` 放入 `WHERE` 或目标 JOIN 的 `ON`。扩展上下文只包含 DSL 类型、版本和服务端构造的 `QueryContext`，不包含原始请求、SQL、数据库连接信息或密码。扩展失败、重复 ID 或非法字段会在启动或编译阶段明确报错，不会自动改用其他扩展或数据库。
+
+`PlanExtensionRegistry` 是公共 DSL 核心的扩展点，企业应用可以在自己的模块实现身份、租户和领域权限；公共仓库不反向依赖企业模块。
+
 ## 日志、审计和调优边界
 
 默认安全日志只记录 `traceId`、计划摘要、adapter、结果码、耗时和行数，不记录密码、Token、原始 SQL、参数值或完整结果。`QueryAuditSink` 和 `QueryTelemetry` 可由宿主接入企业审计与指标系统，审计接收器故障不会改变查询结果。

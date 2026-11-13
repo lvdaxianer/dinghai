@@ -1,0 +1,56 @@
+{
+  "groups": [
+    {
+      "name": "dinghai.data-query",
+      "type": "io.github.lvdaxianer.dinghai.dsl.spring.DslEngineProperties",
+      "description": "服务端 DSL 引擎运行时与适配器选择配置。扩展规则通过 PlanExtension Bean 注册，不通过配置注入。"
+    }
+  ],
+  "properties": [
+    {
+      "name": "dinghai.data-query.default-data-adapter",
+      "type": "java.lang.String",
+      "description": "默认数据适配器类型，只能选择已注册的 mysql 或 postgresql。Doris 的 MySQL 协议端口复用 mysql。"
+    },
+    {
+      "name": "dinghai.data-query.dsl-adapters",
+      "type": "java.util.Map<java.lang.String,java.lang.String>",
+      "description": "DSL 类型到 enabled/disabled 的启动配置；每个 enabled 类型必须有已注册的 DslAdapter。"
+    },
+    {
+      "name": "dinghai.data-query.max-request-bytes",
+      "type": "java.lang.Integer",
+      "description": "单次 DSL 请求允许的最大字节数。"
+    },
+    {
+      "name": "dinghai.data-query.max-concurrency",
+      "type": "java.lang.Integer",
+      "description": "引擎允许的最大并发查询数。"
+    },
+    {
+      "name": "dinghai.data-query.timeout",
+      "type": "java.time.Duration",
+      "description": "单次查询的服务端执行超时时间。"
+    },
+    {
+      "name": "dinghai.data-query.max-plan-nodes",
+      "type": "java.lang.Integer",
+      "description": "计划允许的最大节点数。"
+    },
+    {
+      "name": "dinghai.data-query.max-plan-depth",
+      "type": "java.lang.Integer",
+      "description": "计划允许的最大深度。"
+    },
+    {
+      "name": "dinghai.data-query.max-joins",
+      "type": "java.lang.Integer",
+      "description": "单次查询允许的最大 JOIN 数量。"
+    },
+    {
+      "name": "dinghai.data-query.max-rows",
+      "type": "java.lang.Integer",
+      "description": "单次查询允许返回的最大行数。"
+    }
+  ]
+}

@@ -66,6 +66,21 @@ Doris on its MySQL-protocol port reuses the `mysql` adapter and only uses the co
 
 Startup fails before readiness when the selected adapter, DataSource, DSL adapter, or capability declaration is missing or duplicated.
 
+## Plan extensions
+
+Logical-delete, tenant, and data-domain rules are code-level semantics, not YAML SQL fragments and not request fields. A host application implements `PlanExtension` (or `RelationalPlanExtension`) as a Spring Bean. The starter discovers all beans at startup, rejects duplicate IDs, orders them, and freezes `PlanExtensionRegistry`:
+
+```java
+@Bean
+RelationalPlanExtension activeRowsExtension() {
+    return new ActiveRowsExtension();
+}
+```
+
+Relational extensions return typed, whitelist-checked constraints. The relational rewriter converts them into bound parameters and places them in `WHERE` or a target JOIN `ON` clause. Extension context contains only the DSL type/version and a server-built `QueryContext`; it does not contain the raw request, SQL, connection details, or credentials. Invalid fields, duplicate IDs, and extension failures are explicit errors; the engine never silently falls back to another extension or backend.
+
+The public core owns the extension SPI. Enterprise modules may implement identity, tenant, and domain authorization without creating a reverse dependency from the public repository.
+
 ## Logging and enterprise boundary
 
 The default safe logger records only trace ID, plan digest, adapter, outcome code, duration, and row count. It never records passwords, tokens, raw SQL, parameter values, or complete result sets. Hosts may inject `QueryAuditSink` and `QueryTelemetry`.
