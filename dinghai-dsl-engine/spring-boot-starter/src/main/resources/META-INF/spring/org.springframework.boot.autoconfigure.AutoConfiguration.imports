@@ -1,0 +1,3 @@
+io.github.lvdaxianer.dinghai.dsl.spring.DslEngineAutoConfiguration
+io.github.lvdaxianer.dinghai.dsl.spring.MysqlDataAdapterAutoConfiguration
+io.github.lvdaxianer.dinghai.dsl.spring.PostgresqlDataAdapterAutoConfiguration

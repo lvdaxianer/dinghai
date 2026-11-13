@@ -21,5 +21,6 @@
         <module>relational</module>
         <module>mysql</module>
         <module>postgresql</module>
+        <module>spring-boot-starter</module>
     </modules>
 </project>
