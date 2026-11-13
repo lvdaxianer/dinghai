@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.lvdaxianer</groupId>
+        <artifactId>dinghai-parent</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>dinghai-dsl-engine</artifactId>
+    <packaging>pom</packaging>
+    <name>dinghai-dsl-engine</name>
+    <description>通用 DSL 解析、编译与后端适配引擎聚合模块</description>
+
+    <modules>
+        <module>core</module>
+        <module>spi</module>
+    </modules>
+</project>
