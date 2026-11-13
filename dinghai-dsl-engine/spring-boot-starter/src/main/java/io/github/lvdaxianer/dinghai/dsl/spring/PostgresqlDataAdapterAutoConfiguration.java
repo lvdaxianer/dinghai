@@ -1,6 +1,8 @@
 package io.github.lvdaxianer.dinghai.dsl.spring;
 
 import io.github.lvdaxianer.dinghai.dsl.postgresql.PostgresqlDataAdapter;
+import io.github.lvdaxianer.dinghai.dsl.postgresql.PostgresqlExecutionLimits;
+import io.github.lvdaxianer.dinghai.dsl.postgresql.PostgresqlRelationalCompiler;
 import io.github.lvdaxianer.dinghai.dsl.spi.DataAdapter;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -30,12 +32,14 @@ public class PostgresqlDataAdapterAutoConfiguration {
      */
     @Bean(name = "dinghaiPostgresqlDataAdapter")
     @ConditionalOnMissingBean(name = "dinghaiPostgresqlDataAdapter")
-    public DataAdapter postgresqlDataAdapter(ObjectProvider<DataSource> dataSources) {
+    public DataAdapter postgresqlDataAdapter(
+            ObjectProvider<DataSource> dataSources, DslEngineProperties properties) {
         DataSource dataSource = dataSources.getIfAvailable();
         if (dataSource == null) {
             throw new DslBootstrapException(
                     "postgresql data adapter requires a server-managed DataSource bean");
         }
-        return new PostgresqlDataAdapter(dataSource);
+        return new PostgresqlDataAdapter(dataSource, new PostgresqlRelationalCompiler(),
+                new PostgresqlExecutionLimits(properties.getQueryTimeoutSeconds(), properties.getMaxRows()));
     }
 }

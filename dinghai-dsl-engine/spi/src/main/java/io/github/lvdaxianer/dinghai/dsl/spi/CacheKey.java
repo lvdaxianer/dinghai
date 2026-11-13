@@ -8,7 +8,10 @@ import java.util.Objects;
  * @param dslType DSL 类型
  * @param dslVersion DSL 版本
  * @param planHash 规范化计划摘要
+ * @param backendType 后端类型
+ * @param adapterVersion 数据适配器实现版本
  * @param compilerVersion 编译器版本
+ * @param capabilityVersion 后端能力配置版本
  * @param schemaVersion Schema 版本
  * @param policyVersion 策略版本
  * @author lvdaxianer@yeah.net
@@ -18,7 +21,10 @@ public record CacheKey(
         String dslType,
         int dslVersion,
         String planHash,
+        String backendType,
+        String adapterVersion,
         String compilerVersion,
+        String capabilityVersion,
         String schemaVersion,
         String policyVersion) {
 
@@ -31,7 +37,10 @@ public record CacheKey(
     public CacheKey {
         dslType = requireText(dslType, "dslType");
         planHash = requireText(planHash, "planHash");
+        backendType = requireText(backendType, "backendType");
+        adapterVersion = requireText(adapterVersion, "adapterVersion");
         compilerVersion = requireText(compilerVersion, "compilerVersion");
+        capabilityVersion = requireText(capabilityVersion, "capabilityVersion");
         schemaVersion = requireText(schemaVersion, "schemaVersion");
         policyVersion = requireText(policyVersion, "policyVersion");
         // 版本必须有效，避免缓存键把未知 DSL 当成可复用结果。

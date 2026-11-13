@@ -23,7 +23,7 @@ public final class PostgresqlCapabilityProfile {
      * @date 2026-11-13
      */
     public static BackendCapabilities common() {
-        return new BackendCapabilities("postgresql", Set.of(
+        return new BackendCapabilities("postgresql", "postgresql-v1", Set.of(
                 "relational-query",
                 "inner-join",
                 "left-join",

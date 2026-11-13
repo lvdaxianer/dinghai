@@ -6,6 +6,8 @@ import java.util.Objects;
  * 不包含敏感参数和结果内容的查询审计事件。
  *
  * @param traceId 链路标识
+ * @param dslType DSL 类型
+ * @param dslVersion DSL 版本
  * @param planHash 计划摘要
  * @param adapterType 适配器类型
  * @param outcome 执行结果
@@ -16,6 +18,8 @@ import java.util.Objects;
  */
 public record QueryAuditEvent(
         String traceId,
+        String dslType,
+        int dslVersion,
         String planHash,
         String adapterType,
         String outcome,
@@ -30,6 +34,10 @@ public record QueryAuditEvent(
      */
     public QueryAuditEvent {
         traceId = requireText(traceId, "traceId");
+        dslType = requireText(dslType, "dslType");
+        if (dslVersion < 1) {
+            throw new IllegalArgumentException("dslVersion must be positive");
+        }
         planHash = requireText(planHash, "planHash");
         adapterType = requireText(adapterType, "adapterType");
         outcome = requireText(outcome, "outcome");

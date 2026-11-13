@@ -53,6 +53,7 @@ dinghai:
     max-request-bytes: 1048576
     max-concurrency: 32
     timeout: 30s
+    max-rows: 10000
 
 spring:
   datasource:

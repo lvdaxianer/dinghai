@@ -1,6 +1,8 @@
 package io.github.lvdaxianer.dinghai.dsl.spring;
 
 import io.github.lvdaxianer.dinghai.dsl.mysql.MysqlDataAdapter;
+import io.github.lvdaxianer.dinghai.dsl.mysql.MysqlExecutionLimits;
+import io.github.lvdaxianer.dinghai.dsl.mysql.MysqlRelationalCompiler;
 import io.github.lvdaxianer.dinghai.dsl.spi.DataAdapter;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -31,12 +33,14 @@ public class MysqlDataAdapterAutoConfiguration {
      */
     @Bean(name = "dinghaiMysqlDataAdapter")
     @ConditionalOnMissingBean(name = "dinghaiMysqlDataAdapter")
-    public DataAdapter mysqlDataAdapter(ObjectProvider<DataSource> dataSources) {
+    public DataAdapter mysqlDataAdapter(
+            ObjectProvider<DataSource> dataSources, DslEngineProperties properties) {
         DataSource dataSource = dataSources.getIfAvailable();
         if (dataSource == null) {
             throw new DslBootstrapException(
                     "mysql data adapter requires a server-managed DataSource bean");
         }
-        return new MysqlDataAdapter(dataSource);
+        return new MysqlDataAdapter(dataSource, new MysqlRelationalCompiler(),
+                new MysqlExecutionLimits(properties.getQueryTimeoutSeconds(), properties.getMaxRows()));
     }
 }

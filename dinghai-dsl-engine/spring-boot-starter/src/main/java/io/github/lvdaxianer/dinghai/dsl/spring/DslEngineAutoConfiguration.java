@@ -1,6 +1,7 @@
 package io.github.lvdaxianer.dinghai.dsl.spring;
 
 import io.github.lvdaxianer.dinghai.dsl.relational.RelationalDslAdapter;
+import io.github.lvdaxianer.dinghai.dsl.relational.RelationalPlanLimits;
 import io.github.lvdaxianer.dinghai.dsl.relational.RelationalSchemaPolicy;
 import io.github.lvdaxianer.dinghai.dsl.spi.DataAdapter;
 import io.github.lvdaxianer.dinghai.dsl.spi.DslAdapter;
@@ -63,7 +64,8 @@ public class DslEngineAutoConfiguration {
                 properties.getTimeout(),
                 properties.getMaxPlanNodes(),
                 properties.getMaxPlanDepth(),
-                properties.getMaxJoins());
+                properties.getMaxJoins(),
+                properties.getMaxRows());
         return new QueryExecutionEngine(
                 dslAdapters, dataAdapters, properties.getDefaultDataAdapter(), policy, auditSink, metrics, limits);
     }
@@ -81,13 +83,15 @@ public class DslEngineAutoConfiguration {
             havingValue = "enabled",
             matchIfMissing = true)
     @ConditionalOnMissingBean(name = "dinghaiRelationalDslAdapter")
-    public DslAdapter relationalDslAdapter(ObjectProvider<RelationalSchemaPolicy> policies) {
+    public DslAdapter relationalDslAdapter(
+            ObjectProvider<RelationalSchemaPolicy> policies, DslEngineProperties properties) {
         RelationalSchemaPolicy policy = policies.getIfAvailable();
         if (policy == null) {
             throw new DslBootstrapException(
                     "relational-query is enabled but no RelationalSchemaPolicy bean is configured");
         }
-        return new RelationalDslAdapter(policy);
+        return new RelationalDslAdapter(policy, new RelationalPlanLimits(
+                properties.getMaxJoins(), 64, 128, properties.getMaxPlanDepth(), properties.getMaxRows()));
     }
 
     /**
