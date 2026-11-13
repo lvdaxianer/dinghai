@@ -9,6 +9,7 @@ import io.github.lvdaxianer.dinghai.dsl.spi.DataAdapter;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DataAdapterRegistry;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DslAdapterRegistry;
 import io.github.lvdaxianer.dinghai.dsl.spi.QueryExecutionEngine;
+import io.github.lvdaxianer.dinghai.dsl.spi.PlanPolicy;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -36,7 +37,27 @@ class DslEngineAutoConfigurationTest {
                     "dinghai.data-query.default-data-adapter=mysql",
                     "dinghai.data-query.dsl-adapters.relational-query=enabled")
             .withBean(DataSource.class, () -> mock(DataSource.class))
-            .withBean(RelationalSchemaPolicy.class, () -> (logicalName, context) -> java.util.Optional.empty());
+            .withBean(RelationalSchemaPolicy.class, () -> (logicalName, context) -> java.util.Optional.empty())
+            .withBean(PlanPolicy.class, () -> (plan, context) -> { });
+
+    /**
+     * 验证缺少宿主数据权限策略时启动失败，避免默认放行。
+     */
+    @Test
+    void rejectsMissingPlanPolicyBeforeReady() {
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(
+                        DslEngineAutoConfiguration.class,
+                        MysqlDataAdapterAutoConfiguration.class,
+                        PostgresqlDataAdapterAutoConfiguration.class))
+                .withPropertyValues("dinghai.data-query.default-data-adapter=mysql")
+                .withBean(DataSource.class, () -> mock(DataSource.class))
+                .withBean(RelationalSchemaPolicy.class, () -> (logicalName, context) -> java.util.Optional.empty())
+                .run(context -> assertThat(context)
+                        .hasFailed()
+                        .getFailure()
+                        .hasMessageContaining("requires a server-managed PlanPolicy"));
+    }
 
     /**
      * 验证有效配置可以装配 DSL 和数据适配器注册表。
