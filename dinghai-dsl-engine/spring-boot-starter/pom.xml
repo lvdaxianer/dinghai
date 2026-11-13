@@ -24,11 +24,13 @@
             <groupId>io.github.lvdaxianer</groupId>
             <artifactId>dinghai-dsl-engine-mysql</artifactId>
             <version>${project.version}</version>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>io.github.lvdaxianer</groupId>
             <artifactId>dinghai-dsl-engine-postgresql</artifactId>
             <version>${project.version}</version>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

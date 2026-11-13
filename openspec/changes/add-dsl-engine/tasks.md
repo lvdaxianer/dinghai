@@ -32,8 +32,8 @@
 
 ## 7. Documentation and dependency hygiene
 
-- [ ] 7.1 Document module coordinates, DSL envelope, adapter extension points, MySQL/Doris JDBC usage, PostgreSQL usage, configuration, limitations, and enterprise integration boundaries in README files, and verify every documented sample is internally consistent.
-- [ ] 7.2 Run project-hygiene checks for new POMs, dependencies, environment placeholders, ignored artifacts, line endings, and secret leakage, and verify `git status`, `git ls-files`, and baseline checks are clean.
+- [x] 7.1 Document module coordinates, DSL envelope, adapter extension points, MySQL/Doris JDBC usage, PostgreSQL usage, configuration, limitations, and enterprise integration boundaries in README files, and verify every documented sample is internally consistent.
+- [x] 7.2 Run project-hygiene checks for new POMs, dependencies, environment placeholders, ignored artifacts, line endings, and secret leakage, and verify `git status`, `git ls-files`, and baseline checks are clean.
 
 ## 8. Integrated verification
 
