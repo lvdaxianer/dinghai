@@ -3,7 +3,7 @@
 ## 1. Core contracts and module scaffolding
 
 - [x] 1.1 Add the `dinghai-dsl-engine` aggregator and core/SPI modules, define immutable `DslRequest`, `DslContext`, `ExecutionPlan`, `QueryResult`, diagnostics, `DslAdapter`, `DataAdapter`, compiler, executor, policy, cache, and audit contracts, and verify the new modules compile with focused contract tests.
-- [ ] 1.2 Implement exact, versioned immutable DSL/Data Adapter registries with duplicate and unknown-type failures, and verify registry unit tests cover selection, version rejection, duplicate registration, and no fallback.
+- [x] 1.2 Implement exact, versioned immutable DSL/Data Adapter registries with duplicate and unknown-type failures, and verify registry unit tests cover selection, version rejection, duplicate registration, and no fallback.
 
 ## 2. Reference relational DSL
 
