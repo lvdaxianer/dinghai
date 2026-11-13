@@ -259,7 +259,27 @@ JOIN 约束：
 
 所有参数最终都通过数据库驱动的绑定参数传递，不能拼接成 SQL 文本。
 
-### 3.7 GROUP BY、ORDER BY 和 LIMIT
+### 3.7 结构和运行时限制
+
+当前解析器和计划构建器使用以下默认上限；宿主可以通过 Spring Boot 配置调整可配置的
+计划和运行时限制，但不能关闭字段白名单、参数绑定或禁止 SQL 的安全边界：
+
+| 限制 | 默认值 | 说明 |
+| --- | ---: | --- |
+| 结构节点数 | 256 | 单个 DSL payload 的解析结构节点上限。 |
+| 结构嵌套深度 | 16 | `where` 逻辑条件等嵌套结构的深度上限。 |
+| `select` 项数 | 64 | 字段投影和聚合投影的总数上限。 |
+| JOIN 数量 | 8 | 单个关系查询的 JOIN 上限。 |
+| 条件数量 | 128 | WHERE/逻辑条件的计划条件上限。 |
+| `orderBy` 项数 | 32 | 排序项上限。 |
+| 参数数量 | 256 | 不同参数名的绑定数量上限。 |
+| 单个 `IN` 元素数 | 1000 | 一个 `in` 参数展开的元素上限。 |
+| 返回行数 | 10000 | 默认最大返回行数，宿主可通过 `max-rows` 调整。 |
+
+请求大小、并发数、执行超时、计划节点/深度和 JDBC 查询超时也由服务端运行时边界控制。
+超出限制的请求在解析、计划构建或执行阶段明确失败，不会自动降级或切换到其他 adapter。
+
+### 3.8 GROUP BY、ORDER BY 和 LIMIT
 
 `groupBy` 使用别名限定字段字符串：
 
@@ -371,8 +391,12 @@ DslRequest
 新增 DSL 时实现并注册 `DslAdapter`：
 
 ```java
+import java.util.Set;
+
 public interface DslAdapter {
     String type();
+
+    Set<Integer> supportedVersions();
 
     boolean supports(DslRequest request);
 
