@@ -57,7 +57,6 @@ public class DslEngineAutoConfiguration {
      * @return 冻结注册表
      */
     @Bean
-    @ConditionalOnMissingBean
     public DslAdapterRegistry dslAdapterRegistry(
             List<DslAdapter> adapters, DslEngineProperties properties) {
         DslAdapterRegistry registry = new DslAdapterRegistry(adapters);
@@ -73,7 +72,6 @@ public class DslEngineAutoConfiguration {
      * @return 冻结注册表
      */
     @Bean
-    @ConditionalOnMissingBean
     public DataAdapterRegistry dataAdapterRegistry(
             List<DataAdapter> adapters, DslEngineProperties properties) {
         DataAdapterRegistry registry = new DataAdapterRegistry(adapters);

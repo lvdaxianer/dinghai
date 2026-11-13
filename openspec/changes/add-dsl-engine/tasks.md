@@ -23,7 +23,7 @@
 ## 5. Spring Boot bootstrap
 
 - [x] 5.1 Implement configuration properties, provider-scoped auto-configuration, DataSource wiring, and startup assembly for enabled DSL and Data Adapters, and verify context loading with valid configuration.
-- [ ] 5.2 Add fail-fast validation and registry freezing for missing DataSource/driver, unknown adapter, duplicate adapter, missing DSL adapter, and invalid capability configuration, and verify each failure before readiness.
+- [x] 5.2 Add fail-fast validation and registry freezing for missing DataSource/driver, unknown adapter, duplicate adapter, missing DSL adapter, and invalid capability configuration, and verify each failure before readiness.
 
 ## 6. Runtime controls and observability
 
