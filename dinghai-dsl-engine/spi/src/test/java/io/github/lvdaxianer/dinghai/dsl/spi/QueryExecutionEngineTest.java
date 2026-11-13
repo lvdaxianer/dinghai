@@ -8,6 +8,7 @@ import io.github.lvdaxianer.dinghai.dsl.core.QueryContext;
 import io.github.lvdaxianer.dinghai.dsl.core.QueryResult;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DataAdapterRegistry;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DslAdapterRegistry;
+import io.github.lvdaxianer.dinghai.dsl.spi.registry.PlanExtensionRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -17,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -160,6 +162,113 @@ class QueryExecutionEngineTest {
         }
     }
 
+    /**
+     * 验证扩展在后端执行前生效，并且最终计划再次经过权限策略校验。
+     */
+    @Test
+    void appliesExtensionBeforeBackendAndRevalidatesFinalPlan() {
+        List<QueryAuditEvent> events = new ArrayList<>();
+        AtomicInteger policyCalls = new AtomicInteger();
+        List<ExecutionPlan> receivedPlans = new ArrayList<>();
+        RecordingAdapter adapter = new RecordingAdapter(plan -> {
+            receivedPlans.add(plan);
+            return emptyResult();
+        });
+        PlanExtension extension = new PlanExtension() {
+            @Override
+            public String id() {
+                return "test-scope";
+            }
+
+            @Override
+            public ExecutionPlan apply(ExecutionPlan plan, PlanExtensionContext context) {
+                return new GenericExecutionPlan("test", 1, Map.of("nodeCount", 1, "scope", "trusted"));
+            }
+        };
+        QueryExecutionEngine engine = engine(
+                adapter,
+                new RuntimeExecutionLimits(1024, 1, Duration.ofSeconds(1), 10, 2, 1),
+                events,
+                new PlanExtensionRegistry(List.of(extension)),
+                (plan, context) -> policyCalls.incrementAndGet());
+        try {
+            engine.execute(request("secret"), DSL_CONTEXT, QUERY_CONTEXT);
+
+            assertEquals(2, policyCalls.get());
+            assertEquals("trusted", receivedPlans.getFirst().metadata().get("scope"));
+        } finally {
+            engine.close();
+        }
+    }
+
+    /**
+     * 验证扩展失败时不会调用数据适配器。
+     */
+    @Test
+    void rejectsExtensionFailureBeforeBackend() {
+        RecordingAdapter adapter = new RecordingAdapter(plan -> emptyResult());
+        PlanExtension extension = new PlanExtension() {
+            @Override
+            public String id() {
+                return "broken-extension";
+            }
+
+            @Override
+            public ExecutionPlan apply(ExecutionPlan plan, PlanExtensionContext context) {
+                throw new IllegalStateException("database password");
+            }
+        };
+        QueryExecutionEngine engine = engine(
+                adapter,
+                RuntimeExecutionLimits.defaults(),
+                new ArrayList<>(),
+                new PlanExtensionRegistry(List.of(extension)),
+                (plan, context) -> { });
+        try {
+            PlanExtensionException exception = assertThrows(
+                    PlanExtensionException.class,
+                    () -> engine.execute(request("secret"), DSL_CONTEXT, QUERY_CONTEXT));
+
+            assertEquals("EXTENSION_FAILED", exception.code());
+            assertEquals(0, adapter.calls());
+        } finally {
+            engine.close();
+        }
+    }
+
+    /**
+     * 验证安全编译入口只返回最终计划，不触发数据适配器。
+     */
+    @Test
+    void compilesFinalPlanWithoutBackendExecution() {
+        RecordingAdapter adapter = new RecordingAdapter(plan -> emptyResult());
+        PlanExtension extension = new PlanExtension() {
+            @Override
+            public String id() {
+                return "compile-only";
+            }
+
+            @Override
+            public ExecutionPlan apply(ExecutionPlan plan, PlanExtensionContext context) {
+                return new GenericExecutionPlan("test", 1, Map.of("nodeCount", 1, "compiled", true));
+            }
+        };
+        QueryExecutionEngine engine = engine(
+                adapter,
+                RuntimeExecutionLimits.defaults(),
+                new ArrayList<>(),
+                new PlanExtensionRegistry(List.of(extension)),
+                (plan, context) -> { });
+        try {
+            ExecutionPlan plan = engine.compile(request("secret"), DSL_CONTEXT, QUERY_CONTEXT);
+
+            assertEquals(true, plan.metadata().get("compiled"));
+            assertEquals(0, adapter.calls());
+        } finally {
+            engine.close();
+        }
+    }
+
     private static QueryExecutionEngine engine(
             RecordingAdapter adapter, RuntimeExecutionLimits limits, List<QueryAuditEvent> events) {
         DslAdapterRegistry dslRegistry = new DslAdapterRegistry(List.of(new DslAdapter() {
@@ -182,10 +291,46 @@ class QueryExecutionEngineTest {
                 dslRegistry,
                 new DataAdapterRegistry(List.of(adapter)),
                 "mysql",
-                (plan, context) -> { },
-                events::add,
-                NoopQueryTelemetry.INSTANCE,
-                limits);
+                new QueryExecutionDependencies(
+                        (plan, context) -> { },
+                        new PlanExtensionRegistry(List.of()),
+                        events::add,
+                        NoopQueryTelemetry.INSTANCE,
+                        limits));
+    }
+
+    private static QueryExecutionEngine engine(
+            RecordingAdapter adapter,
+            RuntimeExecutionLimits limits,
+            List<QueryAuditEvent> events,
+            PlanExtensionRegistry extensions,
+            PlanPolicy policy) {
+        DslAdapterRegistry dslRegistry = new DslAdapterRegistry(List.of(new DslAdapter() {
+            @Override
+            public String type() {
+                return "test";
+            }
+
+            @Override
+            public Set<Integer> supportedVersions() {
+                return Set.of(1);
+            }
+
+            @Override
+            public ExecutionPlan parse(DslRequest request, DslContext context) {
+                return new GenericExecutionPlan("test", 1, Map.of("nodeCount", 1));
+            }
+        }));
+        return new QueryExecutionEngine(
+                dslRegistry,
+                new DataAdapterRegistry(List.of(adapter)),
+                "mysql",
+                new QueryExecutionDependencies(
+                        policy,
+                        extensions,
+                        events::add,
+                        NoopQueryTelemetry.INSTANCE,
+                        limits));
     }
 
     private static DslRequest request(String secret) {
