@@ -22,5 +22,6 @@
         <module>mysql</module>
         <module>postgresql</module>
         <module>spring-boot-starter</module>
+        <module>test-spring-boot</module>
     </modules>
 </project>
