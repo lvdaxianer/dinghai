@@ -10,4 +10,4 @@ set -a; . /tmp/dinghai-dsl-engine-it.env; set +a
 dinghai-dsl-engine/test-spring-boot/scripts/run-real-integration.sh
 ```
 
-The script fails immediately with an actionable message when the Docker daemon or Compose v2 is unavailable. It tears down only this Compose project and its test volumes on exit. The default credentials are local test values, not production credentials; override them through environment variables and never commit real secrets.
+The script fails immediately with an actionable message when the Docker daemon or Docker Compose is unavailable. It tears down only this Compose project and its test volumes on exit. The default credentials are local test values, not production credentials; override them through environment variables and never commit real secrets.
