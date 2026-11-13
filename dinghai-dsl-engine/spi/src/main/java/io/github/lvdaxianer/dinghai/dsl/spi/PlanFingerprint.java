@@ -39,7 +39,8 @@ public final class PlanFingerprint {
      * @return SHA-256 摘要
      */
     public static String plan(ExecutionPlan plan) {
-        String canonical = plan.planType() + "|" + plan.planVersion() + "|" + canonical(plan.metadata());
+        String canonical = plan.planType() + "|" + plan.planVersion() + "|"
+                + canonical(plan.fingerprintMaterial());
         return sha256(canonical);
     }
 

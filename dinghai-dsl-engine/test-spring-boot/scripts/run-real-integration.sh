@@ -83,6 +83,16 @@ assert_http_success() {
         sed -n '1,4p' "$response_file" >&2
         exit 1
     fi
+    if ! grep -q '"asset-101"' "$response_file" || ! grep -q '"2026-11-13"' "$response_file"; then
+        echo "HTTP DSL result values are incomplete for adapter=$adapter" >&2
+        sed -n '1,8p' "$response_file" >&2
+        exit 1
+    fi
+    if grep -q 'inactive-asset\|other-domain-asset\|2026-11-11' "$response_file"; then
+        echo "HTTP DSL scope or logical-delete extension leaked rows for adapter=$adapter" >&2
+        sed -n '1,8p' "$response_file" >&2
+        exit 1
+    fi
 }
 
 run_http_case() {

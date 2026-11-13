@@ -81,15 +81,30 @@ class TestDslControllerTest {
 
     @Test
     void rejectsClientSelectedAdapterAndIdentityFields() throws Exception {
-        mockMvc.perform(post("/api/test/dsl/validate")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(VALID_REQUEST.replaceFirst("\\{", "{\"adapter\":\"postgresql\",")))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("REQUEST_INVALID"));
+        assertRejectsTopLevelField("adapter", "postgresql");
+        assertRejectsTopLevelField("sql", "select 1");
+        assertRejectsTopLevelField("dataSourceId", "other-source");
+        assertRejectsTopLevelField("userId", "forged");
+        assertRejectsTopLevelField("domainId", "forged-domain");
+        assertRejectsTopLevelField("tenantId", "forged-tenant");
+    }
 
+    @Test
+    void hidesUnexpectedExceptionDetails() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
+                        "/api/test/dsl/unexpected-test-failure")
+                        .header("X-Trace-Id", "trace-unexpected-001"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                .andExpect(jsonPath("$.message").value("internal DSL service error"));
+    }
+
+    private void assertRejectsTopLevelField(String name, String value) throws Exception {
+        String request = VALID_REQUEST.replaceFirst(
+                "\\{", "{\"" + name + "\":\"" + value + "\",");
         mockMvc.perform(post("/api/test/dsl/validate")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(VALID_REQUEST.replaceFirst("\\{", "{\"userId\":\"forged\",")))
+                        .content(request))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("REQUEST_INVALID"));
     }

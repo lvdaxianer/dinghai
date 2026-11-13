@@ -90,6 +90,8 @@ dinghai:
     max-plan-depth: 16
     max-joins: 8
     max-rows: 10000
+    max-parameters: 256
+    max-in-items: 1000
 
 spring:
   datasource:
@@ -101,6 +103,8 @@ spring:
 PostgreSQL 将 `default-data-adapter` 改为 `postgresql`，并使用 PostgreSQL JDBC URL。Doris 使用 MySQL 协议端口时复用 `mysql` 适配器；该适配器只生成 MySQL 与 Doris 公共支持的 SQL，不放行 Doris 特有语法。PostgreSQL 不存在时不会自动回退到 MySQL。
 
 应用启动时会校验默认 adapter、DataSource、DSL 适配器、能力声明和重复注册；错误会在应用 ready 前失败。请求不能通过参数指定未注册的 adapter，也不能跨 MySQL、Doris、PostgreSQL 做 JOIN。
+
+`QueryContext.dataSourceId` 是服务端注入的数据源上下文标识，用于权限、审计和业务关联，不是请求端的路由参数。实际数据适配器只由服务端的 `default-data-adapter` 选择；请求体中的 `adapter`、`dataSourceId`、`userId`、`domainId`、`tenantId` 或 `sql` 等字段必须在 HTTP 边界拒绝。宿主应用应启用严格的 JSON 未知字段校验，并从登录态或服务身份构建 `QueryContext`。
 
 宿主应用必须提供 schema policy 和 `PlanPolicy`；公共模块不实现企业表权限、`userId`/`domainId` 权限或租户规则。缺少 `PlanPolicy` 时 starter fail-fast，禁止默认放行数据权限。
 

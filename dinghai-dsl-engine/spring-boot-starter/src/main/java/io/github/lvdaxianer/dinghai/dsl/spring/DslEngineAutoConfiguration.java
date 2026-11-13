@@ -12,6 +12,7 @@ import io.github.lvdaxianer.dinghai.dsl.spi.QueryAuditSink;
 import io.github.lvdaxianer.dinghai.dsl.spi.QueryExecutionDependencies;
 import io.github.lvdaxianer.dinghai.dsl.spi.QueryExecutionEngine;
 import io.github.lvdaxianer.dinghai.dsl.spi.QueryTelemetry;
+import io.github.lvdaxianer.dinghai.dsl.spi.QueryTaskDecorator;
 import io.github.lvdaxianer.dinghai.dsl.spi.RuntimeExecutionLimits;
 import io.github.lvdaxianer.dinghai.dsl.spi.SafeQueryLogger;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.AdapterRegistryException;
@@ -47,6 +48,7 @@ public class DslEngineAutoConfiguration {
      * @param policies 宿主计划策略
      * @param auditSinks 审计接收器
      * @param telemetry 指标接收器
+     * @param taskDecorators 后端任务上下文装饰器
      * @return DSL 执行引擎
      */
     @Bean(destroyMethod = "close")
@@ -57,7 +59,8 @@ public class DslEngineAutoConfiguration {
             ObjectProvider<PlanPolicy> policies,
             PlanExtensionRegistry planExtensions,
             ObjectProvider<QueryAuditSink> auditSinks,
-            ObjectProvider<QueryTelemetry> telemetry) {
+            ObjectProvider<QueryTelemetry> telemetry,
+            ObjectProvider<QueryTaskDecorator> taskDecorators) {
         PlanPolicy policy = policies.getIfAvailable();
         if (policy == null) {
             throw new DslBootstrapException(
@@ -66,6 +69,7 @@ public class DslEngineAutoConfiguration {
         QueryAuditSink auditSink = auditSinks.getIfAvailable(
                 () -> new SafeQueryLogger(System.getLogger("io.github.lvdaxianer.dinghai.dsl")));
         QueryTelemetry metrics = telemetry.getIfAvailable(() -> NoopQueryTelemetry.INSTANCE);
+        QueryTaskDecorator taskDecorator = taskDecorators.getIfAvailable(QueryTaskDecorator::identity);
         RuntimeExecutionLimits limits = new RuntimeExecutionLimits(
                 properties.getMaxRequestBytes(),
                 properties.getMaxConcurrency(),
@@ -78,7 +82,8 @@ public class DslEngineAutoConfiguration {
                 dslAdapters,
                 dataAdapters,
                 properties.getDefaultDataAdapter(),
-                new QueryExecutionDependencies(policy, planExtensions, auditSink, metrics, limits));
+                new QueryExecutionDependencies(
+                        policy, planExtensions, auditSink, metrics, limits, taskDecorator));
     }
 
     /**
@@ -113,7 +118,8 @@ public class DslEngineAutoConfiguration {
                     "relational-query is enabled but no RelationalSchemaPolicy bean is configured");
         }
         return new RelationalDslAdapter(policy, new RelationalPlanLimits(
-                properties.getMaxJoins(), 64, 128, properties.getMaxPlanDepth(), properties.getMaxRows()));
+                properties.getMaxJoins(), 64, 128, properties.getMaxPlanDepth(), properties.getMaxRows(),
+                properties.getMaxParameters(), properties.getMaxInItems()));
     }
 
     /**

@@ -33,6 +33,10 @@ public class DslEngineProperties {
 
     private int maxRows = 10_000;
 
+    private int maxParameters = 256;
+
+    private int maxInItems = 1_000;
+
     /**
      * 返回默认数据适配器类型。
      *
@@ -193,6 +197,42 @@ public class DslEngineProperties {
      */
     public void setMaxRows(int maxRows) {
         this.maxRows = maxRows;
+    }
+
+    /**
+     * 返回单次查询允许引用的最大参数数量。
+     *
+     * @return 参数数量上限
+     */
+    public int getMaxParameters() {
+        return maxParameters;
+    }
+
+    /**
+     * 设置单次查询允许引用的最大参数数量。
+     *
+     * @param maxParameters 参数数量上限
+     */
+    public void setMaxParameters(int maxParameters) {
+        this.maxParameters = maxParameters;
+    }
+
+    /**
+     * 返回单个 IN 参数允许的最大元素数量。
+     *
+     * @return IN 元素上限
+     */
+    public int getMaxInItems() {
+        return maxInItems;
+    }
+
+    /**
+     * 设置单个 IN 参数允许的最大元素数量。
+     *
+     * @param maxInItems IN 元素上限
+     */
+    public void setMaxInItems(int maxInItems) {
+        this.maxInItems = maxInItems;
     }
 
     /**

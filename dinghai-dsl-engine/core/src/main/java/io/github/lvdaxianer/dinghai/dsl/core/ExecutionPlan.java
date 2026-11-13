@@ -36,4 +36,15 @@ public interface ExecutionPlan {
      * @date 2026-11-13
      */
     Map<String, Object> metadata();
+
+    /**
+     * 返回用于计划摘要和缓存键的结构化材料。
+     *
+     * <p>实现可以返回不含绑定参数值的 AST 或其他安全结构。默认使用元数据，兼容已有 DSL。</p>
+     *
+     * @return 计划结构摘要材料
+     */
+    default Object fingerprintMaterial() {
+        return metadata();
+    }
 }

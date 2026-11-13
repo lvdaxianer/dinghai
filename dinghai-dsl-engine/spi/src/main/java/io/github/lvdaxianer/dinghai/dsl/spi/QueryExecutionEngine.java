@@ -28,6 +28,9 @@ import java.util.concurrent.TimeoutException;
  */
 public final class QueryExecutionEngine implements AutoCloseable {
 
+    private static final System.Logger LOGGER =
+            System.getLogger("io.github.lvdaxianer.dinghai.dsl.execution");
+
     private final DslAdapterRegistry dslAdapters;
     private final DataAdapterRegistry dataAdapters;
     private final String defaultDataAdapter;
@@ -36,6 +39,7 @@ public final class QueryExecutionEngine implements AutoCloseable {
     private final QueryAuditSink auditSink;
     private final QueryTelemetry telemetry;
     private final RuntimeExecutionLimits limits;
+    private final QueryTaskDecorator taskDecorator;
     private final Semaphore concurrency;
     private final ExecutorService executor;
 
@@ -92,6 +96,7 @@ public final class QueryExecutionEngine implements AutoCloseable {
         this.auditSink = value.auditSink();
         this.telemetry = value.telemetry();
         this.limits = value.limits();
+        this.taskDecorator = value.taskDecorator();
         this.concurrency = new Semaphore(limits.maxConcurrency());
         this.executor = Executors.newFixedThreadPool(limits.maxConcurrency(), runnable -> {
             Thread thread = new Thread(runnable, "dinghai-dsl-query");
@@ -182,7 +187,8 @@ public final class QueryExecutionEngine implements AutoCloseable {
     }
 
     private QueryResult executeWithTimeout(DataAdapter adapter, ExecutionPlan plan, QueryContext context) {
-        Future<QueryResult> future = executor.submit(() -> adapter.execute(plan, context));
+        Future<QueryResult> future = executor.submit(taskDecorator.decorate(
+                () -> adapter.execute(plan, context), context));
         try {
             return future.get(limits.timeout().toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException exception) {
@@ -238,13 +244,17 @@ public final class QueryExecutionEngine implements AutoCloseable {
             auditSink.record(new QueryAuditEvent(
                     context.traceId(), request.dslType(), request.version(), planHash, adapterType,
                     outcome, durationMs, rowCount));
-        } catch (RuntimeException ignored) {
-            // 审计接收器故障不得改变查询结果或错误语义。
+        } catch (RuntimeException exception) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "query audit sink failed traceId={0} adapter={1} exceptionType={2}",
+                    context.traceId(), adapterType, exception.getClass().getName());
         }
         try {
             telemetry.record("execute", adapterType, durationMs, outcome, rowCount);
-        } catch (RuntimeException ignored) {
-            // 指标桥接故障不得改变查询结果或错误语义。
+        } catch (RuntimeException exception) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "query telemetry sink failed traceId={0} adapter={1} exceptionType={2}",
+                    context.traceId(), adapterType, exception.getClass().getName());
         }
     }
 

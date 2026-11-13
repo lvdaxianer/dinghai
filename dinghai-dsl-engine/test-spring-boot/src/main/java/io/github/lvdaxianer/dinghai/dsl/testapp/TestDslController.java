@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.GetMapping;
 
 /**
  * DSL 引擎测试 HTTP 接口。仅接受结构化 DSL 请求，不接受 SQL、adapter 或身份字段。
@@ -67,5 +68,15 @@ public class TestDslController {
             @RequestBody DslRequest request, HttpServletRequest httpRequest) {
         String traceId = TraceIdSupport.resolve(httpRequest);
         return ApiResponse.success(PlanSummary.from(service.compile(request, traceId)), traceId);
+    }
+
+    /**
+     * 提供仅用于 HTTP 边界测试的未预期异常入口。
+     *
+     * @return 不返回
+     */
+    @GetMapping("/unexpected-test-failure")
+    public ApiResponse<Void> unexpectedTestFailure() {
+        throw new IllegalStateException("database-password-must-not-leak");
     }
 }

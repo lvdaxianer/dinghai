@@ -5,6 +5,7 @@ import io.github.lvdaxianer.dinghai.dsl.core.DslContext;
 import io.github.lvdaxianer.dinghai.dsl.core.DslRequest;
 import io.github.lvdaxianer.dinghai.dsl.relational.RelationalQueryAst.RelationalField;
 import io.github.lvdaxianer.dinghai.dsl.spi.ParameterBinding;
+import io.github.lvdaxianer.dinghai.dsl.spi.PlanFingerprint;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -15,6 +16,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 /**
  * 验证关系查询语义校验、权限解析和执行计划构建。
@@ -104,6 +106,59 @@ class RelationalPlanBuilderTest {
     }
 
     /**
+     * 验证参数声明类型必须与白名单字段类型一致。
+     */
+    @Test
+    void rejectsParameterTypeDifferentFromField() {
+        DslCompilationException exception = assertThrows(
+                DslCompilationException.class,
+                () -> new RelationalPlanBuilder(POLICY).build(request(Map.of(
+                        "from", Map.of("table", "fact", "alias", "f"),
+                        "select", List.of(Map.of("field", "f.id")),
+                        "where", List.of(Map.of(
+                                "field", "f.id",
+                                "operator", "eq",
+                                "parameter", "id",
+                                "logicalType", "string")),
+                        "limit", 20), Map.of("id", "1")), CONTEXT));
+
+        assertEquals("PARAMETER_FIELD_TYPE_MISMATCH", exception.diagnostics().getFirst().code());
+    }
+
+    /**
+     * 验证参数总量和 IN 展开数量均受计划限制保护。
+     */
+    @Test
+    void rejectsParameterAndInItemOverflow() {
+        RelationalPlanLimits limits = new RelationalPlanLimits(1, 4, 4, 4, 20, 1, 2);
+        DslCompilationException parameterOverflow = assertThrows(
+                DslCompilationException.class,
+                () -> new RelationalPlanBuilder(POLICY, limits).build(request(Map.of(
+                        "from", Map.of("table", "fact", "alias", "f"),
+                        "select", List.of(Map.of("field", "f.id")),
+                        "where", List.of(
+                                Map.of("field", "f.id", "operator", "eq", "parameter", "id",
+                                        "logicalType", "long"),
+                                Map.of("field", "f.status", "operator", "eq", "parameter", "status",
+                                        "logicalType", "string")),
+                        "limit", 20), Map.of("id", 1, "status", "OPEN")), CONTEXT));
+        DslCompilationException inOverflow = assertThrows(
+                DslCompilationException.class,
+                () -> new RelationalPlanBuilder(POLICY, limits).build(request(Map.of(
+                        "from", Map.of("table", "fact", "alias", "f"),
+                        "select", List.of(Map.of("field", "f.id")),
+                        "where", List.of(Map.of(
+                                "field", "f.id",
+                                "operator", "in",
+                                "parameter", "ids",
+                                "logicalType", "long")),
+                        "limit", 20), Map.of("ids", List.of(1, 2, 3))), CONTEXT));
+
+        assertEquals("PARAMETER_LIMIT_EXCEEDED", parameterOverflow.diagnostics().getFirst().code());
+        assertEquals("IN_PARAMETER_LIMIT_EXCEEDED", inOverflow.diagnostics().getFirst().code());
+    }
+
+    /**
      * 验证 JOIN 必须真正连接新表，禁止同表条件伪装成 JOIN。
      */
     @Test
@@ -163,6 +218,24 @@ class RelationalPlanBuilderTest {
                 "select", List.of(Map.of("field", "f.id")),
                 "limit", 20))));
         assertEquals(0, plan.parameters().size());
+    }
+
+    /**
+     * 验证不同关系结构不会因为相同的统计元数据共享计划摘要。
+     */
+    @Test
+    void fingerprintsDifferentQueryStructuresDiffer() {
+        RelationalPlanBuilder builder = new RelationalPlanBuilder(POLICY);
+        RelationalQueryPlan fact = builder.build(request(Map.of(
+                "from", Map.of("table", "fact", "alias", "f"),
+                "select", List.of(Map.of("field", "f.id")),
+                "limit", 20)), CONTEXT);
+        RelationalQueryPlan device = builder.build(request(Map.of(
+                "from", Map.of("table", "device", "alias", "d"),
+                "select", List.of(Map.of("field", "d.id")),
+                "limit", 20)), CONTEXT);
+
+        assertNotEquals(PlanFingerprint.plan(fact), PlanFingerprint.plan(device));
     }
 
     /**

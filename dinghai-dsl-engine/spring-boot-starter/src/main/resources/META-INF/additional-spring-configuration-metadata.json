@@ -51,6 +51,16 @@
       "name": "dinghai.data-query.max-rows",
       "type": "java.lang.Integer",
       "description": "单次查询允许返回的最大行数。"
+    },
+    {
+      "name": "dinghai.data-query.max-parameters",
+      "type": "java.lang.Integer",
+      "description": "单次查询允许引用的最大参数数量。"
+    },
+    {
+      "name": "dinghai.data-query.max-in-items",
+      "type": "java.lang.Integer",
+      "description": "单个 IN 参数允许绑定的最大元素数量。"
     }
   ]
 }
