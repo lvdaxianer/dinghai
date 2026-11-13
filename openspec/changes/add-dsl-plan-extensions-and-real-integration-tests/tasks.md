@@ -7,8 +7,8 @@
 
 ## 2. 关系型类型化计划重写
 
-- [ ] 2.1 为关系 AST 增加不可变 JOIN ON 附加谓词表达，并同步 MySQL/PostgreSQL 编译器以参数化方式编译 WHERE 与 JOIN ON 扩展条件；先写并运行失败的编译器测试，再实现通过。
-- [ ] 2.2 新增 `RelationalPlanExtension`、`RelationalConstraint`、位置枚举和安全重写器，校验白名单别名/字段、内部参数命名、逻辑类型和值、元数据与计划边界；用关系模块测试覆盖逻辑删除、租户条件、LEFT JOIN ON、参数冲突和非法字段。
+- [x] 2.1 为关系 AST 增加不可变 JOIN ON 附加谓词表达，并同步 MySQL/PostgreSQL 编译器以参数化方式编译 WHERE 与 JOIN ON 扩展条件；先写并运行失败的编译器测试，再实现通过。
+- [x] 2.2 新增 `RelationalPlanExtension`、`RelationalConstraint`、位置枚举和安全重写器，校验白名单别名/字段、内部参数命名、逻辑类型和值、元数据与计划边界；用关系模块测试覆盖逻辑删除、租户条件、LEFT JOIN ON、参数冲突和非法字段。
 
 ## 3. Spring Boot 启动装配
 

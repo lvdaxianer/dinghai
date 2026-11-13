@@ -164,11 +164,27 @@ public record RelationalQueryAst(
      *
      * @param type 连接类型
      * @param table 被连接表
-     * @param on ON 条件
+     * @param on 字段等值 ON 条件
+     * @param additionalOn 扩展增加的类型化 ON 谓词
      * @author lvdaxianer@yeah.net
      * @date 2026-11-13
      */
-    public record Join(JoinType type, TableSource table, List<JoinCondition> on) {
+    public record Join(
+            JoinType type,
+            TableSource table,
+            List<JoinCondition> on,
+            List<Predicate> additionalOn) {
+
+        /**
+         * 创建没有扩展 ON 谓词的普通连接。
+         *
+         * @param type 连接类型
+         * @param table 被连接表
+         * @param on 字段等值 ON 条件
+         */
+        public Join(JoinType type, TableSource table, List<JoinCondition> on) {
+            this(type, table, on, List.of());
+        }
 
         /**
          * 校验连接条件。
@@ -180,6 +196,7 @@ public record RelationalQueryAst(
             type = Objects.requireNonNull(type, "type");
             table = Objects.requireNonNull(table, "table");
             on = requireNonEmpty(on, "on");
+            additionalOn = List.copyOf(Objects.requireNonNull(additionalOn, "additionalOn"));
         }
     }
 

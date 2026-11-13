@@ -6,12 +6,14 @@ import io.github.lvdaxianer.dinghai.dsl.core.GenericExecutionPlan;
 import io.github.lvdaxianer.dinghai.dsl.core.QueryContext;
 import io.github.lvdaxianer.dinghai.dsl.relational.RelationalColumnDefinition;
 import io.github.lvdaxianer.dinghai.dsl.relational.RelationalPlanBuilder;
+import io.github.lvdaxianer.dinghai.dsl.relational.RelationalQueryAst;
 import io.github.lvdaxianer.dinghai.dsl.relational.RelationalQueryPlan;
 import io.github.lvdaxianer.dinghai.dsl.relational.RelationalSchemaPolicy;
 import io.github.lvdaxianer.dinghai.dsl.relational.RelationalTableDefinition;
 import io.github.lvdaxianer.dinghai.dsl.spi.CompiledCommand;
 import io.github.lvdaxianer.dinghai.dsl.spi.BackendCapabilities;
 import io.github.lvdaxianer.dinghai.dsl.spi.BackendCompilationException;
+import io.github.lvdaxianer.dinghai.dsl.spi.ParameterBinding;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -78,6 +80,51 @@ class PostgresqlRelationalCompilerTest {
     }
 
     /**
+     * 验证 PostgreSQL 编译器也能把扩展过滤条件安全地放入 JOIN ON。
+     */
+    @Test
+    void compilesParameterizedJoinOnPredicate() {
+        RelationalQueryPlan base = plan(Map.of(
+                "from", Map.of("table", "fact", "alias", "f"),
+                "select", List.of(Map.of("field", "f.status")),
+                "joins", List.of(Map.of(
+                        "type", "left",
+                        "table", Map.of("table", "device", "alias", "d"),
+                        "on", List.of(Map.of("left", "f.device_id", "right", "d.id")))),
+                "limit", 10), Map.of());
+        RelationalQueryAst.Join join = base.query().joins().getFirst();
+        RelationalQueryAst.Join extendedJoin = new RelationalQueryAst.Join(
+                join.type(),
+                join.table(),
+                join.on(),
+                List.of(new RelationalQueryAst.ComparisonPredicate(
+                        new RelationalQueryAst.RelationalField("d", "deleted"),
+                        RelationalQueryAst.ComparisonOperator.EQ,
+                        new RelationalQueryAst.ParameterReference("__ext_deleted", "integer"))));
+        RelationalQueryAst extendedQuery = new RelationalQueryAst(
+                base.query().from(),
+                base.query().select(),
+                List.of(extendedJoin),
+                base.query().where(),
+                base.query().groupBy(),
+                base.query().orderBy(),
+                base.query().limit());
+        RelationalQueryPlan extended = new RelationalQueryPlan(
+                extendedQuery,
+                base.tablesByAlias(),
+                List.of(new ParameterBinding("__ext_deleted", "integer", 0)),
+                base.predicateDepth(),
+                base.metadata());
+
+        CompiledCommand command = new PostgresqlRelationalCompiler().compile(extended, QUERY_CONTEXT);
+        String sql = (String) command.commandBody();
+
+        assertTrue(sql.contains("LEFT JOIN \"dim_device\" AS \"d\" ON \"f\".\"device_id\" = \"d\".\"device_id\""));
+        assertTrue(sql.contains("AND \"d\".\"deleted\" = ?"));
+        assertEquals(0, command.parameters().getFirst().value());
+    }
+
+    /**
      * 验证 PostgreSQL 能力声明与编译器类型严格一致。
      */
     @Test
@@ -117,7 +164,8 @@ class PostgresqlRelationalCompilerTest {
                             "device_id", new RelationalColumnDefinition("device_id", "device_id", "long"))));
             case "device" -> Optional.of(new RelationalTableDefinition(
                     "device", "dim_device", Map.of(
-                            "id", new RelationalColumnDefinition("id", "device_id", "long"))));
+                        "id", new RelationalColumnDefinition("id", "device_id", "long"),
+                        "deleted", new RelationalColumnDefinition("deleted", "deleted", "integer"))));
             default -> Optional.empty();
         };
         return new RelationalPlanBuilder(policy).build(

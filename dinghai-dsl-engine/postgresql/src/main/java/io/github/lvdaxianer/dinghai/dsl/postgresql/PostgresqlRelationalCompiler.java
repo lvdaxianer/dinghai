@@ -151,6 +151,10 @@ public final class PostgresqlRelationalCompiler implements PlanCompiler {
             appendTable(state, join.table());
             state.sql.append(" ON ");
             appendJoinConditions(state, join.on());
+            if (!join.additionalOn().isEmpty()) {
+                state.sql.append(" AND ");
+                appendPredicates(state, join.additionalOn(), " AND ");
+            }
         }
     }
 
