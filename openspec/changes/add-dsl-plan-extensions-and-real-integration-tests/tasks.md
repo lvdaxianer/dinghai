@@ -17,8 +17,8 @@
 
 ## 4. Spring Boot 真实测试应用与 HTTP 契约
 
-- [ ] 4.1 新增 `dinghai-dsl-engine/test-spring-boot` Maven 模块，提供启动类、可信测试上下文、演示 schema 白名单和逻辑删除/租户扩展示例；通过模块编译和 Spring 启动 smoke test 验证无秘密默认值。
-- [ ] 4.2 提供 `/api/test/dsl/execute`、`/validate`、`/explain`，统一处理 DSL 请求、稳定错误码/traceId 和安全计划摘要；添加不接受原始 SQL、请求体身份字段和 adapter 选择的 HTTP 测试，并编写 `apis/` 模块接口文档及可运行 curl 示例。
+- [x] 4.1 新增 `dinghai-dsl-engine/test-spring-boot` Maven 模块，提供启动类、可信测试上下文、演示 schema 白名单和逻辑删除/租户扩展示例；通过模块编译和 Spring 启动 smoke test 验证无秘密默认值。
+- [x] 4.2 提供 `/api/test/dsl/execute`、`/validate`、`/explain`，统一处理 DSL 请求、稳定错误码/traceId 和安全计划摘要；添加不接受原始 SQL、请求体身份字段和 adapter 选择的 HTTP 测试，并编写 `apis/` 模块接口文档及可运行 curl 示例。
 
 ## 5. 真实数据库协议验收
 

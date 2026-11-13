@@ -1,0 +1,26 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  datasource:
+    url: ${DINGHAI_TEST_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dinghai_test}
+    username: ${DINGHAI_TEST_DB_USERNAME:test}
+    password: ${DINGHAI_TEST_DB_PASSWORD:}
+    driver-class-name: ${DINGHAI_TEST_JDBC_DRIVER:com.mysql.cj.jdbc.Driver}
+
+dinghai:
+  data-query:
+    default-data-adapter: ${DINGHAI_TEST_DATA_ADAPTER:mysql}
+    dsl-adapters:
+      relational-query: enabled
+    max-request-bytes: 1048576
+    max-concurrency: 8
+    timeout: 10s
+    max-plan-nodes: 256
+    max-plan-depth: 16
+    max-joins: 4
+    max-rows: 1000
+  test:
+    data-source-id: ${DINGHAI_TEST_DATA_SOURCE_ID:integration}
+    user-id: ${DINGHAI_TEST_USER_ID:test-user}
+    domain-id: ${DINGHAI_TEST_DOMAIN_ID:test-domain}
