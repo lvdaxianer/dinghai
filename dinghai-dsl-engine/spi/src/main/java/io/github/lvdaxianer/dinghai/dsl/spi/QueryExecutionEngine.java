@@ -9,6 +9,7 @@ import io.github.lvdaxianer.dinghai.dsl.core.QueryResult;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DataAdapterRegistry;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DslAdapterRegistry;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.AdapterRegistryException;
+import io.github.lvdaxianer.dinghai.dsl.spi.registry.PlanExtensionRegistry;
 
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
@@ -31,6 +32,7 @@ public final class QueryExecutionEngine implements AutoCloseable {
     private final DataAdapterRegistry dataAdapters;
     private final String defaultDataAdapter;
     private final PlanPolicy planPolicy;
+    private final PlanExtensionRegistry planExtensions;
     private final QueryAuditSink auditSink;
     private final QueryTelemetry telemetry;
     private final RuntimeExecutionLimits limits;
@@ -56,13 +58,40 @@ public final class QueryExecutionEngine implements AutoCloseable {
             QueryAuditSink auditSink,
             QueryTelemetry telemetry,
             RuntimeExecutionLimits limits) {
+        this(
+                dslAdapters,
+                dataAdapters,
+                defaultDataAdapter,
+                new QueryExecutionDependencies(
+                        planPolicy,
+                        new PlanExtensionRegistry(java.util.List.of()),
+                        auditSink,
+                        telemetry,
+                        limits));
+    }
+
+    /**
+     * 创建包含计划扩展的通用执行编排器。
+     *
+     * @param dslAdapters DSL 注册表
+     * @param dataAdapters 数据适配器注册表
+     * @param defaultDataAdapter 启动配置选择的默认后端
+     * @param dependencies 服务端执行依赖
+     */
+    public QueryExecutionEngine(
+            DslAdapterRegistry dslAdapters,
+            DataAdapterRegistry dataAdapters,
+            String defaultDataAdapter,
+            QueryExecutionDependencies dependencies) {
         this.dslAdapters = Objects.requireNonNull(dslAdapters, "dslAdapters");
         this.dataAdapters = Objects.requireNonNull(dataAdapters, "dataAdapters");
         this.defaultDataAdapter = requireText(defaultDataAdapter, "defaultDataAdapter");
-        this.planPolicy = Objects.requireNonNull(planPolicy, "planPolicy");
-        this.auditSink = Objects.requireNonNull(auditSink, "auditSink");
-        this.telemetry = Objects.requireNonNull(telemetry, "telemetry");
-        this.limits = Objects.requireNonNull(limits, "limits");
+        QueryExecutionDependencies value = Objects.requireNonNull(dependencies, "dependencies");
+        this.planPolicy = value.planPolicy();
+        this.planExtensions = value.planExtensions();
+        this.auditSink = value.auditSink();
+        this.telemetry = value.telemetry();
+        this.limits = value.limits();
         this.concurrency = new Semaphore(limits.maxConcurrency());
         this.executor = Executors.newFixedThreadPool(limits.maxConcurrency(), runnable -> {
             Thread thread = new Thread(runnable, "dinghai-dsl-query");
@@ -117,13 +146,39 @@ public final class QueryExecutionEngine implements AutoCloseable {
         }
     }
 
+    /**
+     * 解析、校验并应用扩展，但不解析数据适配器或获取数据库连接。
+     *
+     * @param request DSL 请求
+     * @param dslContext DSL 编译上下文
+     * @param queryContext 后端查询上下文
+     * @return 最终不可变执行计划
+     */
+    public ExecutionPlan compile(DslRequest request, DslContext dslContext, QueryContext queryContext) {
+        DslRequest value = Objects.requireNonNull(request, "request");
+        DslContext compileContext = Objects.requireNonNull(dslContext, "dslContext");
+        QueryContext executionContext = Objects.requireNonNull(queryContext, "queryContext");
+        validateRequestSize(value);
+        acquireConcurrency();
+        try {
+            return parseAndValidate(value, compileContext, executionContext);
+        } finally {
+            concurrency.release();
+        }
+    }
+
     private ExecutionPlan parseAndValidate(
             DslRequest request, DslContext dslContext, QueryContext queryContext) {
         DslAdapter adapter = dslAdapters.resolve(request);
         ExecutionPlan plan = adapter.parse(request, dslContext);
         planPolicy.validate(plan, queryContext);
         validatePlanBounds(plan);
-        return plan;
+        ExecutionPlan extended = planExtensions.apply(
+                plan,
+                new PlanExtensionContext(request.dslType(), request.version(), queryContext));
+        planPolicy.validate(extended, queryContext);
+        validatePlanBounds(extended);
+        return extended;
     }
 
     private QueryResult executeWithTimeout(DataAdapter adapter, ExecutionPlan plan, QueryContext context) {
@@ -221,6 +276,9 @@ public final class QueryExecutionEngine implements AutoCloseable {
         }
         if (exception instanceof AdapterRegistryException registry) {
             return registry.code();
+        }
+        if (exception instanceof PlanExtensionException extension) {
+            return extension.code();
         }
         if (exception instanceof DslCompilationException compilation
                 && !compilation.diagnostics().isEmpty()) {
