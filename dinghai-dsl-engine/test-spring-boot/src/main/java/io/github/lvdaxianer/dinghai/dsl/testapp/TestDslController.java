@@ -1,7 +1,6 @@
 package io.github.lvdaxianer.dinghai.dsl.testapp;
 
 import io.github.lvdaxianer.dinghai.dsl.core.DslRequest;
-import io.github.lvdaxianer.dinghai.dsl.core.QueryResult;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,10 +35,11 @@ public class TestDslController {
      * @return 查询结果
      */
     @PostMapping(path = "/execute", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ApiResponse<QueryResult> execute(
+    public ApiResponse<ReadableQueryResult> execute(
             @RequestBody DslRequest request, HttpServletRequest httpRequest) {
         String traceId = TraceIdSupport.resolve(httpRequest);
-        return ApiResponse.success(service.execute(request, traceId), traceId);
+        return ApiResponse.success(
+                ReadableQueryResult.from(service.execute(request, traceId)), traceId);
     }
 
     /**
