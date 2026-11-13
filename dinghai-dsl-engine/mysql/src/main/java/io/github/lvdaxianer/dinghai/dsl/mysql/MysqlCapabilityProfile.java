@@ -23,7 +23,7 @@ public final class MysqlCapabilityProfile {
      * @date 2026-11-13
      */
     public static BackendCapabilities common() {
-        return new BackendCapabilities("mysql", Set.of(
+        return new BackendCapabilities("mysql", "mysql-doris-common-v1", Set.of(
                 "relational-query",
                 "inner-join",
                 "left-join",

@@ -29,6 +29,16 @@ public final class RelationalDslAdapter implements DslAdapter {
     }
 
     /**
+     * 使用统一运行时边界创建关系 DSL 适配器。
+     *
+     * @param schemaPolicy 表和字段白名单策略
+     * @param limits 关系查询计划限制
+     */
+    public RelationalDslAdapter(RelationalSchemaPolicy schemaPolicy, RelationalPlanLimits limits) {
+        this.planBuilder = new RelationalPlanBuilder(schemaPolicy, limits);
+    }
+
+    /**
      * 返回 DSL 类型。
      *
      * @return relational-query

@@ -83,20 +83,26 @@ public final class QueryExecutionEngine implements AutoCloseable {
         DslRequest value = Objects.requireNonNull(request, "request");
         DslContext compileContext = Objects.requireNonNull(dslContext, "dslContext");
         QueryContext executionContext = Objects.requireNonNull(queryContext, "queryContext");
-        validateRequestSize(value);
-        acquireConcurrency();
         long started = System.nanoTime();
         String planHash = PlanFingerprint.request(value);
         String adapterType = defaultDataAdapter;
         String outcome = "EXECUTION_FAILED";
         long rowCount = 0;
+        boolean acquired = false;
         try {
+            validateRequestSize(value);
+            acquireConcurrency();
+            acquired = true;
             ExecutionPlan plan = parseAndValidate(value, compileContext, executionContext);
             planHash = PlanFingerprint.plan(plan);
             DataAdapter adapter = dataAdapters.resolve(defaultDataAdapter, plan);
             adapterType = adapter.type();
             QueryResult result = executeWithTimeout(adapter, plan, executionContext);
             rowCount = result.rowCount();
+            if (rowCount > limits.maxRows()) {
+                throw new ExecutionLimitException(
+                        "RESULT_ROW_LIMIT_EXCEEDED", "DSL result exceeds configured row limit");
+            }
             outcome = "SUCCESS";
             return result;
         } catch (RuntimeException exception) {
@@ -104,8 +110,10 @@ public final class QueryExecutionEngine implements AutoCloseable {
             throw exception;
         } finally {
             long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
-            recordAudit(executionContext, planHash, adapterType, outcome, durationMs, rowCount);
-            concurrency.release();
+            recordAudit(executionContext, value, planHash, adapterType, outcome, durationMs, rowCount);
+            if (acquired) {
+                concurrency.release();
+            }
         }
     }
 
@@ -164,10 +172,17 @@ public final class QueryExecutionEngine implements AutoCloseable {
     }
 
     private void recordAudit(
-            QueryContext context, String planHash, String adapterType, String outcome, long durationMs, long rowCount) {
+            QueryContext context,
+            DslRequest request,
+            String planHash,
+            String adapterType,
+            String outcome,
+            long durationMs,
+            long rowCount) {
         try {
             auditSink.record(new QueryAuditEvent(
-                    context.traceId(), planHash, adapterType, outcome, durationMs, rowCount));
+                    context.traceId(), request.dslType(), request.version(), planHash, adapterType,
+                    outcome, durationMs, rowCount));
         } catch (RuntimeException ignored) {
             // 审计接收器故障不得改变查询结果或错误语义。
         }

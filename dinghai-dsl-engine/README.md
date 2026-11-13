@@ -89,6 +89,7 @@ dinghai:
     max-plan-nodes: 1000
     max-plan-depth: 16
     max-joins: 8
+    max-rows: 10000
 
 spring:
   datasource:

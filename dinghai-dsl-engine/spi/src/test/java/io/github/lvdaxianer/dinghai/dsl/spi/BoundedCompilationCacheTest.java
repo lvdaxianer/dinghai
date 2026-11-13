@@ -21,7 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class BoundedCompilationCacheTest {
 
-    private static final CacheKey KEY = new CacheKey("relational-query", 1, "hash-1", "compiler-1", "schema-1", "policy-1");
+    private static final CacheKey KEY = new CacheKey(
+            "relational-query", 1, "hash-1", "mysql", "adapter-1", "compiler-1", "capability-1", "schema-1", "policy-1");
 
     /**
      * 验证计划缓存按容量淘汰且版本变化不会命中旧条目。
@@ -33,11 +34,12 @@ class BoundedCompilationCacheTest {
         GenericExecutionPlan second = new GenericExecutionPlan("relational-query", 1, Map.of("id", 2));
 
         cache.put(KEY, first);
-        cache.put(new CacheKey("relational-query", 1, "hash-2", "compiler-1", "schema-1", "policy-1"), second);
+        cache.put(new CacheKey(
+                "relational-query", 1, "hash-2", "mysql", "adapter-1", "compiler-1", "capability-1", "schema-1", "policy-1"), second);
 
         assertTrue(cache.get(KEY).isEmpty());
         assertEquals(second, cache.get(new CacheKey(
-                "relational-query", 1, "hash-2", "compiler-1", "schema-1", "policy-1")).orElseThrow());
+                "relational-query", 1, "hash-2", "mysql", "adapter-1", "compiler-1", "capability-1", "schema-1", "policy-1")).orElseThrow());
     }
 
     /**
@@ -49,6 +51,20 @@ class BoundedCompilationCacheTest {
         cache.put(KEY, new GenericExecutionPlan("relational-query", 1, Map.of()));
 
         assertTrue(cache.get(KEY).isEmpty());
+    }
+
+    /**
+     * 验证后端能力版本变化不会复用旧缓存条目。
+     */
+    @Test
+    void separatesBackendCapabilityVersions() {
+        BoundedPlanCache cache = new BoundedPlanCache(2, Duration.ofMinutes(1));
+        cache.put(KEY, new GenericExecutionPlan("relational-query", 1, Map.of("id", 1)));
+
+        CacheKey changedCapabilities = new CacheKey(
+                "relational-query", 1, "hash-1", "mysql", "adapter-1", "compiler-1", "capability-2", "schema-1", "policy-1");
+
+        assertTrue(cache.get(changedCapabilities).isEmpty());
     }
 
     /**
@@ -75,7 +91,8 @@ class BoundedCompilationCacheTest {
         BoundedCompiledTemplateCache cache = new BoundedCompiledTemplateCache(1, Duration.ofMinutes(1));
         CompiledCommandTemplate template = new CompiledCommandTemplate(
                 "sql", "SELECT 1", List.of(), List.of());
-        CacheKey other = new CacheKey("relational-query", 1, "other", "compiler-1", "schema-1", "policy-1");
+        CacheKey other = new CacheKey(
+                "relational-query", 1, "other", "mysql", "adapter-1", "compiler-1", "capability-1", "schema-1", "policy-1");
 
         cache.put(KEY, template);
         cache.put(other, template);

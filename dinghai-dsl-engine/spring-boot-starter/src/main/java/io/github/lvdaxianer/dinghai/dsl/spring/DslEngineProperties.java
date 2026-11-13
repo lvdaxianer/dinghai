@@ -31,6 +31,8 @@ public class DslEngineProperties {
 
     private int maxJoins = 8;
 
+    private int maxRows = 10_000;
+
     /**
      * 返回默认数据适配器类型。
      *
@@ -173,5 +175,33 @@ public class DslEngineProperties {
      */
     public void setMaxJoins(int maxJoins) {
         this.maxJoins = maxJoins;
+    }
+
+    /**
+     * 返回最大返回行数。
+     *
+     * @return 最大返回行数
+     */
+    public int getMaxRows() {
+        return maxRows;
+    }
+
+    /**
+     * 设置最大返回行数。
+     *
+     * @param maxRows 最大返回行数
+     */
+    public void setMaxRows(int maxRows) {
+        this.maxRows = maxRows;
+    }
+
+    /**
+     * 返回 JDBC 使用的秒级超时。
+     *
+     * @return 至少一秒的 JDBC 超时
+     */
+    public int getQueryTimeoutSeconds() {
+        long seconds = timeout == null ? 0 : timeout.toSeconds();
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(1, seconds));
     }
 }

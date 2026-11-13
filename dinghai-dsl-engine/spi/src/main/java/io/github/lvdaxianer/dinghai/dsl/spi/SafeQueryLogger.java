@@ -31,8 +31,9 @@ public final class SafeQueryLogger implements QueryAuditSink {
     public void record(QueryAuditEvent event) {
         QueryAuditEvent value = Objects.requireNonNull(event, "event");
         logger.log(Logger.Level.INFO,
-                "dsl execution traceId={0} planHash={1} adapter={2} outcome={3} durationMs={4} rowCount={5}",
-                value.traceId(), value.planHash(), value.adapterType(), value.outcome(),
-                value.durationMs(), value.rowCount());
+                "dsl execution traceId={0} dslType={1} dslVersion={2} planHash={3} adapter={4} "
+                        + "outcome={5} durationMs={6} rowCount={7}",
+                value.traceId(), value.dslType(), value.dslVersion(), value.planHash(), value.adapterType(),
+                value.outcome(), value.durationMs(), value.rowCount());
     }
 }

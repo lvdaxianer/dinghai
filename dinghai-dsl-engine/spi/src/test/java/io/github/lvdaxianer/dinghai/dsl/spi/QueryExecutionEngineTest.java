@@ -47,6 +47,8 @@ class QueryExecutionEngineTest {
 
             assertEquals(0, result.rowCount());
             assertEquals("SUCCESS", events.getFirst().outcome());
+            assertEquals("test", events.getFirst().dslType());
+            assertEquals(1, events.getFirst().dslVersion());
             assertEquals(64, events.getFirst().planHash().length());
             assertFalse(events.getFirst().toString().contains("secret-value"));
         } finally {
@@ -61,7 +63,8 @@ class QueryExecutionEngineTest {
     void rejectsOversizedRequestBeforeBackend() {
         RecordingAdapter adapter = new RecordingAdapter(plan -> emptyResult());
         RuntimeExecutionLimits limits = new RuntimeExecutionLimits(8, 1, Duration.ofSeconds(1), 10, 2, 1);
-        QueryExecutionEngine engine = engine(adapter, limits, new ArrayList<>());
+        List<QueryAuditEvent> events = new ArrayList<>();
+        QueryExecutionEngine engine = engine(adapter, limits, events);
         try {
             ExecutionLimitException exception = assertThrows(
                     ExecutionLimitException.class,
@@ -69,6 +72,7 @@ class QueryExecutionEngineTest {
 
             assertEquals("REQUEST_TOO_LARGE", exception.code());
             assertEquals(0, adapter.calls());
+            assertEquals("REQUEST_TOO_LARGE", events.getFirst().outcome());
         } finally {
             engine.close();
         }
@@ -97,6 +101,28 @@ class QueryExecutionEngineTest {
 
             assertEquals("EXECUTION_TIMEOUT", exception.code());
             assertEquals("EXECUTION_TIMEOUT", events.getFirst().outcome());
+        } finally {
+            engine.close();
+        }
+    }
+
+    /**
+     * 验证通用执行引擎不会接受自定义后端返回的超限结果。
+     */
+    @Test
+    void rejectsResultExceedingRuntimeRowLimit() {
+        List<QueryAuditEvent> events = new ArrayList<>();
+        RecordingAdapter adapter = new RecordingAdapter(plan -> new QueryResult(
+                List.of(), List.of(List.of(), List.of()), 2, false));
+        QueryExecutionEngine engine = engine(adapter,
+                new RuntimeExecutionLimits(1024, 1, Duration.ofSeconds(1), 10, 2, 1, 1), events);
+        try {
+            ExecutionLimitException exception = assertThrows(
+                    ExecutionLimitException.class,
+                    () -> engine.execute(request("safe"), DSL_CONTEXT, QUERY_CONTEXT));
+
+            assertEquals("RESULT_ROW_LIMIT_EXCEEDED", exception.code());
+            assertEquals("RESULT_ROW_LIMIT_EXCEEDED", events.getFirst().outcome());
         } finally {
             engine.close();
         }
