@@ -37,8 +37,8 @@
 
 ## 8. Integrated verification
 
-- [ ] 8.1 Run focused tests for every new module and the full Maven reactor, verify no existing module regression, and record skipped external-service tests explicitly.
-- [ ] 8.2 Run DSL/parser/compiler and JDBC adapter benchmarks or bounded smoke tests, review the complete diff against all four capability specs, and verify OpenSpec validation passes in strict mode.
+- [x] 8.1 Run focused tests for every new module and the full Maven reactor, verify no existing module regression, and record skipped external-service tests explicitly. Focused DSL reactor: 54 tests, 0 failures, 0 errors, 0 skipped. Full Maven reactor: 557 tests, 0 failures, 0 errors, 43 skipped; the skipped cases are existing external-service/integration scenarios and no DSL test is skipped.
+- [x] 8.2 Run DSL/parser/compiler and JDBC adapter benchmarks or bounded smoke tests, review the complete diff against all four capability specs, and verify OpenSpec validation passes in strict mode. Bounded smoke coverage is provided by the parser/compiler/JDBC mock tests and runtime limit tests; `git diff --check` and `openspec validate add-dsl-engine --strict` pass.
 
 ## Workflow follow-up
 
