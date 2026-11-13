@@ -27,7 +27,7 @@
 
 ## 6. Runtime controls and observability
 
-- [ ] 6.1 Implement bounded AST/plan/compiled-command caches with versioned keys, cache failure bypass, and no default result caching, and verify hit, miss, invalidation, bounds, and failure behavior.
+- [x] 6.1 Implement bounded AST/plan/compiled-command caches with versioned keys, cache failure bypass, and no default result caching, and verify hit, miss, invalidation, bounds, and failure behavior.
 - [ ] 6.2 Implement execution limits, concurrency/timeout controls, metrics, trace context, safe diagnostic logging, and audit sink events without sensitive values, and verify limit rejection, timeout, redaction, and telemetry tests.
 
 ## 7. Documentation and dependency hygiene
