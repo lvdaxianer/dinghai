@@ -7,6 +7,7 @@
 | 业务模块 | DSL Engine Test API（`dsl`） |
 | 文档路径 | `dinghai-dsl-engine/test-spring-boot/apis/dsl.md` |
 | 模块职责 | 接收结构化 DSL，调用 DSL parser/plan extension/data adapter；用于本地和真实数据库协议验收 |
+| DSL 语法规范 | [`dinghai-dsl-engine/docs/dsl-syntax.md`](../../docs/dsl-syntax.md) |
 | 基础 URL / 版本 | `http://localhost:8080`；当前无 URL 版本前缀 |
 | 通用认证与约定 | 本测试应用不实现生产登录或 Token 白名单；应由企业网关保护。请求使用 JSON，响应统一包含 `code`、`message`、`data`、`traceId` 或错误详情 |
 
@@ -63,6 +64,9 @@ POST http://localhost:8080/api/test/dsl/execute
 #### 2.2.4 requestBody
 
 请求体必须是 `DslRequest`：
+
+字段语义和 `relational-query v1` 的完整结构请先阅读
+[DSL 语法规范](../../docs/dsl-syntax.md)。本节只说明该语法在 HTTP 接口中的请求位置和接口约定。
 
 ```json
 {
