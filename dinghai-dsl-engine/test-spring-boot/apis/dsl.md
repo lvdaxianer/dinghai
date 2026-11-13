@@ -107,7 +107,7 @@ POST http://localhost:8080/api/test/dsl/execute
 
 | HTTP 状态码 | 业务含义 | 触发条件 | 调用方处理 |
 | --- | --- | --- | --- |
-| `200 OK` | 查询成功 | DSL 编译和后端执行成功 | 读取 `data.columns` 与 `data.rows` |
+| `200 OK` | 查询成功 | DSL 编译和后端执行成功 | 优先读取 `data.records`；需要兼容时读取 `data.columns` 与 `data.rows` |
 | `400 Bad Request` | DSL/请求错误 | 未知字段、版本、白名单字段或参数错误 | 按稳定 `code` 修正请求 |
 | `403 Forbidden` | 服务端上下文缺失 | 用户或数据域没有可信映射 | 修复服务端认证/权限 |
 | `429 Too Many Requests` | 运行时边界拒绝 | 并发、超时或结果限制 | 按退避策略处理 |
@@ -123,6 +123,7 @@ POST http://localhost:8080/api/test/dsl/execute
   "data": {
     "columns": [{"name": "event_date", "logicalType": "date"}],
     "rows": [["2026-11-13"]],
+    "records": [{"event_date": "2026-11-13"}],
     "rowCount": 1,
     "truncated": false
   },
@@ -130,7 +131,35 @@ POST http://localhost:8080/api/test/dsl/execute
 }
 ```
 
-`data.rows` 是真实数据库返回的数据；审计日志不记录完整结果、参数值或密码。
+| 字段路径 | 类型 | 说明 |
+| --- | --- | --- |
+| `data.columns` | array<object> | 输出列名和逻辑类型，列顺序与 `rows` 每行值顺序一致 |
+| `data.rows` | array<array> | 兼容格式；每一行的长度必须与 `columns` 数量一致 |
+| `data.records` | array<object> | 可读格式；每个字段名来自输出列名，按列顺序生成 |
+| `data.rowCount` | integer | 返回行数 |
+| `data.truncated` | boolean | 是否因服务端资源限制截断 |
+
+`records` 不会因为数据库值为 `NULL` 而省略字段，字段值会序列化为 JSON `null`。例如：
+
+```json
+{
+  "columns": [
+    {"name": "event_date", "logicalType": "date"},
+    {"name": "status", "logicalType": "string"},
+    {"name": "severity", "logicalType": "integer"}
+  ],
+  "rows": [["2026-11-13", null, 2]],
+  "records": [{
+    "event_date": "2026-11-13",
+    "status": null,
+    "severity": 2
+  }],
+  "rowCount": 1,
+  "truncated": false
+}
+```
+
+调用方优先使用 `records` 读取字段；已有按数组处理的调用方可以继续使用 `columns` + `rows`。审计日志不记录完整结果、参数值或密码。
 
 #### 2.3.3 Error response
 
@@ -162,6 +191,8 @@ curl --request POST 'http://localhost:8080/api/test/dsl/execute' \
     "parameters":{}
   }'
 ```
+
+成功响应与上面的 `2.3.2 Success response` 相同，其中 `data.records` 是推荐的可读结果字段。
 
 ## 3. 校验 DSL
 

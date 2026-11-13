@@ -10,5 +10,5 @@
 
 ## 3. Documentation and verification
 
-- [ ] 3.1 更新 `test-spring-boot/apis/dsl.md` 的成功响应、字段说明和空值示例。
-- [ ] 3.2 运行严格 OpenSpec 校验、模块测试和真实 MySQL HTTP 验证，完成代码审查和任务审计。
+- [x] 3.1 更新 `test-spring-boot/apis/dsl.md` 的成功响应、字段说明和空值示例。
+- [x] 3.2 运行严格 OpenSpec 校验、模块测试和真实 MySQL HTTP 验证，完成代码审查和任务审计。
