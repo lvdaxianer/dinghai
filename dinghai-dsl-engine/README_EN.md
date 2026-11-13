@@ -21,7 +21,7 @@ Clients submit only registered structured DSLs. They cannot submit raw SQL, SQL 
 | `dinghai-dsl-engine-postgresql` | PostgreSQL compiler and JDBC execution |
 | `dinghai-dsl-engine-spring-boot-starter` | Startup configuration, DataSource, registry, and engine assembly |
 
-Provider artifacts are separate; enterprise code must not be copied into the public core.
+Provider artifacts are separate; enterprise code must not be copied into the public core. The host application must provide both a schema policy and a `PlanPolicy`; startup fails closed when the authorization policy is missing.
 
 Applications must explicitly choose a provider artifact. Provider dependencies in the Spring Boot starter are optional, so applications do not receive both database drivers automatically:
 

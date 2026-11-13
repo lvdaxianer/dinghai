@@ -102,7 +102,7 @@ PostgreSQL 将 `default-data-adapter` 改为 `postgresql`，并使用 PostgreSQL
 
 应用启动时会校验默认 adapter、DataSource、DSL 适配器、能力声明和重复注册；错误会在应用 ready 前失败。请求不能通过参数指定未注册的 adapter，也不能跨 MySQL、Doris、PostgreSQL 做 JOIN。
 
-宿主应用必须提供 schema policy；公共模块不实现企业表权限、`userId`/`domainId` 权限或租户规则。
+宿主应用必须提供 schema policy 和 `PlanPolicy`；公共模块不实现企业表权限、`userId`/`domainId` 权限或租户规则。缺少 `PlanPolicy` 时 starter fail-fast，禁止默认放行数据权限。
 
 ## 日志、审计和调优边界
 

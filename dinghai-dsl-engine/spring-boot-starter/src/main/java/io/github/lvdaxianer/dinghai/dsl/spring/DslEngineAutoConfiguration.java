@@ -54,7 +54,11 @@ public class DslEngineAutoConfiguration {
             ObjectProvider<PlanPolicy> policies,
             ObjectProvider<QueryAuditSink> auditSinks,
             ObjectProvider<QueryTelemetry> telemetry) {
-        PlanPolicy policy = policies.getIfAvailable(() -> (plan, context) -> { });
+        PlanPolicy policy = policies.getIfAvailable();
+        if (policy == null) {
+            throw new DslBootstrapException(
+                    "DSL engine requires a server-managed PlanPolicy for data authorization");
+        }
         QueryAuditSink auditSink = auditSinks.getIfAvailable(
                 () -> new SafeQueryLogger(System.getLogger("io.github.lvdaxianer.dinghai.dsl")));
         QueryTelemetry metrics = telemetry.getIfAvailable(() -> NoopQueryTelemetry.INSTANCE);
