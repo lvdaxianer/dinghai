@@ -52,6 +52,10 @@ Spring Boot 应用至少显式选择一个 provider 构件；starter 中的 prov
 
 这是参考 DSL，不是原始 SQL。它支持受限的单数据源查询：字段投影、参数化 `WHERE`、`INNER JOIN`、`LEFT JOIN`、聚合、`GROUP BY`、`ORDER BY` 和 `LIMIT`。
 
+完整的通用请求信封、`relational-query v1` 字段语义、参数类型、JOIN 约束、限制和非法示例见：
+[DSL 语法规范](docs/dsl-syntax.md)。测试应用的 HTTP 请求和响应契约见
+[`test-spring-boot/apis/dsl.md`](test-spring-boot/apis/dsl.md)。
+
 ```json
 {
   "dslType": "relational-query",
