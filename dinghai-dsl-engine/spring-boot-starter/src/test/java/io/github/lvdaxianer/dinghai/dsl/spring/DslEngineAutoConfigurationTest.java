@@ -8,6 +8,7 @@ import io.github.lvdaxianer.dinghai.dsl.spi.BackendCapabilities;
 import io.github.lvdaxianer.dinghai.dsl.spi.DataAdapter;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DataAdapterRegistry;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DslAdapterRegistry;
+import io.github.lvdaxianer.dinghai.dsl.spi.QueryExecutionEngine;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -45,6 +46,7 @@ class DslEngineAutoConfigurationTest {
         contextRunner.run(context -> {
             assertThat(context).hasSingleBean(DslAdapterRegistry.class);
             assertThat(context).hasSingleBean(DataAdapterRegistry.class);
+            assertThat(context).hasSingleBean(QueryExecutionEngine.class);
             assertThat(context.getBean(DslAdapterRegistry.class).registeredTypes())
                     .containsExactly("relational-query");
             assertThat(context.getBean(DataAdapterRegistry.class).registeredTypes())
