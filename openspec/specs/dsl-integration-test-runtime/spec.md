@@ -29,15 +29,15 @@
 - **THEN** 请求通过 PostgreSQL Data Adapter 编译、绑定和映射结果，不回退到 MySQL
 
 ### Requirement: Test extensions enforce trusted data scope
-测试应用 SHALL 通过代码注册示例计划扩展验证逻辑删除和租户范围；租户身份 SHALL 来自服务端可信上下文，不能由请求体覆盖，扩展生成的条件 SHALL 以参数化约束进入计划。
+测试应用 SHALL 通过代码注册示例计划扩展验证逻辑删除和租户范围；租户身份 SHALL 来自服务端可信上下文，不能由请求体覆盖，扩展生成的条件 SHALL 以参数化约束进入计划，真实 HTTP/JDBC 验收 SHALL 断言返回结果只包含当前可信租户且未逻辑删除的数据。
 
 #### Scenario: Deleted and foreign-tenant rows are excluded
 - **WHEN** 请求查询包含已删除行或其他租户行的数据
-- **THEN** 真实数据库结果只包含当前可信租户且未逻辑删除的数据
+- **THEN** 真实数据库结果只包含当前可信租户且未逻辑删除的数据，并返回预期业务列和值
 
 #### Scenario: Request identity cannot bypass scope
-- **WHEN** 请求体携带不同的 userId 或 tenantId
-- **THEN** 服务端忽略或拒绝该字段，查询仍使用服务端构造的可信上下文
+- **WHEN** 请求体携带不同的 userId、domainId、tenantId 或 dataSourceId
+- **THEN** 服务端拒绝或忽略该字段，查询仍使用服务端构造的可信上下文且不切换后端
 
 ### Requirement: Integration responses are safe and diagnosable
 测试接口 SHALL 返回统一结果或稳定错误码、消息和 traceId；响应和日志不得包含数据库密码、Token、原始敏感参数或完整 SQL，解释接口只能返回安全的计划摘要和适配器信息。
