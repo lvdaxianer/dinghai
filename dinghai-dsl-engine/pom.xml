@@ -18,5 +18,6 @@
     <modules>
         <module>core</module>
         <module>spi</module>
+        <module>relational</module>
     </modules>
 </project>

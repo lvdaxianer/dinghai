@@ -7,7 +7,7 @@
 
 ## 2. Reference relational DSL
 
-- [ ] 2.1 Add the `relational-query` v1 JSON request model and typed AST for source, projection, predicate, join, grouping, ordering, aggregation, parameters, and limit, and verify valid/invalid shape tests.
+- [x] 2.1 Add the `relational-query` v1 JSON request model and typed AST for source, projection, predicate, join, grouping, ordering, aggregation, parameters, and limit, and verify valid/invalid shape tests.
 - [ ] 2.2 Implement relational semantic validation, identifier/policy resolution, safe normalization, complexity checks, and immutable relational execution-plan generation, and verify raw SQL, invalid identifiers, unsafe joins, and plan-boundary tests.
 
 ## 3. MySQL and Doris-compatible backend
