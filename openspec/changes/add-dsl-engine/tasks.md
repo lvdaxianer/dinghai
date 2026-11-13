@@ -12,7 +12,7 @@
 
 ## 3. MySQL and Doris-compatible backend
 
-- [ ] 3.1 Add provider-scoped MySQL JDBC dependencies and implement the MySQL/Doris-common capability model and parameterized relational compiler, and verify SQL shape, identifier quoting, capability rejection, and parameter-binding tests.
+- [x] 3.1 Add provider-scoped MySQL JDBC dependencies and implement the MySQL/Doris-common capability model and parameterized relational compiler, and verify SQL shape, identifier quoting, capability rejection, and parameter-binding tests.
 - [ ] 3.2 Implement MySQL DataSource execution, timeout/row bounds, JDBC parameter binding, stable output aliases, logical type codecs, and unified result mapping, and verify mock-JDBC tests plus optional MySQL/Doris-protocol integration tests when services are available.
 
 ## 4. PostgreSQL backend
