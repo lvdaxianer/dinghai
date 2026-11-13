@@ -20,5 +20,6 @@
         <module>spi</module>
         <module>relational</module>
         <module>mysql</module>
+        <module>postgresql</module>
     </modules>
 </project>

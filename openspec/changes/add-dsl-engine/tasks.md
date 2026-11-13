@@ -17,7 +17,7 @@
 
 ## 4. PostgreSQL backend
 
-- [ ] 4.1 Add provider-scoped PostgreSQL JDBC dependencies and implement the PostgreSQL relational compiler and capability declarations, and verify PostgreSQL-specific quoting, binding, and unsupported-feature tests.
+- [x] 4.1 Add provider-scoped PostgreSQL JDBC dependencies and implement the PostgreSQL relational compiler and capability declarations, and verify PostgreSQL-specific quoting, binding, and unsupported-feature tests.
 - [ ] 4.2 Implement PostgreSQL DataSource execution and result mapping without MySQL fallback, and verify adapter selection, mock-JDBC execution, mapping, timeout, and explicit missing-adapter failure tests.
 
 ## 5. Spring Boot bootstrap
