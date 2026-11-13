@@ -22,8 +22,8 @@
 
 ## 5. 真实数据库协议验收
 
-- [ ] 5.1 添加固定版本的 MySQL、Doris FE/BE、PostgreSQL Compose 配置、健康检查、初始化脚本和无密钥环境变量模板，验证 `docker compose config` 通过且测试数据不会指向生产。
-- [ ] 5.2 添加真实 JDBC/HTTP 集成测试与有界运行脚本，分别验证 MySQL、Doris MySQL 协议复用 MySQL Data Adapter、PostgreSQL 使用 PostgreSQL Data Adapter、JOIN/逻辑删除/租户范围/结果映射；测试必须连接真实数据库，不用 Mock JDBC，并记录 Docker 不可用时的明确失败信息。
+- [x] 5.1 添加固定版本的 MySQL、Doris FE/BE、PostgreSQL Compose 配置、健康检查、初始化脚本和无密钥环境变量模板，验证 `docker compose config` 通过且测试数据不会指向生产。
+- [x] 5.2 添加真实 JDBC/HTTP 集成测试与有界运行脚本，分别验证 MySQL、Doris MySQL 协议复用 MySQL Data Adapter、PostgreSQL 使用 PostgreSQL Data Adapter、JOIN/逻辑删除/租户范围/结果映射；测试必须连接真实数据库，不用 Mock JDBC，并记录 Docker 不可用时的明确失败信息。
 
 ## 6. 跨模块验证与交付
 
