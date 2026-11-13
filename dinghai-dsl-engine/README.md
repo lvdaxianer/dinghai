@@ -75,6 +75,47 @@ Spring Boot 应用至少显式选择一个 provider 构件；starter 中的 prov
 }
 ```
 
+### 执行结果示例
+
+执行接口返回统一响应。调用方优先使用按字段名组织的 `records`；已有调用方仍可以使用 `columns` 和 `rows` 按列下标读取：
+
+```json
+{
+  "code": "OK",
+  "message": "success",
+  "data": {
+    "columns": [
+      {"name": "f_event_date", "logicalType": "date"},
+      {"name": "f_status", "logicalType": "string"},
+      {"name": "f_severity", "logicalType": "integer"}
+    ],
+    "rows": [
+      ["2026-11-13", "OPEN", 2]
+    ],
+    "records": [
+      {
+        "f_event_date": "2026-11-13",
+        "f_status": "OPEN",
+        "f_severity": 2
+      }
+    ],
+    "rowCount": 1,
+    "truncated": false
+  },
+  "traceId": "ec63bcbe-7a7b-406c-86bd-ae1fce27c424"
+}
+```
+
+如果数据库字段值为 `NULL`，`records` 仍然保留字段名，并返回 JSON `null`，不会因为字段为空而缩短结果字段数量：
+
+```json
+{
+  "f_event_date": "2026-11-13",
+  "f_status": null,
+  "f_severity": 2
+}
+```
+
 表、字段和物理名称必须由宿主实现 `RelationalSchemaPolicy` 白名单解析。解析器拒绝原始 SQL、未知字段、未限定字段、笛卡尔积、危险标识符和超出复杂度限制的请求。
 
 ## Spring Boot 配置
