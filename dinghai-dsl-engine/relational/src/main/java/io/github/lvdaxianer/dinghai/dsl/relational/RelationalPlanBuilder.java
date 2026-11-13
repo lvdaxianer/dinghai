@@ -223,7 +223,7 @@ public final class RelationalPlanBuilder {
      * @author lvdaxianer@yeah.net
      * @date 2026-11-13
      */
-    private static PredicateStats validatePredicates(List<Predicate> predicates, ValidationState state) {
+    private PredicateStats validatePredicates(List<Predicate> predicates, ValidationState state) {
         PredicateStats total = new PredicateStats(0, 0);
         for (Predicate predicate : predicates) {
             PredicateStats current = validatePredicate(predicate, state);
@@ -241,10 +241,11 @@ public final class RelationalPlanBuilder {
      * @author lvdaxianer@yeah.net
      * @date 2026-11-13
      */
-    private static PredicateStats validatePredicate(Predicate predicate, ValidationState state) {
+    private PredicateStats validatePredicate(Predicate predicate, ValidationState state) {
         if (predicate instanceof ComparisonPredicate comparison) {
-            resolveField(comparison.field(), state, "$.payload.where.field");
-            registerParameter(state, comparison.parameter(), comparison.operator());
+            RelationalColumnDefinition column = resolveField(
+                    comparison.field(), state, "$.payload.where.field");
+            registerParameter(state, comparison.parameter(), comparison.operator(), column);
             return new PredicateStats(1, 1);
         }
         LogicalPredicate logical = (LogicalPredicate) predicate;
@@ -311,11 +312,26 @@ public final class RelationalPlanBuilder {
      * @author lvdaxianer@yeah.net
      * @date 2026-11-13
      */
-    private static void registerParameter(
-            ValidationState state, ParameterReference parameter, ComparisonOperator operator) {
+    private void registerParameter(
+            ValidationState state,
+            ParameterReference parameter,
+            ComparisonOperator operator,
+            RelationalColumnDefinition column) {
+        if (!column.logicalType().equalsIgnoreCase(parameter.logicalType())) {
+            throw failure("PARAMETER_FIELD_TYPE_MISMATCH", "$.payload.where.logicalType",
+                    "parameter logical type must match the referenced field");
+        }
         ParameterReference previous = state.parameters.putIfAbsent(parameter.name(), parameter);
         if (previous != null && !previous.logicalType().equals(parameter.logicalType())) {
             throw failure("PARAMETER_TYPE_CONFLICT", "$.payload.where", "parameter logical type is inconsistent");
+        }
+        String previousFieldType = state.parameterFieldTypes.putIfAbsent(
+                parameter.name(), column.logicalType());
+        if (previousFieldType != null && !previousFieldType.equalsIgnoreCase(column.logicalType())) {
+            throw failure("PARAMETER_FIELD_TYPE_CONFLICT", "$.payload.where", "parameter fields have different types");
+        }
+        if (state.parameters.size() > limits.maxParameters()) {
+            throw failure("PARAMETER_LIMIT_EXCEEDED", "$.payload.where", "too many parameters are referenced");
         }
         state.operators.putIfAbsent(parameter.name(), operator);
     }
@@ -329,7 +345,7 @@ public final class RelationalPlanBuilder {
      * @author lvdaxianer@yeah.net
      * @date 2026-11-13
      */
-    private static List<ParameterBinding> bindParameters(
+    private List<ParameterBinding> bindParameters(
             ValidationState state, Map<String, Object> values) {
         Map<String, Object> supplied = Objects.requireNonNull(values, "parameters");
         List<ParameterBinding> bindings = new ArrayList<>(state.parameters.size());
@@ -357,7 +373,7 @@ public final class RelationalPlanBuilder {
      * @author lvdaxianer@yeah.net
      * @date 2026-11-13
      */
-    private static void validateParameterValue(
+    private void validateParameterValue(
             ParameterReference parameter, ComparisonOperator operator, Object value) {
         if (value == null) {
             throw failure("PARAMETER_NULL", "$.parameters." + parameter.name(), "parameter value is null");
@@ -370,6 +386,12 @@ public final class RelationalPlanBuilder {
         }
         if (value instanceof Collection<?> collection && collection.isEmpty()) {
             throw failure("PARAMETER_EMPTY", "$.parameters." + parameter.name(), "parameter collection must not be empty");
+        }
+        if (ComparisonOperator.IN == operator
+                && value instanceof Collection<?> collection
+                && collection.size() > limits.maxInItems()) {
+            throw failure("IN_PARAMETER_LIMIT_EXCEEDED", "$.parameters." + parameter.name(),
+                    "IN parameter contains too many items");
         }
         if (!compatible(parameter.logicalType(), value)) {
             throw failure("PARAMETER_TYPE_INVALID", "$.parameters." + parameter.name(), "parameter type is invalid");
@@ -458,6 +480,7 @@ public final class RelationalPlanBuilder {
         private final Map<String, RelationalTableDefinition> tables = new LinkedHashMap<>();
         private final Map<String, ParameterReference> parameters = new LinkedHashMap<>();
         private final Map<String, ComparisonOperator> operators = new LinkedHashMap<>();
+        private final Map<String, String> parameterFieldTypes = new LinkedHashMap<>();
     }
 
     /**

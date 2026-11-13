@@ -4,6 +4,7 @@ import io.github.lvdaxianer.dinghai.dsl.core.ExecutionPlan;
 import io.github.lvdaxianer.dinghai.dsl.spi.ParameterBinding;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -63,5 +64,21 @@ public record RelationalQueryPlan(
     @Override
     public int planVersion() {
         return RelationalQueryParser.VERSION;
+    }
+
+    /**
+     * 返回不含绑定值的关系查询结构，避免不同查询因统计元数据相同而发生摘要碰撞。
+     *
+     * @return 关系查询摘要材料
+     */
+    @Override
+    public Object fingerprintMaterial() {
+        Map<String, Object> material = new LinkedHashMap<>();
+        material.put("query", query);
+        material.put("aliases", tablesByAlias.keySet());
+        material.put("parameters", parameters.stream()
+                .map(parameter -> Map.of("name", parameter.name(), "logicalType", parameter.logicalType()))
+                .toList());
+        return Map.copyOf(material);
     }
 }

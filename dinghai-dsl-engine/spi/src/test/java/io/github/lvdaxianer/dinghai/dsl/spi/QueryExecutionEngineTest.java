@@ -19,9 +19,11 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -269,6 +271,42 @@ class QueryExecutionEngineTest {
         }
     }
 
+    /**
+     * 验证后端任务获得服务端上下文，并在工作线程完成后清理线程状态。
+     */
+    @Test
+    void decoratesBackendTaskAndCleansWorkerContext() {
+        ThreadLocal<String> traceContext = new ThreadLocal<>();
+        AtomicReference<String> observed = new AtomicReference<>();
+        RecordingAdapter adapter = new RecordingAdapter(plan -> {
+            observed.set(traceContext.get());
+            return emptyResult();
+        });
+        QueryTaskDecorator decorator = (task, context) -> () -> {
+            traceContext.set(context.traceId());
+            try {
+                return task.call();
+            } finally {
+                traceContext.remove();
+            }
+        };
+        QueryExecutionEngine engine = engine(
+                adapter,
+                RuntimeExecutionLimits.defaults(),
+                new ArrayList<>(),
+                new PlanExtensionRegistry(List.of()),
+                (plan, context) -> { },
+                decorator);
+        try {
+            engine.execute(request("secret"), DSL_CONTEXT, QUERY_CONTEXT);
+
+            assertEquals("trace-1", observed.get());
+            assertNull(traceContext.get());
+        } finally {
+            engine.close();
+        }
+    }
+
     private static QueryExecutionEngine engine(
             RecordingAdapter adapter, RuntimeExecutionLimits limits, List<QueryAuditEvent> events) {
         DslAdapterRegistry dslRegistry = new DslAdapterRegistry(List.of(new DslAdapter() {
@@ -305,6 +343,16 @@ class QueryExecutionEngineTest {
             List<QueryAuditEvent> events,
             PlanExtensionRegistry extensions,
             PlanPolicy policy) {
+        return engine(adapter, limits, events, extensions, policy, QueryTaskDecorator.identity());
+    }
+
+    private static QueryExecutionEngine engine(
+            RecordingAdapter adapter,
+            RuntimeExecutionLimits limits,
+            List<QueryAuditEvent> events,
+            PlanExtensionRegistry extensions,
+            PlanPolicy policy,
+            QueryTaskDecorator taskDecorator) {
         DslAdapterRegistry dslRegistry = new DslAdapterRegistry(List.of(new DslAdapter() {
             @Override
             public String type() {
@@ -330,7 +378,8 @@ class QueryExecutionEngineTest {
                         extensions,
                         events::add,
                         NoopQueryTelemetry.INSTANCE,
-                        limits));
+                        limits,
+                        taskDecorator));
     }
 
     private static DslRequest request(String secret) {

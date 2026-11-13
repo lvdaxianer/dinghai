@@ -13,12 +13,16 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 测试接口的稳定错误码和脱敏错误响应处理器。
  */
 @RestControllerAdvice(assignableTypes = TestDslController.class)
 public class TestDslExceptionHandler {
+
+    private static final System.Logger LOGGER =
+            System.getLogger("io.github.lvdaxianer.dinghai.dsl.testapp.errors");
 
     /**
      * 处理 DSL 解析和语义校验错误。
@@ -58,7 +62,8 @@ public class TestDslExceptionHandler {
     @ExceptionHandler(BackendExecutionException.class)
     public ResponseEntity<ApiErrorResponse> handleBackend(
             BackendExecutionException exception, HttpServletRequest request) {
-        return error(HttpStatus.BAD_GATEWAY, exception.code(), exception.getMessage(), List.of(), request);
+        logExpectedFailure(exception, request);
+        return error(HttpStatus.BAD_GATEWAY, exception.code(), "query backend execution failed", List.of(), request);
     }
 
     /**
@@ -71,7 +76,8 @@ public class TestDslExceptionHandler {
     @ExceptionHandler(ExecutionLimitException.class)
     public ResponseEntity<ApiErrorResponse> handleLimit(
             ExecutionLimitException exception, HttpServletRequest request) {
-        return error(HttpStatus.TOO_MANY_REQUESTS, exception.code(), exception.getMessage(), List.of(), request);
+        logExpectedFailure(exception, request);
+        return error(HttpStatus.TOO_MANY_REQUESTS, exception.code(), "query execution limit exceeded", List.of(), request);
     }
 
     /**
@@ -84,7 +90,8 @@ public class TestDslExceptionHandler {
     @ExceptionHandler(PlanExtensionException.class)
     public ResponseEntity<ApiErrorResponse> handleExtension(
             PlanExtensionException exception, HttpServletRequest request) {
-        return error(HttpStatus.BAD_REQUEST, exception.code(), exception.getMessage(), List.of(), request);
+        logExpectedFailure(exception, request);
+        return error(HttpStatus.BAD_REQUEST, exception.code(), "query plan extension rejected", List.of(), request);
     }
 
     /**
@@ -97,7 +104,8 @@ public class TestDslExceptionHandler {
     @ExceptionHandler(AdapterRegistryException.class)
     public ResponseEntity<ApiErrorResponse> handleAdapter(
             AdapterRegistryException exception, HttpServletRequest request) {
-        return error(HttpStatus.BAD_REQUEST, exception.code(), exception.getMessage(), List.of(), request);
+        logExpectedFailure(exception, request);
+        return error(HttpStatus.BAD_REQUEST, exception.code(), "configured data adapter is unavailable", List.of(), request);
     }
 
     /**
@@ -110,7 +118,8 @@ public class TestDslExceptionHandler {
     @ExceptionHandler(TestAuthorizationException.class)
     public ResponseEntity<ApiErrorResponse> handleAuthorization(
             TestAuthorizationException exception, HttpServletRequest request) {
-        return error(HttpStatus.FORBIDDEN, exception.code(), exception.getMessage(), List.of(), request);
+        logExpectedFailure(exception, request);
+        return error(HttpStatus.FORBIDDEN, exception.code(), "query data scope is not authorized", List.of(), request);
     }
 
     /**
@@ -136,7 +145,61 @@ public class TestDslExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(
             Exception exception, HttpServletRequest request) {
+        String traceId = TraceIdSupport.fromRequest(request);
+        LOGGER.log(System.Logger.Level.ERROR,
+                "unexpected DSL HTTP failure traceId={0} exceptionType={1} stack={2}",
+                traceId, exception.getClass().getName(), stackSummary(exception));
         return error(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "internal DSL service error", List.of(), request);
+    }
+
+    /**
+     * 记录可预期错误的安全摘要，不记录异常消息、请求体或参数值。
+     *
+     * @param exception 业务异常
+     * @param request HTTP 请求
+     */
+    private static void logExpectedFailure(RuntimeException exception, HttpServletRequest request) {
+        LOGGER.log(System.Logger.Level.WARNING,
+                "expected DSL HTTP failure traceId={0} code={1} exceptionType={2}",
+                TraceIdSupport.fromRequest(request), errorCode(exception), exception.getClass().getName());
+    }
+
+    /**
+     * 提取有限长度的堆栈摘要，避免异常消息中的敏感信息进入日志。
+     *
+     * @param exception 未预期异常
+     * @return 堆栈摘要
+     */
+    private static String stackSummary(Exception exception) {
+        return java.util.Arrays.stream(exception.getStackTrace())
+                .limit(8)
+                .map(StackTraceElement::toString)
+                .collect(Collectors.joining(" | "));
+    }
+
+    /**
+     * 读取稳定错误码，不读取异常消息。
+     *
+     * @param exception 业务异常
+     * @return 稳定错误码
+     */
+    private static String errorCode(RuntimeException exception) {
+        if (exception instanceof BackendExecutionException value) {
+            return value.code();
+        }
+        if (exception instanceof ExecutionLimitException value) {
+            return value.code();
+        }
+        if (exception instanceof PlanExtensionException value) {
+            return value.code();
+        }
+        if (exception instanceof AdapterRegistryException value) {
+            return value.code();
+        }
+        if (exception instanceof TestAuthorizationException value) {
+            return value.code();
+        }
+        return "REQUEST_INVALID";
     }
 
     private static ResponseEntity<ApiErrorResponse> error(

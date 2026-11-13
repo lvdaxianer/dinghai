@@ -13,7 +13,9 @@ import io.github.lvdaxianer.dinghai.dsl.relational.RelationalQueryAst.Relational
 import io.github.lvdaxianer.dinghai.dsl.relational.RelationalQueryPlan;
 import io.github.lvdaxianer.dinghai.dsl.spi.PlanPolicy;
 import io.github.lvdaxianer.dinghai.dsl.spi.PlanExtensionContext;
+import io.github.lvdaxianer.dinghai.dsl.spi.QueryTaskDecorator;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import org.slf4j.MDC;
 import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -63,6 +65,27 @@ public class TestQueryConfiguration {
     @Bean
     public Jackson2ObjectMapperBuilderCustomizer rejectUnknownRequestFields() {
         return builder -> builder.featuresToEnable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+    }
+
+    /**
+     * 将服务端查询上下文传播到引擎工作线程，并在任务结束时恢复线程状态。
+     *
+     * @return MDC 任务装饰器
+     */
+    @Bean
+    public QueryTaskDecorator queryTaskDecorator() {
+        return (task, context) -> () -> {
+            Map<String, String> previous = MDC.getCopyOfContextMap();
+            try {
+                MDC.put("traceId", context.traceId());
+                return task.call();
+            } finally {
+                MDC.clear();
+                if (previous != null) {
+                    MDC.setContextMap(previous);
+                }
+            }
+        };
     }
 
     /**

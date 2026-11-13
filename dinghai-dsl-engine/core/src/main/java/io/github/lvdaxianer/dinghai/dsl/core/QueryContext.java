@@ -7,7 +7,7 @@ import java.util.Objects;
  * 后端执行阶段使用的服务端上下文。
  *
  * @param traceId 链路标识
- * @param dataSourceId 服务端解析后的数据源标识
+ * @param dataSourceId 服务端解析后的数据源上下文标识，不是请求端路由选择器
  * @param attributes 由宿主应用注入的非敏感上下文属性
  * @author lvdaxianer@yeah.net
  * @date 2026-11-13
