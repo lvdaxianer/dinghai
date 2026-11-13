@@ -6,8 +6,11 @@ import io.github.lvdaxianer.dinghai.dsl.core.QueryContext;
 import io.github.lvdaxianer.dinghai.dsl.core.QueryResult;
 import io.github.lvdaxianer.dinghai.dsl.spi.BackendCapabilities;
 import io.github.lvdaxianer.dinghai.dsl.spi.DataAdapter;
+import io.github.lvdaxianer.dinghai.dsl.spi.PlanExtension;
+import io.github.lvdaxianer.dinghai.dsl.spi.PlanExtensionContext;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DataAdapterRegistry;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DslAdapterRegistry;
+import io.github.lvdaxianer.dinghai.dsl.spi.registry.PlanExtensionRegistry;
 import io.github.lvdaxianer.dinghai.dsl.spi.QueryExecutionEngine;
 import io.github.lvdaxianer.dinghai.dsl.spi.PlanPolicy;
 import org.junit.jupiter.api.Test;
@@ -148,6 +151,34 @@ class DslEngineAutoConfigurationTest {
     }
 
     /**
+     * 验证 Spring Bean 扩展会在启动期装配为冻结注册表。
+     */
+    @Test
+    void loadsPlanExtensionRegistryBeforeReady() {
+        contextRunner
+                .withBean(PlanExtension.class, () -> extension("scope", 20))
+                .run(context -> {
+                    assertThat(context).hasSingleBean(PlanExtensionRegistry.class);
+                    assertThat(context.getBean(PlanExtensionRegistry.class).registeredIds())
+                            .containsExactly("scope");
+                });
+    }
+
+    /**
+     * 验证重复扩展标识会阻止应用启动。
+     */
+    @Test
+    void rejectsDuplicatePlanExtensionBeforeReady() {
+        contextRunner
+                .withBean("firstPlanExtension", PlanExtension.class, () -> extension("duplicate", 1))
+                .withBean("secondPlanExtension", PlanExtension.class, () -> extension("duplicate", 2))
+                .run(context -> assertThat(context)
+                        .hasFailed()
+                        .getFailure()
+                        .hasMessageContaining("Duplicate plan extension registration"));
+    }
+
+    /**
      * 验证重复数据适配器和能力类型不一致不会被静默接受。
      */
     @Test
@@ -206,6 +237,25 @@ class DslEngineAutoConfigurationTest {
             @Override
             public QueryResult execute(ExecutionPlan plan, QueryContext context) {
                 throw new UnsupportedOperationException();
+            }
+        };
+    }
+
+    private static PlanExtension extension(String id, int order) {
+        return new PlanExtension() {
+            @Override
+            public String id() {
+                return id;
+            }
+
+            @Override
+            public int order() {
+                return order;
+            }
+
+            @Override
+            public ExecutionPlan apply(ExecutionPlan plan, PlanExtensionContext context) {
+                return plan;
             }
         };
     }

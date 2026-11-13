@@ -12,8 +12,8 @@
 
 ## 3. Spring Boot 启动装配
 
-- [ ] 3.1 在 starter 中收集 `PlanExtension` Bean、构建并冻结注册表，将其注入执行引擎，保持既有 DSL/Data Adapter/PlanPolicy fail-fast；补充 ApplicationContextRunner 测试验证 Bean 装配、重复扩展和启动前失败。
-- [ ] 3.2 更新 starter 配置元数据与公共 README，明确扩展通过代码 Bean 注册、请求不传 adapter/SQL、Doris 复用 MySQL；运行 starter 模块测试和文档示例校验。
+- [x] 3.1 在 starter 中收集 `PlanExtension` Bean、构建并冻结注册表，将其注入执行引擎，保持既有 DSL/Data Adapter/PlanPolicy fail-fast；补充 ApplicationContextRunner 测试验证 Bean 装配、重复扩展和启动前失败。
+- [x] 3.2 更新 starter 配置元数据与公共 README，明确扩展通过代码 Bean 注册、请求不传 adapter/SQL、Doris 复用 MySQL；运行 starter 模块测试和文档示例校验。
 
 ## 4. Spring Boot 真实测试应用与 HTTP 契约
 

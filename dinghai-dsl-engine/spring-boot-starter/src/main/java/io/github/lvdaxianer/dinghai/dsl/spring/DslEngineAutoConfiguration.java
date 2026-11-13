@@ -6,8 +6,10 @@ import io.github.lvdaxianer.dinghai.dsl.relational.RelationalSchemaPolicy;
 import io.github.lvdaxianer.dinghai.dsl.spi.DataAdapter;
 import io.github.lvdaxianer.dinghai.dsl.spi.DslAdapter;
 import io.github.lvdaxianer.dinghai.dsl.spi.NoopQueryTelemetry;
+import io.github.lvdaxianer.dinghai.dsl.spi.PlanExtension;
 import io.github.lvdaxianer.dinghai.dsl.spi.PlanPolicy;
 import io.github.lvdaxianer.dinghai.dsl.spi.QueryAuditSink;
+import io.github.lvdaxianer.dinghai.dsl.spi.QueryExecutionDependencies;
 import io.github.lvdaxianer.dinghai.dsl.spi.QueryExecutionEngine;
 import io.github.lvdaxianer.dinghai.dsl.spi.QueryTelemetry;
 import io.github.lvdaxianer.dinghai.dsl.spi.RuntimeExecutionLimits;
@@ -15,6 +17,7 @@ import io.github.lvdaxianer.dinghai.dsl.spi.SafeQueryLogger;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.AdapterRegistryException;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DataAdapterRegistry;
 import io.github.lvdaxianer.dinghai.dsl.spi.registry.DslAdapterRegistry;
+import io.github.lvdaxianer.dinghai.dsl.spi.registry.PlanExtensionRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -52,6 +55,7 @@ public class DslEngineAutoConfiguration {
             DataAdapterRegistry dataAdapters,
             DslEngineProperties properties,
             ObjectProvider<PlanPolicy> policies,
+            PlanExtensionRegistry planExtensions,
             ObjectProvider<QueryAuditSink> auditSinks,
             ObjectProvider<QueryTelemetry> telemetry) {
         PlanPolicy policy = policies.getIfAvailable();
@@ -71,7 +75,21 @@ public class DslEngineAutoConfiguration {
                 properties.getMaxJoins(),
                 properties.getMaxRows());
         return new QueryExecutionEngine(
-                dslAdapters, dataAdapters, properties.getDefaultDataAdapter(), policy, auditSink, metrics, limits);
+                dslAdapters,
+                dataAdapters,
+                properties.getDefaultDataAdapter(),
+                new QueryExecutionDependencies(policy, planExtensions, auditSink, metrics, limits));
+    }
+
+    /**
+     * 构建并冻结计划扩展注册表。扩展由宿主代码以 Bean 方式提供，不通过请求或规则配置动态创建。
+     *
+     * @param extensions Spring 已发现的计划扩展
+     * @return 冻结注册表
+     */
+    @Bean
+    public PlanExtensionRegistry planExtensionRegistry(List<PlanExtension> extensions) {
+        return new PlanExtensionRegistry(extensions);
     }
 
     /**
