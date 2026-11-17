@@ -5,8 +5,8 @@
 
 ## 2. JDBC temporal adapters
 
-- [ ] 2.1 为 MySQL/Doris 和 PostgreSQL 适配器补充时间绑定、结果映射和失败测试。
-- [ ] 2.2 实现 `DATE`、本地日期时间、绝对时间的类型化 JDBC 处理，不依赖 JVM 默认时区。
+- [x] 2.1 为 MySQL/Doris 和 PostgreSQL 适配器补充时间绑定、结果映射和失败测试。
+- [x] 2.2 实现 `DATE`、本地日期时间、绝对时间的类型化 JDBC 处理，不依赖 JVM 默认时区。
 
 ## 3. Documentation and integration
 

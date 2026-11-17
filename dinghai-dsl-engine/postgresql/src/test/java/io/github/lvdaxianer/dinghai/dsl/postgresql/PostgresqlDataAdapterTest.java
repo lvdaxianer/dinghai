@@ -17,9 +17,15 @@ import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -99,6 +105,31 @@ class PostgresqlDataAdapterTest {
     }
 
     /**
+     * 验证 PostgreSQL 对 date、timestamp without time zone 和 timestamptz 的统一映射。
+     */
+    @Test
+    void bindsAndMapsPostgresqlTemporalLogicalTypes() throws Exception {
+        JdbcFixture fixture = temporalFixture();
+        Instant instant = Instant.parse("2026-11-13T02:30:00Z");
+        when(fixture.resultSet().next()).thenReturn(true, false);
+        when(fixture.resultSet().getObject("f_event_date")).thenReturn(Date.valueOf("2026-11-13"));
+        when(fixture.resultSet().getObject("f_created_at"))
+                .thenReturn(Timestamp.valueOf("2026-11-13 10:30:00"));
+        when(fixture.resultSet().getObject("f_observed_at"))
+                .thenReturn(OffsetDateTime.parse("2026-11-13T10:30:00+08:00"));
+
+        QueryResult result = adapter(fixture.dataSource()).execute(temporalPlan(), QUERY_CONTEXT);
+
+        assertEquals(List.of(
+                LocalDate.of(2026, 11, 13),
+                LocalDateTime.of(2026, 11, 13, 10, 30),
+                instant), result.rows().getFirst());
+        verify(fixture.statement()).setObject(1, LocalDate.of(2026, 11, 13));
+        verify(fixture.statement()).setObject(2, LocalDateTime.of(2026, 11, 13, 10, 30));
+        verify(fixture.statement()).setTimestamp(3, Timestamp.from(instant));
+    }
+
+    /**
      * 验证未注册 PostgreSQL 适配器时不会静默回退到 MySQL。
      */
     @Test
@@ -152,6 +183,31 @@ class PostgresqlDataAdapterTest {
     }
 
     /**
+     * 构造包含时间参数和时间投影的查询计划。
+     *
+     * @return 时间查询计划
+     */
+    private static RelationalQueryPlan temporalPlan() {
+        return buildPlan(Map.of(
+                "from", Map.of("table", "fact", "alias", "f"),
+                "select", List.of(
+                        Map.of("field", "f.event_date"),
+                        Map.of("field", "f.created_at"),
+                        Map.of("field", "f.observed_at")),
+                "where", List.of(
+                        Map.of("field", "f.event_date", "operator", "eq", "parameter", "day",
+                                "logicalType", "date"),
+                        Map.of("field", "f.created_at", "operator", "eq", "parameter", "created",
+                                "logicalType", "local_datetime"),
+                        Map.of("field", "f.observed_at", "operator", "eq", "parameter", "observed",
+                                "logicalType", "instant")),
+                "limit", 10), Map.of(
+                "day", "2026-11-13",
+                "created", "2026-11-13T10:30:00",
+                "observed", "2026-11-13T10:30:00+08:00"));
+    }
+
+    /**
      * 使用测试 schema 策略构造计划。
      *
      * @param payload 查询载荷
@@ -162,7 +218,12 @@ class PostgresqlDataAdapterTest {
         RelationalSchemaPolicy policy = (logicalName, context) -> Optional.of(
                 new RelationalTableDefinition("fact", "fact_table", Map.of(
                         "id", new RelationalColumnDefinition("id", "id", "long"),
-                        "status", new RelationalColumnDefinition("status", "status", "string"))));
+                        "status", new RelationalColumnDefinition("status", "status", "string"),
+                        "event_date", new RelationalColumnDefinition("event_date", "event_date", "date"),
+                        "created_at", new RelationalColumnDefinition(
+                                "created_at", "created_at", "local_datetime"),
+                        "observed_at", new RelationalColumnDefinition(
+                                "observed_at", "observed_at", "instant"))));
         return new RelationalPlanBuilder(policy).build(
                 new DslRequest("relational-query", 1, payload, parameters), DSL_CONTEXT);
     }
@@ -184,6 +245,28 @@ class PostgresqlDataAdapterTest {
         when(resultSet.getMetaData()).thenReturn(metadata);
         when(metadata.getColumnCount()).thenReturn(1);
         when(metadata.getColumnLabel(1)).thenReturn("f_status");
+        return new JdbcFixture(dataSource, connection, statement, resultSet);
+    }
+
+    /**
+     * 构造三列时间结果的 mock JDBC 环境。
+     *
+     * @return JDBC 测试夹具
+     */
+    private static JdbcFixture temporalFixture() throws Exception {
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        PreparedStatement statement = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        ResultSetMetaData metadata = mock(ResultSetMetaData.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString(), anyInt(), anyInt())).thenReturn(statement);
+        when(statement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.getMetaData()).thenReturn(metadata);
+        when(metadata.getColumnCount()).thenReturn(3);
+        when(metadata.getColumnLabel(1)).thenReturn("f_event_date");
+        when(metadata.getColumnLabel(2)).thenReturn("f_created_at");
+        when(metadata.getColumnLabel(3)).thenReturn("f_observed_at");
         return new JdbcFixture(dataSource, connection, statement, resultSet);
     }
 
