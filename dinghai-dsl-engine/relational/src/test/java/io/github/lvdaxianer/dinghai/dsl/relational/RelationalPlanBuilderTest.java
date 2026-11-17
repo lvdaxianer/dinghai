@@ -12,6 +12,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -159,6 +162,86 @@ class RelationalPlanBuilderTest {
     }
 
     /**
+     * 验证日期时间参数会在计划构建阶段转换为明确的 Java 时间类型。
+     */
+    @Test
+    void normalizesTemporalParametersBeforeBackendBinding() {
+        RelationalPlanBuilder builder = new RelationalPlanBuilder(POLICY);
+
+        RelationalQueryPlan datePlan = builder.build(request(Map.of(
+                "from", Map.of("table", "fact", "alias", "f"),
+                "select", List.of(Map.of("field", "f.id")),
+                "where", List.of(Map.of(
+                        "field", "f.event_date", "operator", "eq", "parameter", "day",
+                        "logicalType", "date")),
+                "limit", 20), Map.of("day", "2026-11-13")), CONTEXT);
+        RelationalQueryPlan localDateTimePlan = builder.build(request(Map.of(
+                "from", Map.of("table", "fact", "alias", "f"),
+                "select", List.of(Map.of("field", "f.id")),
+                "where", List.of(Map.of(
+                        "field", "f.created_at", "operator", "eq", "parameter", "created",
+                        "logicalType", "local_datetime")),
+                "limit", 20), Map.of("created", "2026-11-13T10:30:00")), CONTEXT);
+        RelationalQueryPlan instantPlan = builder.build(request(Map.of(
+                "from", Map.of("table", "fact", "alias", "f"),
+                "select", List.of(Map.of("field", "f.id")),
+                "where", List.of(Map.of(
+                        "field", "f.observed_at", "operator", "eq", "parameter", "observed",
+                        "logicalType", "instant")),
+                "limit", 20), Map.of("observed", "2026-11-13T10:30:00+08:00")), CONTEXT);
+
+        assertEquals(LocalDate.of(2026, 11, 13), datePlan.parameters().getFirst().value());
+        assertEquals(LocalDateTime.of(2026, 11, 13, 10, 30),
+                localDateTimePlan.parameters().getFirst().value());
+        assertEquals(Instant.parse("2026-11-13T02:30:00Z"), instantPlan.parameters().getFirst().value());
+    }
+
+    /**
+     * 验证旧 datetime 类型按 local_datetime 语义兼容处理。
+     */
+    @Test
+    void normalizesLegacyDatetimeAlias() {
+        RelationalQueryPlan plan = new RelationalPlanBuilder(POLICY).build(request(Map.of(
+                "from", Map.of("table", "fact", "alias", "f"),
+                "select", List.of(Map.of("field", "f.id")),
+                "where", List.of(Map.of(
+                        "field", "f.created_at", "operator", "eq", "parameter", "created",
+                        "logicalType", "datetime")),
+                "limit", 20), Map.of("created", "2026-11-13T10:30:00")), CONTEXT);
+
+        assertEquals("local_datetime", plan.parameters().getFirst().logicalType());
+        assertEquals(LocalDateTime.of(2026, 11, 13, 10, 30), plan.parameters().getFirst().value());
+    }
+
+    /**
+     * 验证本地日期时间和绝对时间的时区格式边界。
+     */
+    @Test
+    void rejectsTemporalValuesWithWrongTimezoneSemantics() {
+        DslCompilationException localWithOffset = assertThrows(
+                DslCompilationException.class,
+                () -> new RelationalPlanBuilder(POLICY).build(request(Map.of(
+                        "from", Map.of("table", "fact", "alias", "f"),
+                        "select", List.of(Map.of("field", "f.id")),
+                        "where", List.of(Map.of(
+                                "field", "f.created_at", "operator", "eq", "parameter", "created",
+                                "logicalType", "local_datetime")),
+                        "limit", 20), Map.of("created", "2026-11-13T10:30:00+08:00")), CONTEXT));
+        DslCompilationException instantWithoutOffset = assertThrows(
+                DslCompilationException.class,
+                () -> new RelationalPlanBuilder(POLICY).build(request(Map.of(
+                        "from", Map.of("table", "fact", "alias", "f"),
+                        "select", List.of(Map.of("field", "f.id")),
+                        "where", List.of(Map.of(
+                                "field", "f.observed_at", "operator", "eq", "parameter", "observed",
+                                "logicalType", "instant")),
+                        "limit", 20), Map.of("observed", "2026-11-13T10:30:00")), CONTEXT));
+
+        assertEquals("PARAMETER_TYPE_INVALID", localWithOffset.diagnostics().getFirst().code());
+        assertEquals("PARAMETER_TYPE_INVALID", instantWithoutOffset.diagnostics().getFirst().code());
+    }
+
+    /**
      * 验证 JOIN 必须真正连接新表，禁止同表条件伪装成 JOIN。
      */
     @Test
@@ -270,7 +353,12 @@ class RelationalPlanBuilderTest {
                 return Optional.of(new RelationalTableDefinition(
                         "fact", "fact_table", Map.of(
                                 "id", new RelationalColumnDefinition("id", "id", "long"),
-                                "status", new RelationalColumnDefinition("status", "status", "string"))));
+                                "status", new RelationalColumnDefinition("status", "status", "string"),
+                                "event_date", new RelationalColumnDefinition("event_date", "event_date", "date"),
+                                "created_at", new RelationalColumnDefinition(
+                                        "created_at", "created_at", "local_datetime"),
+                                "observed_at", new RelationalColumnDefinition(
+                                        "observed_at", "observed_at", "instant"))));
             }
             if ("device".equals(logicalName)) {
                 return Optional.of(new RelationalTableDefinition(

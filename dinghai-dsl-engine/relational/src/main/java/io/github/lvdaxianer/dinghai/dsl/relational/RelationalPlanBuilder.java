@@ -21,6 +21,7 @@ import io.github.lvdaxianer.dinghai.dsl.spi.ParameterBinding;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -354,8 +355,15 @@ public final class RelationalPlanBuilder {
                 throw failure("PARAMETER_MISSING", "$.parameters." + parameter.name(), "parameter is missing");
             }
             Object value = supplied.get(parameter.name());
-            validateParameterValue(parameter, state.operators.get(parameter.name()), value);
-            bindings.add(new ParameterBinding(parameter.name(), parameter.logicalType(), value));
+            Object normalizedValue;
+            try {
+                normalizedValue = RelationalTemporalTypes.normalizeValue(parameter.logicalType(), value);
+            } catch (IllegalArgumentException exception) {
+                throw failure("PARAMETER_TYPE_INVALID", "$.parameters." + parameter.name(),
+                        "parameter type is invalid");
+            }
+            validateParameterValue(parameter, state.operators.get(parameter.name()), normalizedValue);
+            bindings.add(new ParameterBinding(parameter.name(), parameter.logicalType(), normalizedValue));
         }
         for (String name : supplied.keySet()) {
             if (!state.parameters.containsKey(name)) {
@@ -432,8 +440,9 @@ public final class RelationalPlanBuilder {
             case "integer" -> value instanceof Integer || value instanceof Short || value instanceof Byte;
             case "decimal" -> value instanceof BigDecimal || value instanceof Double || value instanceof Float;
             case "boolean" -> value instanceof Boolean;
-            case "date" -> value instanceof LocalDate || value instanceof CharSequence;
-            case "datetime" -> value instanceof LocalDateTime || value instanceof CharSequence;
+            case RelationalTemporalTypes.DATE -> value instanceof LocalDate;
+            case RelationalTemporalTypes.LOCAL_DATETIME -> value instanceof LocalDateTime;
+            case RelationalTemporalTypes.INSTANT -> value instanceof Instant;
             default -> false;
         };
     }

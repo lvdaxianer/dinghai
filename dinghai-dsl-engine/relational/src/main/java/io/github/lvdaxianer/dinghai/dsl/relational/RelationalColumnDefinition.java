@@ -22,7 +22,7 @@ public record RelationalColumnDefinition(String logicalName, String physicalName
     public RelationalColumnDefinition {
         logicalName = requireText(logicalName, "logicalName");
         physicalName = requireText(physicalName, "physicalName");
-        logicalType = requireText(logicalType, "logicalType");
+        logicalType = RelationalTemporalTypes.normalize(requireText(logicalType, "logicalType"));
     }
 
     /**
