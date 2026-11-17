@@ -4,6 +4,7 @@ import io.github.lvdaxianer.dinghai.dsl.core.ExecutionPlan;
 import io.github.lvdaxianer.dinghai.dsl.core.QueryColumn;
 import io.github.lvdaxianer.dinghai.dsl.core.QueryContext;
 import io.github.lvdaxianer.dinghai.dsl.core.QueryResult;
+import io.github.lvdaxianer.dinghai.dsl.relational.RelationalTemporalTypes;
 import io.github.lvdaxianer.dinghai.dsl.spi.BackendExecutionException;
 import io.github.lvdaxianer.dinghai.dsl.spi.BackendCapabilities;
 import io.github.lvdaxianer.dinghai.dsl.spi.CompiledCommand;
@@ -21,6 +22,8 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -158,7 +161,19 @@ public final class MysqlDataAdapter implements DataAdapter {
     private static void bindParameters(PreparedStatement statement, List<ParameterBinding> parameters)
             throws SQLException {
         for (int index = 0; index < parameters.size(); index++) {
-            statement.setObject(index + 1, parameters.get(index).value());
+            ParameterBinding parameter = parameters.get(index);
+            switch (RelationalTemporalTypes.normalize(parameter.logicalType())) {
+                case RelationalTemporalTypes.DATE, RelationalTemporalTypes.LOCAL_DATETIME ->
+                        statement.setObject(index + 1, parameter.value());
+                case RelationalTemporalTypes.INSTANT -> {
+                    if (!(parameter.value() instanceof Instant instant)) {
+                        throw new BackendExecutionException(
+                                "PARAMETER_MAPPING_FAILED", "instant parameter is not an Instant", null);
+                    }
+                    statement.setTimestamp(index + 1, Timestamp.from(instant));
+                }
+                default -> statement.setObject(index + 1, parameter.value());
+            }
         }
     }
 
@@ -238,18 +253,22 @@ public final class MysqlDataAdapter implements DataAdapter {
         if (value == null) {
             return null;
         }
-        return switch (logicalType) {
+        return switch (RelationalTemporalTypes.normalize(logicalType)) {
             case "string" -> value instanceof CharSequence ? value.toString() : failMapping();
             case "long" -> value instanceof Number number ? number.longValue() : failMapping();
             case "integer" -> value instanceof Number number ? number.intValue() : failMapping();
             case "decimal" -> value instanceof BigDecimal decimal
                     ? decimal : value instanceof Number number ? new BigDecimal(number.toString()) : failMapping();
             case "boolean" -> value instanceof Boolean ? value : failMapping();
-            case "date" -> value instanceof Date date ? date.toLocalDate()
+            case RelationalTemporalTypes.DATE -> value instanceof Date date ? date.toLocalDate()
                     : value instanceof LocalDate ? value : failMapping();
-            case "datetime" -> value instanceof Timestamp timestamp ? timestamp.toLocalDateTime()
+            case RelationalTemporalTypes.LOCAL_DATETIME -> value instanceof Timestamp timestamp ? timestamp.toLocalDateTime()
                     : value instanceof LocalDateTime ? value : failMapping();
-            default -> value;
+            case RelationalTemporalTypes.INSTANT -> value instanceof Timestamp timestamp ? timestamp.toInstant()
+                    : value instanceof Instant ? value
+                    : value instanceof OffsetDateTime offsetDateTime ? offsetDateTime.toInstant()
+                    : failMapping();
+            default -> failMapping();
         };
     }
 
