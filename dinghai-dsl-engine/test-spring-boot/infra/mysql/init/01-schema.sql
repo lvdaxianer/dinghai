@@ -1,6 +1,8 @@
 CREATE TABLE IF NOT EXISTS fact_wireless_outage_timeline (
     outage_id BIGINT NOT NULL,
     event_date DATE NOT NULL,
+    created_at DATETIME NOT NULL,
+    observed_at TIMESTAMP NOT NULL,
     status VARCHAR(32) NOT NULL,
     severity INT NOT NULL,
     asset_id BIGINT NOT NULL,
@@ -26,7 +28,7 @@ INSERT INTO outage_asset(asset_id, asset_name, active, domain_id) VALUES
     (103, 'other-domain-asset', 1, 'other-domain');
 
 INSERT INTO fact_wireless_outage_timeline
-    (outage_id, event_date, status, severity, asset_id, active, domain_id) VALUES
-    (1, '2026-11-13', 'OPEN', 2, 101, 1, 'test-domain'),
-    (2, '2026-11-12', 'CLOSED', 1, 102, 0, 'test-domain'),
-    (3, '2026-11-11', 'OPEN', 3, 103, 1, 'other-domain');
+    (outage_id, event_date, created_at, observed_at, status, severity, asset_id, active, domain_id) VALUES
+    (1, '2026-11-13', '2026-11-13 10:30:00', '2026-11-13 10:30:00', 'OPEN', 2, 101, 1, 'test-domain'),
+    (2, '2026-11-12', '2026-11-12 11:30:00', '2026-11-12 11:30:00', 'CLOSED', 1, 102, 0, 'test-domain'),
+    (3, '2026-11-11', '2026-11-11 12:30:00', '2026-11-11 12:30:00', 'OPEN', 3, 103, 1, 'other-domain');

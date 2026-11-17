@@ -7,7 +7,7 @@
 默认使用 MySQL/Doris MySQL 协议适配器。数据库账号只从环境变量读取，不写入请求体：
 
 ```bash
-export DINGHAI_TEST_JDBC_URL='jdbc:mysql://127.0.0.1:3306/dinghai_test'
+export DINGHAI_TEST_JDBC_URL='jdbc:mysql://127.0.0.1:3306/dinghai_test?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true'
 export DINGHAI_TEST_DB_USERNAME='dinghai_test'
 export DINGHAI_TEST_DB_PASSWORD='change-me-locally'
 mvn -pl dinghai-dsl-engine/test-spring-boot -am spring-boot:run

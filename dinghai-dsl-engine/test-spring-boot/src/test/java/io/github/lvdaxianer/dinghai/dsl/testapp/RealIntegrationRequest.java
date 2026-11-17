@@ -36,4 +36,35 @@ final class RealIntegrationRequest {
                         "limit", 10),
                 Map.of("status", "OPEN"));
     }
+
+    static DslRequest activeOpenOutagesWithLocalDatetime() {
+        return request(List.of(
+                Map.of("field", "f.event_date"),
+                Map.of("field", "f.created_at")));
+    }
+
+    static DslRequest activeOpenOutagesWithInstant() {
+        return request(List.of(
+                Map.of("field", "f.event_date"),
+                Map.of("field", "f.created_at"),
+                Map.of("field", "f.observed_at")));
+    }
+
+    private static DslRequest request(List<Map<String, Object>> select) {
+        return new DslRequest(
+                "relational-query",
+                1,
+                Map.of(
+                        "from", Map.of("table", "fact_wireless_outage_timeline", "alias", "f"),
+                        "select", select,
+                        "where", List.of(Map.of(
+                                "field", "f.status",
+                                "operator", "eq",
+                                "parameter", "status",
+                                "logicalType", "string")),
+                        "groupBy", List.of(),
+                        "orderBy", List.of(),
+                        "limit", 10),
+                Map.of("status", "OPEN"));
+    }
 }

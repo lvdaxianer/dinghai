@@ -244,8 +244,33 @@ JOIN 约束：
 | `integer` | `3` | 整数 |
 | `decimal` | `12.50` | 小数 |
 | `boolean` | `true` | 布尔值 |
-| `date` | `"2026-11-13"` | 日期或服务端日期对象 |
-| `datetime` | `"2026-11-13T10:30:00"` | 日期时间或服务端日期时间对象 |
+| `date` | `"2026-11-13"` | 不包含时间和时区的日历日期，计划层为 `LocalDate` |
+| `local_datetime` | `"2026-11-13T10:30:00"` | 不包含时区的本地日期时间，计划层为 `LocalDateTime` |
+| `instant` | `"2026-11-13T10:30:00+08:00"` | 必须携带 offset 或 `Z` 的时间线瞬时值，计划层归一化为 UTC `Instant` |
+| `datetime` | `"2026-11-13T10:30:00"` | 历史兼容别名，按 `local_datetime` 处理 |
+
+时间类型必须保持语义明确，不通过 JVM 默认时区进行隐式转换：
+
+- `date` 只接受 `yyyy-MM-dd`；它不是某个时区的零点。
+- `local_datetime` 只接受 ISO 本地日期时间，例如 `2026-11-13T10:30:00`；带 `Z` 或 offset 的值会被拒绝。
+- `instant` 必须接受 ISO offset 日期时间或 `Z`，例如 `2026-11-13T10:30:00+08:00`；引擎会将它规范化为 `2026-11-13T02:30:00Z`。
+- `datetime` 只为兼容旧请求保留，新的 DSL 应使用 `local_datetime`。
+- `date`、`local_datetime` 和 `instant` 之间不会自动互转；需要把业务日期解释成某个时区的时间范围时，应由服务端可信上下文或代码扩展明确提供时区。
+
+数据库类型映射由 Data Adapter 负责，DSL 不写数据库类型和方言：
+
+| 数据库 | 原生类型 | DSL 逻辑类型 | 说明 |
+| --- | --- | --- | --- |
+| MySQL/Doris | `DATE` | `date` | 仅日期 |
+| MySQL/Doris | `DATETIME` | `local_datetime` | 不带时区的本地时间 |
+| MySQL/Doris | `TIMESTAMP` | `instant` | 部署必须显式固定 JDBC/session 时区 |
+| PostgreSQL | `DATE` | `date` | 仅日期 |
+| PostgreSQL | `TIMESTAMP WITHOUT TIME ZONE` | `local_datetime` | 不带时区的本地时间 |
+| PostgreSQL | `TIMESTAMP WITH TIME ZONE` | `instant` | 按时间线瞬时值返回 |
+
+结果响应按逻辑类型序列化：`date` 使用 `yyyy-MM-dd`，`local_datetime` 使用不带 offset
+的 ISO 格式，`instant` 使用带 `Z` 的 UTC ISO 格式。JDBC 驱动返回的 `Date`、`Timestamp`
+或 `OffsetDateTime` 只在 Data Adapter 内部转换，不泄漏给 DSL 调用方。
 
 参数校验规则：
 

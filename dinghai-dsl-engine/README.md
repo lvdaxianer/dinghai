@@ -75,6 +75,23 @@ Spring Boot 应用至少显式选择一个 provider 构件；starter 中的 prov
 }
 ```
 
+### 时间逻辑类型与数据库映射
+
+关系 DSL 不直接暴露 MySQL、Doris 或 PostgreSQL 的字段类型，而是使用明确的时间逻辑类型：
+
+| DSL 类型 | 请求格式 | Java 计划值 | 语义 |
+| --- | --- | --- | --- |
+| `date` | `2026-11-13` | `LocalDate` | 不包含时间和时区 |
+| `local_datetime` | `2026-11-13T10:30:00` | `LocalDateTime` | 不包含 offset 的本地日期时间 |
+| `instant` | `2026-11-13T10:30:00+08:00` | `Instant` | 带 offset/`Z`，归一化为 UTC |
+| `datetime` | `2026-11-13T10:30:00` | `LocalDateTime` | `local_datetime` 的历史兼容别名 |
+
+`local_datetime` 拒绝带时区输入，`instant` 拒绝不带时区输入；引擎不使用 JVM 默认时区做
+隐式转换。MySQL/Doris 的 `DATE`、`DATETIME`、`TIMESTAMP` 分别映射到 `date`、
+`local_datetime`、`instant`；PostgreSQL 的 `DATE`、`TIMESTAMP WITHOUT TIME ZONE`、
+`TIMESTAMP WITH TIME ZONE` 采用相同的三层语义。MySQL/Doris 的 `TIMESTAMP` 必须在部署时
+显式固定 JDBC/session 时区，不能依赖机器默认时区。
+
 ### 执行结果示例
 
 执行接口返回统一响应。调用方优先使用按字段名组织的 `records`；已有调用方仍可以使用 `columns` 和 `rows` 按列下标读取：

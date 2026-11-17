@@ -10,5 +10,5 @@
 
 ## 3. Documentation and integration
 
-- [ ] 3.1 更新 DSL 语法、README 和测试 API 文档，说明时间格式和时区语义。
-- [ ] 3.2 使用真实 MySQL、Doris MySQL 协议和 PostgreSQL 验证时间结果，完成审计、归档和合并。
+- [x] 3.1 更新 DSL 语法、README 和测试 API 文档，说明时间格式和时区语义。
+- [x] 3.2 使用真实 MySQL、Doris MySQL 协议和 PostgreSQL 验证时间结果，完成审计、归档和合并。

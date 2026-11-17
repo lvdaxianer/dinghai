@@ -109,7 +109,7 @@ run_http_case() {
 }
 
 run_http_case mysql \
-    "jdbc:mysql://127.0.0.1:${DINGHAI_IT_MYSQL_PORT:-13306}/dinghai_test" \
+    "jdbc:mysql://127.0.0.1:${DINGHAI_IT_MYSQL_PORT:-13306}/dinghai_test?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true" \
     18080 dinghai_test "${DINGHAI_IT_DB_PASSWORD:-dinghai_local_only}"
 run_http_case postgresql \
     "jdbc:postgresql://127.0.0.1:${DINGHAI_IT_POSTGRES_PORT:-15432}/dinghai_test" \
@@ -118,7 +118,7 @@ run_http_case mysql \
     "jdbc:mysql://127.0.0.1:${DINGHAI_IT_DORIS_PORT:-19030}/dinghai_test" \
     18082 root "${DINGHAI_IT_DORIS_PASSWORD:-}"
 
-DINGHAI_IT_MYSQL_URL="jdbc:mysql://127.0.0.1:${DINGHAI_IT_MYSQL_PORT:-13306}/dinghai_test" \
+DINGHAI_IT_MYSQL_URL="jdbc:mysql://127.0.0.1:${DINGHAI_IT_MYSQL_PORT:-13306}/dinghai_test?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true" \
 DINGHAI_IT_POSTGRES_URL="jdbc:postgresql://127.0.0.1:${DINGHAI_IT_POSTGRES_PORT:-15432}/dinghai_test" \
 DINGHAI_IT_DORIS_URL="jdbc:mysql://127.0.0.1:${DINGHAI_IT_DORIS_PORT:-19030}/dinghai_test" \
 DINGHAI_IT_DB_PASSWORD="${DINGHAI_IT_DB_PASSWORD:-dinghai_local_only}" \

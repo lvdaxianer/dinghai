@@ -12,6 +12,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import java.util.Map;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -28,7 +31,8 @@ class RealMysqlIntegrationTest {
     @DynamicPropertySource
     static void mysqlProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> env("DINGHAI_IT_MYSQL_URL",
-                "jdbc:mysql://127.0.0.1:13306/dinghai_test"));
+                "jdbc:mysql://127.0.0.1:13306/dinghai_test"
+                        + "?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"));
         registry.add("spring.datasource.username", () -> env("DINGHAI_IT_DB_USERNAME", "dinghai_test"));
         registry.add("spring.datasource.password", () -> env("DINGHAI_IT_DB_PASSWORD", "dinghai_local_only"));
     }
@@ -44,6 +48,20 @@ class RealMysqlIntegrationTest {
         assertThat(result.rowCount()).isEqualTo(1);
         assertThat(result.rows().getFirst()).containsExactly(
                 java.time.LocalDate.of(2026, 11, 13), "asset-101");
+    }
+
+    @Test
+    void mapsMysqlDateLocalDatetimeAndTimestampToDslTypes() {
+        QueryResult result = engine.execute(
+                RealIntegrationRequest.activeOpenOutagesWithInstant(),
+                new DslContext("real-mysql-time", Map.of()),
+                new QueryContext("real-mysql-time", "mysql", Map.of(
+                        "userId", "test-user", "domainId", "test-domain")));
+
+        assertThat(result.rows().getFirst()).containsExactly(
+                LocalDate.of(2026, 11, 13),
+                LocalDateTime.of(2026, 11, 13, 10, 30),
+                Instant.parse("2026-11-13T10:30:00Z"));
     }
 
     private static String env(String name, String fallback) {

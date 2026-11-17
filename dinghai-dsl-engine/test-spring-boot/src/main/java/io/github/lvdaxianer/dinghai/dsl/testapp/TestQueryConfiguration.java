@@ -157,6 +157,8 @@ public class TestQueryConfiguration {
                 Map.of(
                         "outage_id", column("outage_id", "long"),
                         "event_date", column("event_date", "date"),
+                        "created_at", column("created_at", "local_datetime"),
+                        "observed_at", column("observed_at", "instant"),
                         "status", column("status", "string"),
                         "severity", column("severity", "integer"),
                         "asset_id", column("asset_id", "long"),
