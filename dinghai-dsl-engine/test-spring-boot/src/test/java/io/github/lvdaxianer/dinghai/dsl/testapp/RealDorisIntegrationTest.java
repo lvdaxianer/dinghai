@@ -12,6 +12,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import java.util.Map;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -44,6 +46,19 @@ class RealDorisIntegrationTest {
         assertThat(result.rowCount()).isEqualTo(1);
         assertThat(result.rows().getFirst()).containsExactly(
                 java.time.LocalDate.of(2026, 11, 13), "asset-101");
+    }
+
+    @Test
+    void mapsDorisDateAndDatetimeThroughMysqlAdapter() {
+        QueryResult result = engine.execute(
+                RealIntegrationRequest.activeOpenOutagesWithLocalDatetime(),
+                new DslContext("real-doris-time", Map.of()),
+                new QueryContext("real-doris-time", "doris-mysql", Map.of(
+                        "userId", "test-user", "domainId", "test-domain")));
+
+        assertThat(result.rows().getFirst()).containsExactly(
+                LocalDate.of(2026, 11, 13),
+                LocalDateTime.of(2026, 11, 13, 10, 30));
     }
 
     private static String env(String name, String fallback) {

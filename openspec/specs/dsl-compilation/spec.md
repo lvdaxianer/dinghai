@@ -22,22 +22,30 @@
 - **THEN** 系统返回稳定的 DSL 版本错误，且不降级到其他版本
 
 ### Requirement: DSL input is parsed into a typed representation
-每个 DSL Adapter SHALL 将请求内容解析为自己的类型化 AST 或语义模型；解析过程 SHALL 检查输入结构、字段类型、参数数量、`IN` 集合规模、大小和嵌套深度，并 SHALL 拒绝未知或不允许的结构。
+每个 DSL Adapter SHALL 将请求内容解析为自己的类型化 AST 或语义模型；解析过程 SHALL 检查输入结构、字段类型、参数数量、`IN` 集合规模、大小和嵌套深度，并 SHALL 对时间逻辑类型执行严格格式解析和规范化；系统 SHALL 拒绝未知或不允许的结构。
 
 #### Scenario: Valid DSL produces a typed model
 - **WHEN** 请求结构、字段类型、参数规模和嵌套深度均符合 DSL 版本规范
 - **THEN** Adapter 生成可供语义分析使用的类型化模型
 
+#### Scenario: Temporal strings become typed values
+- **WHEN** DSL 参数声明为 `date`、`local_datetime`、`instant` 或兼容别名 `datetime`，且值符合对应格式
+- **THEN** 计划绑定 `LocalDate`、`LocalDateTime` 或 UTC `Instant`，不保留为待 JDBC 自行推断的时间字符串
+
 #### Scenario: Malformed DSL is rejected before execution
 - **WHEN** 请求包含缺失字段、错误类型、未知字段、过多绑定参数或超出输入边界的结构
 - **THEN** 系统返回带有路径和稳定错误码的诊断结果，且不调用任何 Data Adapter
+
+#### Scenario: Invalid temporal input is rejected before execution
+- **WHEN** 时间字符串格式错误、`local_datetime` 携带 offset、`instant` 缺少 offset 或逻辑类型未知
+- **THEN** 系统返回参数类型错误，且不生成 JDBC 命令
 
 #### Scenario: Parameter type matches the resolved field
 - **WHEN** 关系 DSL 的参数引用声明逻辑类型与白名单字段类型不一致
 - **THEN** 计划构建阶段拒绝请求，不生成 JDBC 命令
 
 ### Requirement: Compilation produces a backend-neutral execution plan
-通过语法和语义校验的 DSL SHALL 被编译为不可变的 `ExecutionPlan`；计划 SHALL 只包含已解析的结构、类型、参数绑定和执行约束，不得包含原始 SQL 或未校验的 SQL 片段。
+通过语法和语义校验的 DSL SHALL 被编译为不可变的 `ExecutionPlan`；计划 SHALL 只包含已解析的结构、规范化类型、类型化参数绑定和执行约束，不得包含原始 SQL 或未校验的 SQL 片段。
 
 #### Scenario: Valid DSL compiles to an immutable plan
 - **WHEN** DSL 通过语法、引用、类型和语义校验

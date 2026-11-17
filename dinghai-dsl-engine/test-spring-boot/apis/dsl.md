@@ -101,6 +101,10 @@ POST http://localhost:8080/api/test/dsl/execute
 
 未知顶层字段（例如 `adapter`、`userId`、`domainId`）和未知 DSL 字段会被拒绝。数据库账号、密码、数据源选择和服务端身份不得放在请求体中。
 
+时间参数使用 DSL 逻辑类型而不是数据库原生类型：`date` 使用 `yyyy-MM-dd`，
+`local_datetime` 使用不带 offset 的 ISO 本地时间，`instant` 必须携带 offset 或 `Z`；历史
+`datetime` 会按 `local_datetime` 兼容处理。服务端不会使用 JVM 默认时区隐式转换时间。
+
 ### 2.3 响应定义
 
 #### 2.3.1 Response overview
