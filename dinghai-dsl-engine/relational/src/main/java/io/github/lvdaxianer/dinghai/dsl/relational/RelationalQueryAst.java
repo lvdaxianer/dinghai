@@ -337,7 +337,7 @@ public record RelationalQueryAst(
          */
         public ParameterReference {
             name = requireText(name, "name");
-            logicalType = requireText(logicalType, "logicalType");
+            logicalType = RelationalTemporalTypes.normalize(requireText(logicalType, "logicalType"));
         }
     }
 

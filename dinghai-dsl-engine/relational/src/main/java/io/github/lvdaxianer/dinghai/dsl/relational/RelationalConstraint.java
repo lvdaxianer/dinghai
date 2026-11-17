@@ -29,7 +29,7 @@ public record RelationalConstraint(
     public RelationalConstraint {
         field = Objects.requireNonNull(field, "field");
         operator = Objects.requireNonNull(operator, "operator");
-        logicalType = requireText(logicalType, "logicalType");
+        logicalType = RelationalTemporalTypes.normalize(requireText(logicalType, "logicalType"));
         value = copyValue(value);
         placement = Objects.requireNonNull(placement, "placement");
     }

@@ -12,6 +12,7 @@ import io.github.lvdaxianer.dinghai.dsl.spi.PlanExtensionException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -58,14 +59,14 @@ public final class RelationalPlanRewriter {
         }
         for (int index = 0; index < values.size(); index++) {
             RelationalConstraint constraint = values.get(index);
-            validateConstraint(source, constraint);
+            Object normalizedValue = validateConstraint(source, constraint);
             String parameterName = parameterName(id, index, parameterNames);
             parameterNames.add(parameterName);
             Predicate predicate = new ComparisonPredicate(
                     constraint.field(),
                     constraint.operator(),
                     new ParameterReference(parameterName, constraint.logicalType()));
-            bindings.add(new ParameterBinding(parameterName, constraint.logicalType(), constraint.value()));
+            bindings.add(new ParameterBinding(parameterName, constraint.logicalType(), normalizedValue));
             if (constraint.placement() == ConstraintPlacement.WHERE) {
                 where.add(predicate);
             } else {
@@ -112,7 +113,7 @@ public final class RelationalPlanRewriter {
                 metadata);
     }
 
-    private static void validateConstraint(RelationalQueryPlan plan, RelationalConstraint constraint) {
+    private static Object validateConstraint(RelationalQueryPlan plan, RelationalConstraint constraint) {
         RelationalField field = constraint.field();
         RelationalTableDefinition table = plan.tablesByAlias().get(field.qualifier());
         if (table == null || !table.columns().containsKey(field.name())) {
@@ -122,7 +123,12 @@ public final class RelationalPlanRewriter {
         if (!column.logicalType().equalsIgnoreCase(constraint.logicalType())) {
             throw failure("EXTENSION_PARAMETER_TYPE_INVALID", "extension type does not match field type");
         }
-        Object value = constraint.value();
+        Object value;
+        try {
+            value = RelationalTemporalTypes.normalizeValue(constraint.logicalType(), constraint.value());
+        } catch (IllegalArgumentException exception) {
+            throw failure("EXTENSION_PARAMETER_TYPE_INVALID", "extension value does not match logical type");
+        }
         if (constraint.operator() == ComparisonOperator.IN && !(value instanceof Collection<?>)) {
             throw failure("EXTENSION_PARAMETER_TYPE_INVALID", "IN extension value must be a collection");
         }
@@ -138,6 +144,7 @@ public final class RelationalPlanRewriter {
                     "EXTENSION_JOIN_TARGET_NOT_FOUND",
                     "constraint JOIN_ON field must target a joined alias");
         }
+        return value;
     }
 
     private static boolean compatible(String logicalType, Object value) {
@@ -157,8 +164,9 @@ public final class RelationalPlanRewriter {
             case "integer" -> value instanceof Integer || value instanceof Short || value instanceof Byte;
             case "decimal" -> value instanceof BigDecimal || value instanceof Double || value instanceof Float;
             case "boolean" -> value instanceof Boolean;
-            case "date" -> value instanceof LocalDate || value instanceof CharSequence;
-            case "datetime" -> value instanceof LocalDateTime || value instanceof CharSequence;
+            case RelationalTemporalTypes.DATE -> value instanceof LocalDate;
+            case RelationalTemporalTypes.LOCAL_DATETIME -> value instanceof LocalDateTime;
+            case RelationalTemporalTypes.INSTANT -> value instanceof Instant;
             default -> false;
         };
     }
