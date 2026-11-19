@@ -15,4 +15,4 @@
 
 ## 4. Integration verification
 
-- [ ] 4.1 Run cross-repository consistency checks, the existing skill unit tests, OpenSpec strict validation, and a final diff audit; verify no pre-existing user changes are overwritten.
+- [x] 4.1 Run cross-repository consistency checks, the existing skill unit tests, OpenSpec strict validation, and a final diff audit; verify no pre-existing user changes are overwritten.

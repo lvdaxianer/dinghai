@@ -51,7 +51,7 @@
 
 - [x] **Step 1: Run documentation consistency checks** for copied files, version metadata, operator names, type mappings, and the `gte`/`lt` convention; verify all checks pass.
 - [x] **Step 2: Run the existing local MetricView skill test suite** with the documented `python3 -m unittest discover -s scripts -p 'test_*.py'` command in a clean skill worktree; verify no regression in existing tests.
-- [ ] **Step 3: Review the final diff** for accidental edits to the user's pre-existing skill changes and verify only the intended documentation/schema/reference files are included.
+- [x] **Step 3: Review the final diff** for accidental edits to the user's pre-existing skill changes and verify only the intended documentation/schema/reference files are included.
 
 ## Workflow follow-up
 
