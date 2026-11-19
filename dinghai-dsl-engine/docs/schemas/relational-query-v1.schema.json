@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dinghai.dev/schema/relational-query-v1.schema.json",
+  "title": "Dinghai relational-query v1 request",
+  "description": "Structural schema for the public Dinghai relational DSL. Semantic and authorization checks remain runtime responsibilities.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["dslType", "version", "payload", "parameters"],
+  "properties": {
+    "dslType": {
+      "const": "relational-query"
+    },
+    "version": {
+      "const": 1
+    },
+    "payload": {
+      "$ref": "#/$defs/payload"
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/parameterValue"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "fieldRef": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "parameterValue": {
+      "oneOf": [
+        {
+          "type": ["string", "number", "boolean"]
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": ["string", "number", "boolean"]
+          }
+        }
+      ]
+    },
+    "from": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "alias"],
+      "properties": {
+        "table": {"$ref": "#/$defs/identifier"},
+        "alias": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field"],
+      "properties": {
+        "field": {"$ref": "#/$defs/fieldRef"},
+        "alias": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "aggregateProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["aggregate", "field"],
+      "properties": {
+        "aggregate": {
+          "enum": ["count", "sum", "avg", "min", "max"]
+        },
+        "field": {"$ref": "#/$defs/fieldRef"},
+        "alias": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "join": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "table", "on"],
+      "properties": {
+        "type": {"enum": ["inner", "left"]},
+        "table": {"$ref": "#/$defs/from"},
+        "on": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["left", "right"],
+            "properties": {
+              "left": {"$ref": "#/$defs/fieldRef"},
+              "right": {"$ref": "#/$defs/fieldRef"}
+            }
+          }
+        }
+      }
+    },
+    "predicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "operator", "parameter", "logicalType"],
+      "properties": {
+        "field": {"$ref": "#/$defs/fieldRef"},
+        "operator": {
+          "enum": ["eq", "neq", "not-eq", "gt", "gte", "lt", "lte", "like", "in"]
+        },
+        "parameter": {"$ref": "#/$defs/identifier"},
+        "logicalType": {
+          "enum": ["string", "long", "integer", "decimal", "boolean", "date", "local_datetime", "instant", "datetime"]
+        }
+      }
+    },
+    "logicGroup": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["and"],
+          "properties": {
+            "and": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"$ref": "#/$defs/condition"}
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["or"],
+          "properties": {
+            "or": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"$ref": "#/$defs/condition"}
+            }
+          }
+        }
+      ]
+    },
+    "condition": {
+      "oneOf": [
+        {"$ref": "#/$defs/predicate"},
+        {"$ref": "#/$defs/logicGroup"}
+      ]
+    },
+    "orderBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "direction"],
+      "properties": {
+        "field": {"$ref": "#/$defs/fieldRef"},
+        "direction": {"enum": ["asc", "desc"]}
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "select", "limit"],
+      "properties": {
+        "from": {"$ref": "#/$defs/from"},
+        "select": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {"$ref": "#/$defs/projection"},
+              {"$ref": "#/$defs/aggregateProjection"}
+            ]
+          }
+        },
+        "joins": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/join"}
+        },
+        "where": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {"$ref": "#/$defs/predicate"}
+            },
+            {"$ref": "#/$defs/logicGroup"}
+          ]
+        },
+        "groupBy": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/fieldRef"}
+        },
+        "orderBy": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/orderBy"}
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

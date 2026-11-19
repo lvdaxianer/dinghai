@@ -324,6 +324,57 @@ JOIN 约束：
 `direction` 支持 `asc` 和 `desc`。`limit` 必须是正整数，并且不能超过服务端
 配置的 `max-rows` 或关系计划限制。
 
+### 3.9 生成器兼容规则
+
+指标视图、Python 客户端和其他 DSL 消费者必须直接使用本节定义的 v1 字段名：
+
+| 查询意图 | relational-query v1 字段 |
+| --- | --- |
+| 起始数据源 | `from` |
+| 字段或聚合投影 | `select` |
+| 关联 | `joins` |
+| 筛选 | `where` |
+| 分组 | `groupBy` |
+| 排序 | `orderBy` |
+| 返回行数上限 | `limit` |
+
+`sources`、`dimensions`、`measures`、`filters` 和 `sort` 不是本版本的
+payload 字段；它们不能作为 v1 DSL 的别名提交。MetricView 的目标返回字段仍由
+`returnDef` 管理，不能把 `select` 投影字段自动当成最终 `answer` schema。
+
+当前 v1 只支持本节列出的 `eq`、`neq`、`not-eq`、`gt`、`gte`、`lt`、`lte`、
+`like` 和 `in`。`not_in`、`between` 以及任意函数表达式不是当前引擎协议；需要表达
+时间窗口时，使用两个参数化条件：
+
+```json
+{
+  "and": [
+    {
+      "field": "f.event_time",
+      "operator": "gte",
+      "parameter": "window_start",
+      "logicalType": "instant"
+    },
+    {
+      "field": "f.event_time",
+      "operator": "lt",
+      "parameter": "window_end",
+      "logicalType": "instant"
+    }
+  ]
+}
+```
+
+上述约定表示左闭右开区间 `[window_start, window_end)`。生成器必须根据字段的
+实际数据库类型选择 `date`、`local_datetime` 或 `instant`，不能把带时区的时间线值
+降级为不带时区的 `datetime`。`datetime` 只作为历史兼容别名；新请求应优先使用
+`local_datetime`。
+
+结构校验可以使用同目录的
+[`schemas/relational-query-v1.schema.json`](schemas/relational-query-v1.schema.json)。
+JSON Schema 负责信封、字段名、标识符、枚举和基础值形状；表/字段白名单、参数引用、
+字段逻辑类型、JOIN 关系和运行时资源限制仍由解析器、schema policy 和计划校验负责。
+
 ## 4. 完整示例
 
 ```json
